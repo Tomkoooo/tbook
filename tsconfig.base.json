@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "declaration": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@tbook/schemas": ["packages/schemas/src/index.ts"],
+      "@tbook/schemas/*": ["packages/schemas/src/*"],
+      "@tbook/db": ["packages/db/src/index.ts"],
+      "@tbook/db/*": ["packages/db/src/*"],
+      "@tbook/domain": ["packages/domain/src/index.ts"],
+      "@tbook/domain/*": ["packages/domain/src/*"],
+      "@tbook/services": ["packages/services/src/index.ts"],
+      "@tbook/services/*": ["packages/services/src/*"],
+      "@tbook/actions": ["packages/actions/src/index.ts"],
+      "@tbook/actions/*": ["packages/actions/src/*"],
+      "@tbook/ui": ["packages/ui/src/index.ts"],
+      "@tbook/ui/*": ["packages/ui/src/*"]
+    }
+  }
+}

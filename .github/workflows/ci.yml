@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --legacy-peer-deps
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - name: Unit + component tests
+        run: npm run test:unit -- --coverage
+
+      - name: Integration tests (mongodb-memory-server)
+        run: npm run test:integration
+        env:
+          MONGOMS_VERSION: "7.0.24"
+
+      - run: npm run build

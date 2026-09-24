@@ -1,0 +1,67 @@
+# Portainer stack: tbook (standalone rebuild)
+# Replaces the `tbook-sironic` service from the old webshop-engine stack in
+# place — same DATABASE_URL (tbook-admin), same domain (tbook.sironic.hu),
+# same TBOOK_API_CORS_ORIGINS allow-list. Because the v1 API is served at
+# the same /api/plugins/t-book/* path (see apps/web/next.config.ts
+# rewrites), Sörfeszt and World Darts Festival need NO changes on their
+# side.
+#
+# Copy to a gitignored `portainer.stack.tbook.yml` (or paste into the
+# Portainer UI) and fill in the "changeme" secrets. Never commit the real
+# file — see .gitignore.
+
+services:
+  tbook:
+    image: ghcr.io/<owner>/tbook:latest
+    container_name: tbook
+    restart: unless-stopped
+    labels:
+      - wud.watch=true
+      - wud.tag=include
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - tbook-uploads:/app/uploads
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      TZ: Europe/Budapest
+
+      DATABASE_URL: mongodb://192.168.0.12:27017/tbook-admin
+      NEXT_PUBLIC_APP_URL: https://tbook.sironic.hu
+      NEXTAUTH_URL: https://tbook.sironic.hu
+      AUTH_URL: https://tbook.sironic.hu
+      AUTH_SECRET: "changeme"
+      AUTH_TRUST_HOST: "true"
+
+      STRIPE_SECRET_KEY: "changeme"
+      STRIPE_WEBHOOK_SECRET: "changeme"
+
+      EMAIL_HOST: smtp.example.com
+      EMAIL_PORT: "465"
+      EMAIL_USER: noreply@example.com
+      EMAIL_PASS: "changeme"
+      EMAIL_FROM: noreply@example.com
+      EMAIL_FROM_NAME: tBook
+
+      TBOOK_API_CORS_ORIGINS: https://worlddartsfestival.com,https://www.worlddartsfestival.com,https://sor.testsrt.org.hu
+    networks:
+      - nginxproxy_default
+
+volumes:
+  tbook-uploads:
+
+networks:
+  nginxproxy_default:
+    external: true

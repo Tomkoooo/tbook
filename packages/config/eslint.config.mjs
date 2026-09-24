@@ -1,0 +1,39 @@
+// @ts-check
+import js from "@eslint/js";
+import nextPlugin from "@next/eslint-plugin-next";
+import tseslint from "typescript-eslint";
+
+/**
+ * Shared flat ESLint config re-used (not copy-pasted) by every workspace.
+ * The root eslint.config.mjs just imports and extends this.
+ */
+export const baseConfig = tseslint.config(
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+    },
+  },
+  {
+    files: ["apps/web/**/*.{ts,tsx}"],
+    plugins: { "@next/next": nextPlugin },
+    settings: { next: { rootDir: "apps/web" } },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs["core-web-vitals"].rules,
+    },
+  },
+  {
+    ignores: [
+      "**/node_modules/**",
+      "**/.next/**",
+      "**/dist/**",
+      "**/coverage/**",
+      "**/*.config.*",
+      "**/next-env.d.ts",
+    ],
+  },
+);
+
+export default baseConfig;

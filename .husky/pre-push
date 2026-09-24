@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+echo "tbook pre-push: lint, typecheck, test, build"
+
+npm run lint && \
+npm run typecheck && \
+npm run test:unit && \
+npm run build
