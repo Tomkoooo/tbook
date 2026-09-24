@@ -45,3 +45,14 @@ export function verifyApiKey(plaintext: string, storedHash: string): boolean {
   const b = Buffer.from(storedHash, "hex");
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/** Reads the key from the X-TBook-Api-Key header, falling back to `Authorization: Bearer <key>`. */
+export function extractApiKeyFromRequest(request: Request): string | null {
+  const header = request.headers.get(TBOOK_API_KEY_HEADER);
+  if (header?.trim()) return header.trim();
+  const auth = request.headers.get("authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    return auth.slice(7).trim() || null;
+  }
+  return null;
+}

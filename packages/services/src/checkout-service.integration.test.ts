@@ -1,7 +1,7 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { BookingModel, EventModel, VoucherModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { AFTER_BOOKING_PAID_HOOKS, expireBookingFromStripeSession, finalizeBookingFromStripeSession, stripeCurrencyCode, toStripeUnitAmount } from "./checkout-service";
+import { AFTER_BOOKING_PAID_HOOKS, expireBookingFromStripeSession, finalizeBookingFromStripeSession, loadBookingForGuestCheckout, stripeCurrencyCode, toStripeUnitAmount } from "./checkout-service";
 
 async function createEvent(overrides: Partial<Record<string, unknown>> = {}) {
   return EventModel.create({
@@ -195,5 +195,34 @@ describe("expireBookingFromStripeSession", () => {
     expect(reloadedBooking?.status).toBe("expired");
     const reloadedEvent = await EventModel.findById(event._id).exec();
     expect(reloadedEvent?.soldGuestCount).toBe(0);
+  });
+
+  describe("loadBookingForGuestCheckout", () => {
+    it("returns the booking when the session id matches", async () => {
+      const event = await createEvent();
+      const booking = await createCheckoutStartedBooking(String(event._id), "cs_guest_1");
+      const loaded = await loadBookingForGuestCheckout(String(booking._id), "cs_guest_1");
+      expect(String(loaded._id)).toBe(String(booking._id));
+    });
+
+    it("rejects a missing booking id", async () => {
+      await expect(loadBookingForGuestCheckout("", "cs_guest_1")).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("rejects a missing session id", async () => {
+      const event = await createEvent();
+      const booking = await createCheckoutStartedBooking(String(event._id), "cs_guest_1");
+      await expect(loadBookingForGuestCheckout(String(booking._id), null)).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("404s for an unknown booking id", async () => {
+      await expect(loadBookingForGuestCheckout("507f1f77bcf86cd799439011", "cs_guest_1")).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("403s on a session id mismatch", async () => {
+      const event = await createEvent();
+      const booking = await createCheckoutStartedBooking(String(event._id), "cs_real_session");
+      await expect(loadBookingForGuestCheckout(String(booking._id), "cs_wrong_session")).rejects.toMatchObject({ status: 403 });
+    });
   });
 });

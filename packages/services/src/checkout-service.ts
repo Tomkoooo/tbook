@@ -263,3 +263,27 @@ export async function getCheckoutStatus(bookingId: string, stripeSessionId?: str
     returnBaseUrl: resolved.checkoutReturnBaseUrl ?? null,
   };
 }
+
+/**
+ * Guest-checkout access gate for the invoice/voucher PDF download routes —
+ * bookingId + stripeSessionId is the bearer-token pair (no login). Ported
+ * from the legacy plugin's lib/booking-checkout-access.ts. `403` (not the
+ * `400` ActionError.validation uses elsewhere) matches the legacy status
+ * code for a session mismatch specifically.
+ */
+export async function loadBookingForGuestCheckout(bookingId: string, stripeSessionId: string | null | undefined): Promise<IBooking> {
+  if (!bookingId?.trim()) {
+    throw new ActionError(400, "validation_error", "Invalid booking.");
+  }
+  if (!stripeSessionId?.trim()) {
+    throw new ActionError(400, "validation_error", "Missing Stripe session.");
+  }
+  const booking = await bookingRepository.findById(bookingId);
+  if (!booking) {
+    throw ActionError.notFound("Booking not found.");
+  }
+  if (booking.stripeSessionId && booking.stripeSessionId !== stripeSessionId) {
+    throw new ActionError(403, "forbidden", "Session mismatch.");
+  }
+  return booking;
+}

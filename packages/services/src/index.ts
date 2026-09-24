@@ -22,13 +22,25 @@
  * item from the previous pass. Invoice PDF storage rides on the same
  * media-storage.ts.
  *
+ * Also done: public-catalog-service.ts (listPublicDirectory/
+ * listPublicEventsForGroup/getPublicEventDetail — the public storefront
+ * read models), currency.ts, rate-limit.ts, and
+ * checkout-service.ts's loadBookingForGuestCheckout (the guest bearer-token
+ * gate for invoice/voucher PDF downloads). These, plus the services above,
+ * are wired into real HTTP routes at apps/web/src/app/api/v1/** — the
+ * byte-compatible public API the still-running Sörfeszt/World Darts
+ * Festival storefronts call.
+ *
  * Still to come: multi-event booking (quoteMulti/
- * createPendingMultiBookings/createMultiBookingWithCheckout); guest PDF
- * download HTTP endpoints (the files exist in storage, but no apps/web
- * route serves them yet); admin listing/export methods; tDarts
- * resyncEvent/backfill; header images for voucher PDFs are only resolved
- * from an absolute http(s) URL — no general internal media-upload feature
- * exists yet for an admin to host one locally.
+ * createPendingMultiBookings/createMultiBookingWithCheckout) and its v1
+ * routes (currently 501); the public entry-list read model
+ * (getPublicEntryList) and its route; the OpenAPI spec route; admin/org/
+ * system API routes (separate pass — the underlying org-service/
+ * event-repository etc. exist, just no apps/web routes yet); admin
+ * listing/export methods; tDarts resyncEvent/backfill; header images for
+ * voucher PDFs are only resolved from an absolute http(s) URL — no general
+ * internal media-upload feature exists yet for an admin to host one
+ * locally.
  */
 export * from "./org-secrets";
 export * from "./api-key";
@@ -44,3 +56,6 @@ export * from "./media-storage";
 export * from "./mailer";
 export * from "./voucher-pdf";
 export * from "./voucher-pdf-email";
+export * from "./currency";
+export * from "./rate-limit";
+export * from "./public-catalog-service";

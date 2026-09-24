@@ -83,25 +83,27 @@ function formatAttendeeFieldValue(field: AttendeeFieldDef, value: AttendeeFieldV
 }
 
 /**
- * Resolved relative to this module's own URL. Verified to work under plain
- * ts-node/Vitest (this package's tests import it directly, unbundled).
- * NOT YET verified under Next.js/webpack bundling — no apps/web route
- * imports @tbook/services' voucher-pdf module yet (that wiring is a later
- * phase), and `transpilePackages` (next.config.ts) means Next WILL bundle
- * this package's source once something does. A bundled chunk's
- * `import.meta.url` may not point at this file's original location,
- * which would break the relative path below. TBOOK_FONT_PATH is an escape
- * hatch for that case — set it to an absolute path if the default breaks
- * once this is actually wired into a route; the Dockerfile's runner stage
- * already copies packages/services/assets explicitly either way.
+ * Resolved lazily (not at module scope) — confirmed necessary once apps/web
+ * actually wired a route importing this module: Next's build-time page-data
+ * collection evaluates every module a route transitively imports, and a
+ * top-level `fileURLToPath(new URL(..., import.meta.url))` computed eagerly
+ * there threw (`ERR_INVALID_ARG_TYPE`, a webpack-bundled `import.meta.url`
+ * producing a URL instance from a different realm than Node's `url` module
+ * expects). Deferring the resolution into a function means it only runs
+ * when a voucher PDF is actually rendered, never during module evaluation.
+ * TBOOK_FONT_PATH remains the escape hatch for a bundled path that still
+ * doesn't resolve correctly at runtime; the Dockerfile's runner stage
+ * copies packages/services/assets explicitly either way.
  */
-const VENDORED_FONT_PATH = process.env.TBOOK_FONT_PATH || fileURLToPath(new URL("../assets/fonts/Roboto-Regular.ttf", import.meta.url));
+function resolveVendoredFontPath(): string {
+  return process.env.TBOOK_FONT_PATH || fileURLToPath(new URL("../assets/fonts/Roboto-Regular.ttf", import.meta.url));
+}
 
 let cachedFontBytes: Buffer | null = null;
 
 /** Default font loader — reads the vendored TTF once, cached in-memory thereafter. Override in tests to avoid filesystem I/O. */
 export async function loadDefaultVoucherFont(): Promise<Uint8Array> {
-  if (!cachedFontBytes) cachedFontBytes = await readFile(VENDORED_FONT_PATH);
+  if (!cachedFontBytes) cachedFontBytes = await readFile(resolveVendoredFontPath());
   return cachedFontBytes;
 }
 
