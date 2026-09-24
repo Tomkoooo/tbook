@@ -13,7 +13,8 @@
     "@tbook/db": "*",
     "@tbook/domain": "*",
     "@tbook/schemas": "*",
-    "stripe": "^22.1.1"
+    "stripe": "^22.1.1",
+    "szamlazz.js": "^9.2.0"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

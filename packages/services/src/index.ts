@@ -9,12 +9,15 @@
  * booking-service (quote + single-event booking lifecycle, atomic capacity
  * reservation), voucher-service (issuance/check-in lifecycle, not PDF
  * generation), checkout-service (Stripe checkout session creation +
- * idempotent webhook finalization, single-event path only). Still to come:
- * invoice-service (Számlázz.hu) and tdarts-sync-service — checkout-service's
- * `AFTER_BOOKING_PAID_HOOKS` array is the extension point for both; voucher
- * PDF rendering + email delivery; multi-event booking
- * (quoteMulti/createPendingMultiBookings/createMultiBookingWithCheckout);
- * guest PDF download endpoints; admin listing/export methods.
+ * idempotent webhook finalization, single-event path only), invoice-service
+ * (Számlázz.hu, org-scoped credentials only, no PDF storage yet) and
+ * tdarts-sync-service (partner enroll, solo/pair/skip-team-roster
+ * strategies) — both registered into checkout-service's
+ * `AFTER_BOOKING_PAID_HOOKS` extension point. Still to come: voucher PDF
+ * rendering + email delivery (invoice PDF storage rides along with it);
+ * multi-event booking (quoteMulti/createPendingMultiBookings/
+ * createMultiBookingWithCheckout); guest PDF download endpoints; admin
+ * listing/export methods; tDarts resyncEvent/backfill.
  */
 export * from "./org-secrets";
 export * from "./api-key";
@@ -24,3 +27,5 @@ export * from "./booking-validation";
 export * from "./booking-service";
 export * from "./voucher-service";
 export * from "./checkout-service";
+export * from "./invoice-service";
+export * from "./tdarts-sync-service";
