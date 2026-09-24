@@ -45,8 +45,10 @@ export const eventRepository = {
    * double-release can never push the counter negative.
    */
   async releaseCapacity(eventId: string, guests: number): Promise<void> {
-    await EventModel.updateOne({ _id: eventId }, [
-      { $set: { soldGuestCount: { $max: [0, { $subtract: ["$soldGuestCount", guests] }] } } },
-    ]);
+    await EventModel.updateOne(
+      { _id: eventId },
+      [{ $set: { soldGuestCount: { $max: [0, { $subtract: ["$soldGuestCount", guests] }] } } }],
+      { updatePipeline: true },
+    );
   },
 };

@@ -34,4 +34,25 @@ export const bookingRepository = {
   updateById(id: string, update: Partial<IBooking>): Promise<IBooking | null> {
     return BookingModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
+  /**
+   * Raw per-booking selections + accommodation guest count for a hotel's
+   * active bookings — the input @tbook/services' hotel room/package
+   * inventory check sums per package key (mirrors the legacy plugin's
+   * countSoldPackageUnitsForHotel query shape; the actual summing logic
+   * lives in @tbook/services using @tbook/domain's pure helpers, this stays
+   * a thin data read).
+   */
+  async findAccommodationSummariesByHotel(hotelId: string, statuses: IBooking["status"][]): Promise<Array<{ selections: Record<string, unknown>; accommodationGuests: number }>> {
+    const rows = await BookingModel.find({ hotelId, status: { $in: statuses } })
+      .select("selections guests quote.accommodationGuests")
+      .lean()
+      .exec();
+    return rows.map((row) => {
+      const quoteGuests = (row.quote as { accommodationGuests?: number } | undefined)?.accommodationGuests;
+      return {
+        selections: (row.selections ?? {}) as Record<string, unknown>,
+        accommodationGuests: typeof quoteGuests === "number" && quoteGuests > 0 ? quoteGuests : (row.guests ?? 1),
+      };
+    });
+  },
 };
