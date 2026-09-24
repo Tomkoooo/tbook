@@ -55,6 +55,11 @@ RUN chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 
+# Static assets read via fs at runtime (not import'd, so Next's output-file-tracing
+# won't reliably pick them up) — copy explicitly. Currently: the voucher PDF
+# renderer's vendored Unicode font.
+COPY --from=builder --chown=nextjs:nodejs /app/packages/services/assets ./packages/services/assets
+
 USER nextjs
 
 EXPOSE 3000

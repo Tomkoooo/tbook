@@ -1,5 +1,6 @@
 export * from "./common";
 export * from "./value-objects";
+export * from "./voucher-pdf-layout";
 export * from "./permissions";
 export * from "./organization";
 export * from "./event-group";

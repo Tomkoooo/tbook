@@ -24,6 +24,17 @@ export const voucherRepository = {
       .exec()
       .then(() => undefined);
   },
+  /** All vouchers for a booking share one multi-page PDF (one page per guest). */
+  setPdfFileNameForBooking(bookingId: string, pdfFileName: string): Promise<void> {
+    return VoucherModel.updateMany({ bookingId }, { $set: { pdfFileName } })
+      .exec()
+      .then(() => undefined);
+  },
+  markEmailedForBooking(bookingId: string, email: string, name: string): Promise<void> {
+    return VoucherModel.updateMany({ bookingId }, { $set: { emailedAt: new Date(), lastSentToEmail: email, lastSentToName: name } })
+      .exec()
+      .then(() => undefined);
+  },
   /** CAS check-in — the filter's status:"active" makes this atomic against double-scanning. */
   checkIn(voucherId: string, userId: string | null): Promise<IVoucher | null> {
     return VoucherModel.findOneAndUpdate(

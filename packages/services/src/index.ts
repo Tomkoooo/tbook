@@ -7,17 +7,28 @@
  * Ported module by module from the legacy plugin's
  * packages/plugins/t-book/services/*.ts. Done: org-service (org/RBAC),
  * booking-service (quote + single-event booking lifecycle, atomic capacity
- * reservation), voucher-service (issuance/check-in lifecycle, not PDF
- * generation), checkout-service (Stripe checkout session creation +
- * idempotent webhook finalization, single-event path only), invoice-service
- * (Számlázz.hu, org-scoped credentials only, no PDF storage yet) and
- * tdarts-sync-service (partner enroll, solo/pair/skip-team-roster
- * strategies) — both registered into checkout-service's
- * `AFTER_BOOKING_PAID_HOOKS` extension point. Still to come: voucher PDF
- * rendering + email delivery (invoice PDF storage rides along with it);
- * multi-event booking (quoteMulti/createPendingMultiBookings/
- * createMultiBookingWithCheckout); guest PDF download endpoints; admin
- * listing/export methods; tDarts resyncEvent/backfill.
+ * reservation), voucher-service (issuance/check-in lifecycle), checkout-
+ * service (Stripe checkout session creation + idempotent webhook
+ * finalization, single-event path only), invoice-service (Számlázz.hu,
+ * org-scoped credentials only) and tdarts-sync-service (partner enroll,
+ * solo/pair/skip-team-roster strategies) — both registered into checkout-
+ * service's `AFTER_BOOKING_PAID_HOOKS` extension point.
+ *
+ * Voucher PDF rendering (voucher-pdf.ts — fully admin-customizable
+ * block-based layout, packages/schemas' voucherPdfLayout), local media
+ * storage (media-storage.ts), email delivery (mailer.ts), and their
+ * orchestration (voucher-pdf-email.ts, also registered into
+ * AFTER_BOOKING_PAID_HOOKS) are done — this closes out the last deferred
+ * item from the previous pass. Invoice PDF storage rides on the same
+ * media-storage.ts.
+ *
+ * Still to come: multi-event booking (quoteMulti/
+ * createPendingMultiBookings/createMultiBookingWithCheckout); guest PDF
+ * download HTTP endpoints (the files exist in storage, but no apps/web
+ * route serves them yet); admin listing/export methods; tDarts
+ * resyncEvent/backfill; header images for voucher PDFs are only resolved
+ * from an absolute http(s) URL — no general internal media-upload feature
+ * exists yet for an admin to host one locally.
  */
 export * from "./org-secrets";
 export * from "./api-key";
@@ -29,3 +40,7 @@ export * from "./voucher-service";
 export * from "./checkout-service";
 export * from "./invoice-service";
 export * from "./tdarts-sync-service";
+export * from "./media-storage";
+export * from "./mailer";
+export * from "./voucher-pdf";
+export * from "./voucher-pdf-email";

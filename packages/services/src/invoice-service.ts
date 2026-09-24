@@ -1,5 +1,6 @@
 import { bookingRepository, eventRepository, hotelRepository, organizationRepository, type IBooking } from "@tbook/db";
 import { AFTER_BOOKING_PAID_HOOKS } from "./checkout-service";
+import { storeFile } from "./media-storage";
 import { decryptOrgSecret } from "./org-secrets";
 
 /**
@@ -258,12 +259,12 @@ export async function issueInvoiceForBooking(bookingId: string, opts?: { provide
       orderNumber: String(booking._id),
     });
 
+    const invoicePdfFileName = result.pdfBuffer ? (await storeFile(result.pdfBuffer, { subdir: "invoices", fileName: `${result.invoiceId}.pdf` })).url : null;
+
     await bookingRepository.updateById(bookingId, {
       invoiceStatus: "issued",
       invoiceId: result.invoiceId,
-      // TODO(media pass): persist result.pdfBuffer via whatever replaces
-      // MediaService, alongside voucher PDF storage (see voucher-service.ts).
-      invoicePdfFileName: null,
+      invoicePdfFileName,
       invoiceError: null,
     });
   } catch (error) {

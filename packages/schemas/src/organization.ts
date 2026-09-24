@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { currencySchema, objectIdSchema } from "./common";
+import { voucherPdfLayoutSchema } from "./voucher-pdf-layout";
 
 /**
  * Ported from the legacy plugin's models/TBookOrganization.ts. `xxxEnc`
@@ -63,9 +64,10 @@ export const organizationSettingsSchema = z.object({
   smtp: orgSmtpSettingsSchema.optional(),
   szamlazz: orgSzamlazzSettingsSchema.optional(),
   emailTemplates: orgEmailTemplatesSchema.optional(),
-  // Free-form layout; the legacy layout editor was removed, only
-  // DEFAULT_VOUCHER_PDF_LAYOUT is used today. Kept for read compatibility.
-  voucherPdfLayout: z.unknown().optional(),
+  // null = "use DEFAULT_VOUCHER_PDF_LAYOUT". Admin-editable per-block layout
+  // (voucher-pdf-layout.ts) — normalizeVoucherPdfLayout() is what actually
+  // reads this at render time, tolerating legacy/malformed data.
+  voucherPdfLayout: voucherPdfLayoutSchema.nullable().default(null),
   tdarts: orgTDartsSettingsSchema.optional(),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
