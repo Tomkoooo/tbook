@@ -1,0 +1,97 @@
+[
+  {
+    "_id": "6a509bd99e04703ce2c58c0a",
+    "name": "World Darts Festival",
+    "description": "",
+    "status": "active",
+    "defaultBookingOptions": [],
+    "defaultPriceBasis": "net",
+    "defaultVatPercent": 27,
+    "listOnTBookSite": true,
+    "listingTitle": "World Darts Festivla",
+    "listingUrl": "https://worlddartsfestival.com",
+    "listingImage": "",
+    "apiKeyHash": "08a484f3b03cb6c106fb558a148156a60db7cb83a927da86346adc34db862c1b",
+    "apiKeyHint": "tbk_47f4…9a4a",
+    "apiKeyCreatedAt": "2026-07-18T18:07:32.352Z",
+    "createdAt": "2026-07-10T07:14:34.071Z",
+    "updatedAt": "2026-07-18T18:07:32.352Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a575b234ec536a2bfa17eff",
+    "organizationId": "6a574d05da17ae33cc2b5517",
+    "name": "World Darts Festival",
+    "description": "",
+    "status": "active",
+    "defaultBookingOptions": [],
+    "defaultPriceBasis": "net",
+    "defaultVatPercent": 27,
+    "listOnTBookSite": false,
+    "listingTitle": "",
+    "listingUrl": "",
+    "listingImage": "",
+    "apiKeyHash": "174fafb484adb27960a842895db838a9cb0758e334c79848c8e7fe2f3a61b0f5",
+    "apiKeyHint": "tbk_9a5a…f122",
+    "apiKeyCreatedAt": "2026-07-18T19:18:16.310Z",
+    "createdAt": "2026-07-15T10:04:19.400Z",
+    "updatedAt": "2026-07-20T08:46:39.717Z",
+    "__v": 0,
+    "defaultAttendeeFieldSchema": [
+      {
+        "key": "teljes_nev",
+        "label": "Full Name",
+        "type": "text",
+        "required": true,
+        "helpText": "",
+        "sortOrder": 0
+      },
+      {
+        "key": "e_mail",
+        "label": "E-mail",
+        "type": "email",
+        "required": true,
+        "helpText": "",
+        "sortOrder": 1
+      },
+      {
+        "key": "szuletesi_ev",
+        "label": "Dat of Birth",
+        "type": "date",
+        "required": true,
+        "helpText": "",
+        "min": 1900,
+        "max": 2100,
+        "sortOrder": 2
+      },
+      {
+        "key": "allampolgarsag",
+        "label": "Nationality",
+        "type": "text",
+        "required": true,
+        "helpText": "",
+        "sortOrder": 3
+      },
+      {
+        "key": "field_5",
+        "label": "Gender",
+        "type": "select",
+        "required": true,
+        "helpText": "",
+        "choices": [
+          {
+            "value": "option_1",
+            "label": "Male"
+          },
+          {
+            "value": "option_2",
+            "label": "Female"
+          }
+        ],
+        "sortOrder": 4
+      }
+    ],
+    "defaultHeroImage": "",
+    "voucherHeaderImage": "609e60e9-3743-4947-b4c3-cdcd5d576617.jpg"
+  }
+]

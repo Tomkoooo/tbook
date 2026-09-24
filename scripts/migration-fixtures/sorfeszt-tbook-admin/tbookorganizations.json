@@ -1,0 +1,48 @@
+[
+  {
+    "_id": "6a574d05da17ae33cc2b5517",
+    "name": "Magyar Darts Szövetség",
+    "slug": "magyar-darts-szovetseg",
+    "status": "active",
+    "settings": {
+      "currency": "EUR",
+      "emailTemplates": {
+        "bookingConfirmation": {
+          "subject": "Hungarian Darts Federation — Booking Confirmation ({{eventName}})",
+          "body": "<h1>Thank you for your booking!</h1><p>Dear {{customerName}},</p><p>We have received the payment for the following booking:</p><p><strong>Event:</strong> {{eventName}}</p><p><strong>Guests:</strong> {{guests}} </p><p><strong>Accomodation:</strong> {{hotelName}}</p><p><strong>Nights:</strong> {{nights}}</p><p><strong>Amount paid:</strong> {{total}}</p><p>Booking ID: {{bookingId}}</p><p>This is an automated message. The invoice will be sent in a separate email.</p><p>Your ticket(s) will be sent as a PDF attachment in a separate email.</p>"
+        },
+        "voucherDelivery": {
+          "subject": "Hungarian Darts Federation — Entrys ({{eventName}})",
+          "body": "<h1>Entry(S)</h1><p>Dear {{customerName}},</p><p>Please find attached the admission ticket(s) for the <strong>{{eventName}}</strong> event ({{voucherCount}} ticket(s)).</p><p><strong>Event:</strong> {{eventName}}</p><p><strong>Guests:</strong> {{guests}} </p><p><strong>Booking ID:</strong> {{bookingId}}</p><p>Please present the QR code contained in the attached PDF at the entrance on the day of the event. Each attendee has their own unique QR code.</p><p>This is an automated message. Please do not reply to this email.</p>"
+        },
+        "invoiceSent": {
+          "subject": "Hungarian Darts Federation — invoice ({{eventName}})",
+          "body": "\n        <div style=\"font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;\">\n          <h1>Invoice</h1>\n          <p>Dear {{customerName}},</p>\n          <p>Please find attached the invoice for your <strong>{{eventName}}</strong> booking.</p>\n          <div style=\"background:#f4f4f4;padding:15px;margin:20px 0;\">\n            <p><strong>Event:</strong> {{eventName}}</p>\n            <p><strong>Amount paid:</strong> {{total}}</p>\n            <p><strong>Booking ID:</strong> {{bookingId}}</p>\n            <p><strong>Invoice ID:</strong> {{invoiceId}}</p>\n          </div>\n          <p style=\"font-size:12px;color:#666;\">This is an automated message. Entry ticket(s) are sent in a separate email.</p>\n        </div>\n      "
+        }
+      },
+      "smtp": {
+        "fromEmail": "office@magyardarts.hu",
+        "fromName": "World Darts Festival",
+        "host": "smtp.gmail.com",
+        "passEnc": "enc:v1:2OlfvCsdqil8Xix4.J2aDn1YEubeUhvpvFWgGDw.ThuJ2zWhaDnHhn8FNVViobrbsA",
+        "port": 465,
+        "user": "office@magyardarts.hu"
+      },
+      "stripe": {
+        "enabled": true,
+        "publishableKey": "pk_live_51SjiaeRJo7ihvkbcN9RjZiOvgGoeZ6lPSb6X9jECUuaGqbKQST2jMHgPDUMCp9Gn7TnzMduFmbMz1glg0gigaLUx00fpyLbes1",
+        "secretKeyEnc": "enc:v1:MWkqbZzGiwOfP1jb.Xnki5rVxRZmK3zsIuEoAxw.BDhGIrrICcHPDfzArNOhf8sVQxslMn-fNo5OYbVI33OD8SEoPfwCyJ7zooY1_O8KO8Tp6deL9UZyhF8XsBIwPKQQXKJLz9MYri6F7NE-mUhGPmhnvaeGDGu6Uu4PWRsb5NcUDdfABtsgXuo",
+        "webhookSecretEnc": "enc:v1:n5QdUyxRL7cryHah.EKuWY1CC90ocXhL_PPQYsw.hj_4kHFVvixixwQUauvuHubWKKUY3NdrUuUO7QV2aoC0IkLMKTwN0nArgO-6_ZdTJefnfEkkLKNIgZ9Di6uXAboGKPONPg"
+      },
+      "szamlazz": {
+        "agentKeyEnc": "enc:v1:F5p4dC_8N8xxQlQ-.maEcvVsdWOWShK3aXoDspQ.bZFn22n0uq2k_OchtOCuSHPk_x9WJxnQAgyiWB8uoz4VhynBaLAzCd2T",
+        "enabled": true,
+        "sellerName": "Magyar Darts Szövetség"
+      }
+    },
+    "createdBy": "6a4f97fffd5043058133c835",
+    "createdAt": "2026-07-15T09:04:05.680Z",
+    "updatedAt": "2026-08-05T12:48:23.333Z",
+    "__v": 0
+  }
+]

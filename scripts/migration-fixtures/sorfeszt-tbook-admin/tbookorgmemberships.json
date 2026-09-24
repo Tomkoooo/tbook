@@ -1,0 +1,26 @@
+[
+  {
+    "_id": "6a574d05da17ae33cc2b5520",
+    "organizationId": "6a574d05da17ae33cc2b5517",
+    "userId": "6a563021fd5043058133c837",
+    "roleIds": [
+      "6a574d05da17ae33cc2b5519"
+    ],
+    "status": "active",
+    "createdAt": "2026-07-15T09:04:05.694Z",
+    "updatedAt": "2026-07-15T09:04:05.694Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a57541f7470feb902699951",
+    "organizationId": "6a574d05da17ae33cc2b5517",
+    "userId": "6a4f97fffd5043058133c835",
+    "roleIds": [
+      "6a574d05da17ae33cc2b5519"
+    ],
+    "status": "active",
+    "createdAt": "2026-07-15T09:34:23.017Z",
+    "updatedAt": "2026-07-15T09:34:23.017Z",
+    "__v": 0
+  }
+]

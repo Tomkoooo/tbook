@@ -1,0 +1,71 @@
+[
+  {
+    "_id": "6a574d05da17ae33cc2b5519",
+    "organizationId": "6a574d05da17ae33cc2b5517",
+    "name": "Owner",
+    "description": "Teljes hozzáférés a szervezethez.",
+    "permissions": [
+      "org:read",
+      "org:update",
+      "member:read",
+      "member:invite",
+      "member:manage",
+      "role:read",
+      "role:manage",
+      "group:read",
+      "group:write",
+      "group:apiKey",
+      "event:read",
+      "event:write",
+      "hotel:read",
+      "hotel:write",
+      "booking:read",
+      "booking:export",
+      "booking:manage",
+      "stats:read",
+      "voucher:read",
+      "voucher:scan",
+      "voucher:manage"
+    ],
+    "isBuiltIn": true,
+    "createdAt": "2026-07-15T09:04:05.685Z",
+    "updatedAt": "2026-07-16T11:58:44.349Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a574d05da17ae33cc2b551b",
+    "organizationId": "6a574d05da17ae33cc2b5517",
+    "name": "Viewer",
+    "description": "Csak olvasási jogosultságok.",
+    "permissions": [
+      "org:read",
+      "member:read",
+      "role:read",
+      "group:read",
+      "event:read",
+      "hotel:read",
+      "booking:read",
+      "stats:read",
+      "voucher:read"
+    ],
+    "isBuiltIn": true,
+    "createdAt": "2026-07-15T09:04:05.687Z",
+    "updatedAt": "2026-07-16T11:58:44.353Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a58b2481451d9386a298a51",
+    "organizationId": "6a574d05da17ae33cc2b5517",
+    "name": "beléptető",
+    "description": "",
+    "permissions": [
+      "voucher:read",
+      "voucher:scan",
+      "voucher:manage"
+    ],
+    "isBuiltIn": false,
+    "createdAt": "2026-07-16T10:28:24.643Z",
+    "updatedAt": "2026-07-16T10:28:24.643Z",
+    "__v": 0
+  }
+]
