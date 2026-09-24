@@ -9,9 +9,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@tbook/actions": "*",
     "@tbook/db": "*",
     "@tbook/domain": "*",
-    "@tbook/schemas": "*"
+    "@tbook/schemas": "*",
+    "stripe": "^22.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

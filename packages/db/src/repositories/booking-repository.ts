@@ -35,6 +35,20 @@ export const bookingRepository = {
     return BookingModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
   /**
+   * CAS transition guarding webhook idempotency: only flips a booking tied
+   * to this exact Stripe session from pending/checkout_started to paid.
+   * Returns null (not an error) when the booking was already finalized —
+   * the filter's status condition is what makes repeated Stripe webhook
+   * deliveries for the same session safe to call more than once.
+   */
+  markPaidIfPending(bookingId: string, stripeSessionId: string, paidAt: Date): Promise<IBooking | null> {
+    return BookingModel.findOneAndUpdate(
+      { _id: bookingId, stripeSessionId, status: { $in: ["pending", "checkout_started"] } },
+      { $set: { status: "paid", paidAt } },
+      { returnDocument: "after" },
+    ).exec();
+  },
+  /**
    * Raw per-booking selections + accommodation guest count for a hotel's
    * active bookings — the input @tbook/services' hotel room/package
    * inventory check sums per package key (mirrors the legacy plugin's
