@@ -14,6 +14,6 @@ export const orgRoleRepository = {
     return OrgRoleModel.create(data);
   },
   updateById(id: string, update: Partial<IOrgRole>): Promise<IOrgRole | null> {
-    return OrgRoleModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return OrgRoleModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

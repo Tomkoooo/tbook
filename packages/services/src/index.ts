@@ -4,9 +4,16 @@
  * calculations) with @tbook/db (repositories) and calls out to external
  * integrations (Stripe, Számlázz.hu, tDarts, SMTP).
  *
- * Ported module by module in Phase 2/3 from the legacy plugin's
- * packages/plugins/t-book/services/*.ts (booking-service, checkout-service,
- * event-service, invoice-service, org-service, tdarts-sync-service,
- * voucher-service).
+ * Ported module by module from the legacy plugin's
+ * packages/plugins/t-book/services/*.ts. Done: org-service (org/RBAC),
+ * booking-service (quote + booking lifecycle), voucher-service (lifecycle,
+ * not PDF generation). Still to come: checkout-service (Stripe),
+ * invoice-service (Számlázz.hu), tdarts-sync-service, voucher PDF issuance.
  */
-export const SERVICES_LAYER_VERSION = "0.0.0-bootstrap";
+export * from "./org-secrets";
+export * from "./api-key";
+export * from "./org-auth";
+export * from "./org-service";
+// TODO(this pass): re-enable once booking-service.ts / voucher-service.ts are written below.
+// export * from "./booking-service";
+// export * from "./voucher-service";

@@ -11,6 +11,6 @@ export const orgInviteRepository = {
     return OrgInviteModel.create(data);
   },
   updateById(id: string, update: Partial<IOrgInvite>): Promise<IOrgInvite | null> {
-    return OrgInviteModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return OrgInviteModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

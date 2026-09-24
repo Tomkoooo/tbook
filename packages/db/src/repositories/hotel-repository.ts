@@ -11,6 +11,6 @@ export const hotelRepository = {
     return HotelModel.create(data);
   },
   updateById(id: string, update: Partial<IHotel>): Promise<IHotel | null> {
-    return HotelModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return HotelModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

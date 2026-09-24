@@ -14,6 +14,39 @@ export const eventRepository = {
     return EventModel.create(data);
   },
   updateById(id: string, update: Partial<IEvent>): Promise<IEvent | null> {
-    return EventModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return EventModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
+  },
+  /**
+   * Atomically reserves `guests` of capacity by incrementing soldGuestCount,
+   * guarded by a capacity condition in the filter itself — single-document
+   * writes are atomic in MongoDB, so this closes the legacy read-then-write
+   * oversell race without needing a multi-document transaction (which would
+   * require a replica-set-mode test double). `capacity: null` means
+   * unlimited. Returns the updated event on success, or null when there
+   * isn't enough room left (the caller should not create a booking then).
+   */
+  reserveCapacity(eventId: string, guests: number): Promise<IEvent | null> {
+    return EventModel.findOneAndUpdate(
+      {
+        _id: eventId,
+        $or: [
+          { capacity: null },
+          { $expr: { $lte: [{ $add: ["$soldGuestCount", guests] }, "$capacity"] } },
+        ],
+      },
+      { $inc: { soldGuestCount: guests } },
+      { returnDocument: "after" },
+    ).exec();
+  },
+  /**
+   * Compensating release for `reserveCapacity` — used both by expireBooking
+   * (releasing a no-longer-held reservation) and as a rollback when booking
+   * creation fails after capacity was already reserved. Clamped at 0 so a
+   * double-release can never push the counter negative.
+   */
+  async releaseCapacity(eventId: string, guests: number): Promise<void> {
+    await EventModel.updateOne({ _id: eventId }, [
+      { $set: { soldGuestCount: { $max: [0, { $subtract: ["$soldGuestCount", guests] }] } } },
+    ]);
   },
 };

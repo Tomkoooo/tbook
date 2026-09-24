@@ -11,6 +11,6 @@ export const organizationRepository = {
     return OrganizationModel.create(data);
   },
   updateById(id: string, update: Partial<IOrganization>): Promise<IOrganization | null> {
-    return OrganizationModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return OrganizationModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

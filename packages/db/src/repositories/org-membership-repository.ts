@@ -14,6 +14,6 @@ export const orgMembershipRepository = {
     return OrgMembershipModel.create(data);
   },
   updateById(id: string, update: Partial<IOrgMembership>): Promise<IOrgMembership | null> {
-    return OrgMembershipModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return OrgMembershipModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

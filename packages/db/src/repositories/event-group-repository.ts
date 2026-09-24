@@ -15,6 +15,6 @@ export const eventGroupRepository = {
     return EventGroupModel.create(data);
   },
   updateById(id: string, update: Partial<IEventGroup>): Promise<IEventGroup | null> {
-    return EventGroupModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return EventGroupModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

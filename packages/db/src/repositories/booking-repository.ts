@@ -32,6 +32,6 @@ export const bookingRepository = {
     return BookingModel.create(data);
   },
   updateById(id: string, update: Partial<IBooking>): Promise<IBooking | null> {
-    return BookingModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return BookingModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };

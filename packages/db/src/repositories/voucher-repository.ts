@@ -14,6 +14,6 @@ export const voucherRepository = {
     return VoucherModel.create(data);
   },
   updateById(id: string, update: Partial<IVoucher>): Promise<IVoucher | null> {
-    return VoucherModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    return VoucherModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
   },
 };
