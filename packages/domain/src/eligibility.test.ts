@@ -1,0 +1,78 @@
+import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
+import { describe, expect, it } from "vitest";
+import { canonicalizeGenderValue, expandLegacyEligibilityForEdit, validateEligibility } from "./eligibility";
+
+describe("expandLegacyEligibilityForEdit", () => {
+  it("expands the legacy under18 preset into a custom max age", () => {
+    expect(expandLegacyEligibilityForEdit({ eligibilityPreset: "under18" })).toEqual({
+      eligibilityPreset: "custom",
+      eligibilityMinAge: null,
+      eligibilityMaxAge: 17,
+      eligibilityAllowedGenders: null,
+    });
+  });
+
+  it("expands the legacy women preset into min age + gender", () => {
+    expect(expandLegacyEligibilityForEdit({ eligibilityPreset: "women" })).toEqual({
+      eligibilityPreset: "custom",
+      eligibilityMinAge: 18,
+      eligibilityMaxAge: null,
+      eligibilityAllowedGenders: ["female"],
+    });
+  });
+
+  it("passes modern presets through unchanged", () => {
+    expect(expandLegacyEligibilityForEdit({ eligibilityPreset: "none" }).eligibilityPreset).toBe("none");
+  });
+});
+
+describe("canonicalizeGenderValue", () => {
+  it("maps display labels to stable keys", () => {
+    expect(canonicalizeGenderValue("Nő")).toBe("female");
+    expect(canonicalizeGenderValue("Férfi")).toBe("male");
+  });
+});
+
+const birthDateField: AttendeeFieldDef = { key: "birth_date", label: "Birth date", type: "date", required: true, helpText: "", sortOrder: 0 };
+
+describe("validateEligibility", () => {
+  it("returns no issues when the event has no eligibility rules", () => {
+    const attendees: BookingAttendee[] = [{ fields: {} }];
+    expect(validateEligibility({ eligibilityPreset: "none" }, attendees, [birthDateField], [], null)).toEqual([]);
+  });
+
+  it("flags a missing birth date when a min age is required", () => {
+    const attendees: BookingAttendee[] = [{ fields: {} }];
+    const issues = validateEligibility({ eligibilityPreset: "custom", eligibilityMinAge: 18 }, attendees, [birthDateField], [], null);
+    expect(issues).toEqual([{ ticketIndex: 0, playerIndex: null, reason: "birth_date_required" }]);
+  });
+
+  it("flags an attendee below the minimum age", () => {
+    const tooYoung = new Date();
+    tooYoung.setFullYear(tooYoung.getFullYear() - 10);
+    const attendees: BookingAttendee[] = [{ fields: { birth_date: tooYoung.toISOString() } }];
+    const issues = validateEligibility({ eligibilityPreset: "custom", eligibilityMinAge: 18 }, attendees, [birthDateField], [], null);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.reason).toBe("min_age");
+  });
+
+  it("passes an attendee who meets the age requirement", () => {
+    const oldEnough = new Date();
+    oldEnough.setFullYear(oldEnough.getFullYear() - 25);
+    const attendees: BookingAttendee[] = [{ fields: { birth_date: oldEnough.toISOString() } }];
+    const issues = validateEligibility({ eligibilityPreset: "custom", eligibilityMinAge: 18 }, attendees, [birthDateField], [], null);
+    expect(issues).toEqual([]);
+  });
+
+  it("evaluates form_rules with OR logic", () => {
+    const genderField: AttendeeFieldDef = { key: "gender", label: "Gender", type: "select", required: true, helpText: "", sortOrder: 0, choices: [{ value: "female", label: "Female" }, { value: "male", label: "Male" }] };
+    const event = {
+      eligibilityPreset: "form_rules" as const,
+      eligibilityFormRules: { logic: "or" as const, rules: [{ id: "r1", fieldKey: "gender", op: "equals" as const, value: "female", message: "Female only" }] },
+    };
+    const failing: BookingAttendee[] = [{ fields: { gender: "male" } }];
+    const passing: BookingAttendee[] = [{ fields: { gender: "female" } }];
+    expect(validateEligibility(event, failing, [genderField], [], null)[0]?.reason).toBe("form_rules_failed");
+    expect(validateEligibility(event, passing, [genderField], [], null)).toEqual([]);
+  });
+});

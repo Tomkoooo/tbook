@@ -16,6 +16,19 @@ export function toNetAmount(amount: number, basis: PriceBasis, vatPercent: numbe
   return round2(amount / (1 + vatPercent / 100));
 }
 
+export interface PriceBreakdown {
+  net: number;
+  gross: number;
+  vat: number;
+}
+
+/** Ported from the legacy grossPreview — net/gross/VAT breakdown for admin price-preview UI. */
+export function priceBreakdown(amount: number, basis: PriceBasis, vatPercent: number): PriceBreakdown {
+  const net = toNetAmount(amount, basis, vatPercent);
+  const gross = toGrossAmount(amount, basis, vatPercent);
+  return { net, gross, vat: round2(gross - net) };
+}
+
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
