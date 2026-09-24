@@ -11,6 +11,10 @@ export const eventGroupRepository = {
   findByApiKeyHash(apiKeyHash: string): Promise<IEventGroup | null> {
     return EventGroupModel.findOne({ apiKeyHash }).exec();
   },
+  /** Public directory: groups opted into the public tBook listing. */
+  findPublicListed(): Promise<IEventGroup[]> {
+    return EventGroupModel.find({ status: "active", listOnTBookSite: true }).sort({ name: 1 }).exec();
+  },
   create(data: Partial<IEventGroup>): Promise<IEventGroup> {
     return EventGroupModel.create(data);
   },

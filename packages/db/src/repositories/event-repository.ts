@@ -7,8 +7,22 @@ export const eventRepository = {
   findByGroupId(groupId: string): Promise<IEvent[]> {
     return EventModel.find({ groupId }).sort({ sortOrder: 1, startDate: 1 }).exec();
   },
+  /** Public storefront read: active events for a group, in display order. */
+  findActiveByGroupId(groupId: string): Promise<IEvent[]> {
+    return EventModel.find({ groupId, status: "active" }).sort({ sortOrder: 1, startDate: 1 }).exec();
+  },
   findActiveByOrganizationId(organizationId: string): Promise<IEvent[]> {
     return EventModel.find({ organizationId, status: "active" }).sort({ startDate: 1 }).exec();
+  },
+  /** Public directory listing: how many not-yet-ended active events a group currently has on sale. */
+  countActiveUpcomingForGroup(groupId: string, now: Date): Promise<number> {
+    return EventModel.countDocuments({ groupId, status: "active", endDate: { $gte: now } }).exec();
+  },
+  /** Public directory listing: the soonest not-yet-ended active event for a group. */
+  findNextActiveUpcomingForGroup(groupId: string, now: Date): Promise<IEvent | null> {
+    return EventModel.findOne({ groupId, status: "active", endDate: { $gte: now } })
+      .sort({ startDate: 1 })
+      .exec();
   },
   create(data: Partial<IEvent>): Promise<IEvent> {
     return EventModel.create(data);
