@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tbook/schemas": "*",
+    "mongodb": "^7.5.0",
     "mongoose": "^9.0.0"
   },
   "devDependencies": {

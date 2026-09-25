@@ -10,13 +10,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@auth/mongodb-adapter": "^3.11.1",
     "@tbook/actions": "*",
     "@tbook/db": "*",
     "@tbook/domain": "*",
     "@tbook/schemas": "*",
     "@tbook/services": "*",
     "@tbook/ui": "*",
+    "mongodb": "^7.5.0",
     "next": "^15.1.3",
+    "next-auth": "^5.0.0-beta.30",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

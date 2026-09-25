@@ -31,16 +31,22 @@
  * byte-compatible public API the still-running Sörfeszt/World Darts
  * Festival storefronts call.
  *
+ * Auth: bootstrap-admin.ts (BOOTSTRAP_ADMIN_EMAILS/BOOTSTRAP_SYSTEM_ADMIN_EMAILS
+ * allowlist promotion to isSystemAdmin) — the NextAuth instance itself,
+ * Google OAuth config, and session callbacks live in apps/web (framework-
+ * specific), but this package stays framework-agnostic.
+ *
  * Still to come: multi-event booking (quoteMulti/
  * createPendingMultiBookings/createMultiBookingWithCheckout) and its v1
  * routes (currently 501); the public entry-list read model
- * (getPublicEntryList) and its route; the OpenAPI spec route; admin/org/
- * system API routes (separate pass — the underlying org-service/
- * event-repository etc. exist, just no apps/web routes yet); admin
- * listing/export methods; tDarts resyncEvent/backfill; header images for
- * voucher PDFs are only resolved from an absolute http(s) URL — no general
- * internal media-upload feature exists yet for an admin to host one
- * locally.
+ * (getPublicEntryList) and its route; the OpenAPI spec route; the org/system
+ * ADMIN API ROUTES (separate pass — org-service/org-auth are fully built,
+ * just no apps/web routes yet, now that real session auth exists to gate
+ * them); admin listing/export methods; tDarts resyncEvent/backfill; header
+ * images for voucher PDFs are only resolved from an absolute http(s) URL —
+ * no general internal media-upload feature exists yet for an admin to host
+ * one locally; auto-processing a pending org invite on sign-in (an invited
+ * user can still use their invite token/link manually in the meantime).
  */
 export * from "./org-secrets";
 export * from "./api-key";
@@ -59,3 +65,4 @@ export * from "./voucher-pdf-email";
 export * from "./currency";
 export * from "./rate-limit";
 export * from "./public-catalog-service";
+export * from "./bootstrap-admin";

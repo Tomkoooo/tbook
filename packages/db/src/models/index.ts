@@ -7,3 +7,4 @@ export * from "./voucher";
 export * from "./org-membership";
 export * from "./org-role";
 export * from "./org-invite";
+export * from "./user";

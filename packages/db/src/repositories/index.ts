@@ -7,3 +7,4 @@ export * from "./voucher-repository";
 export * from "./org-membership-repository";
 export * from "./org-role-repository";
 export * from "./org-invite-repository";
+export * from "./user-repository";
