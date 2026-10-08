@@ -11,7 +11,7 @@ import {
   StatRow,
   Table,
 } from "@tbook/ui";
-import { formatDateTime, formatHuf, requireAdminPage } from "@/lib/admin-page";
+import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
 
 /**
  * Org dashboard (legacy: the admin home resolver's landing view). Reads
@@ -38,10 +38,11 @@ export default async function AdminHomePage({
       : Promise.resolve(null),
   ]);
 
-  const paid = recent?.statusTotals.find((row) => row.status === "paid");
-  const confirmed = recent?.statusTotals.find((row) => row.status === "confirmed");
-  const pending = recent?.statusTotals.find((row) => row.status === "pending");
-  const guestsSold = (paid?.guests ?? 0) + (confirmed?.guests ?? 0);
+  // statusTotals is per status *and* currency, so a status can appear more
+  // than once — count across all of its rows rather than picking the first.
+  const pendingCount = (recent?.statusTotals ?? [])
+    .filter((row) => row.status === "pending")
+    .reduce((sum, row) => sum + row.count, 0);
 
   return (
     <>
@@ -69,9 +70,9 @@ export default async function AdminHomePage({
         <Stat label="Members" value={stats.memberCount} />
         {recent ? (
           <>
-            <Stat label="Bookings" value={recent.total} hint={`${pending?.count ?? 0} pending`} />
-            <Stat label="Guests sold" value={guestsSold} hint="paid + confirmed" />
-            <Stat label="Revenue" value={formatHuf(recent.grandTotalHuf)} hint="paid + confirmed" />
+            <Stat label="Bookings" value={recent.total} hint={`${pendingCount} pending`} />
+            <Stat label="Guests sold" value={recent.paidGuests} hint="paid + confirmed" />
+            <Stat label="Revenue" value={formatRevenue(recent.revenueByCurrency)} hint="paid + confirmed" />
           </>
         ) : null}
       </StatRow>
@@ -111,7 +112,7 @@ export default async function AdminHomePage({
                     </td>
                     <td className="tbook-wrap">{booking.eventName}</td>
                     <td className="tbook-num">{booking.guests}</td>
-                    <td className="tbook-num">{formatHuf(booking.totalHuf, booking.currency)}</td>
+                    <td className="tbook-num">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</td>
                     <td>
                       <Badge tone={BOOKING_STATUS_TONES[booking.status] ?? "neutral"}>{booking.status}</Badge>
                     </td>

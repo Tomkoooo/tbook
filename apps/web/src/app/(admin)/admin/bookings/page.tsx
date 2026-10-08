@@ -13,7 +13,7 @@ import {
   StatRow,
   Table,
 } from "@tbook/ui";
-import { formatDateTime, formatHuf, requireAdminPage } from "@/lib/admin-page";
+import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
 import { BookingFilters } from "./booking-filters";
 
 /**
@@ -113,8 +113,6 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
   if (filter.createdFrom) exportQuery.set("createdFrom", filter.createdFrom.toISOString());
   if (filter.createdTo) exportQuery.set("createdTo", filter.createdTo.toISOString());
 
-  const paid = result.statusTotals.find((row) => row.status === "paid");
-  const confirmed = result.statusTotals.find((row) => row.status === "confirmed");
 
   return (
     <>
@@ -135,8 +133,8 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
 
       <StatRow>
         <Stat label="Matching" value={result.total} />
-        <Stat label="Guests" value={(paid?.guests ?? 0) + (confirmed?.guests ?? 0)} hint="paid + confirmed" />
-        <Stat label="Revenue" value={formatHuf(result.grandTotalHuf)} hint="paid + confirmed" />
+        <Stat label="Guests" value={result.paidGuests} hint="paid + confirmed" />
+        <Stat label="Revenue" value={formatRevenue(result.revenueByCurrency)} hint="paid + confirmed" />
       </StatRow>
 
       <Card title="Filters">
@@ -184,7 +182,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                           {booking.eventName}
                           {booking.hotelName ? <div className="tbook-faint">{booking.hotelName}</div> : null}
                         </td>
-                        <td className="tbook-num">{formatHuf(booking.totalHuf, booking.currency)}</td>
+                        <td className="tbook-num">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</td>
                         <td className="tbook-num">{booking.guests}</td>
                         <td>
                           <Badge tone={BOOKING_STATUS_TONES[booking.status] ?? "neutral"}>{booking.status}</Badge>

@@ -189,23 +189,33 @@ export const bookingRepository = {
     if (!Types.ObjectId.isValid(id)) return Promise.resolve(null);
     return BookingModel.findOne({ ...buildBookingQuery(scope, {}), _id: new Types.ObjectId(id) }).exec();
   },
-  /** Per-status counts + revenue for the admin dashboard and list summary. */
+  /**
+   * Per-status, per-currency counts and money for the dashboard and list
+   * summary.
+   *
+   * Grouping by currency as well as status is not optional: `totalHuf` is a
+   * legacy misnomer that actually holds the amount in the booking's own
+   * `currency`, and real organizations run in different ones (the Magyar
+   * Darts Szövetség data is entirely EUR). Summing across currencies would
+   * produce a meaningless number, and labelling it with a single currency
+   * would be worse than useless.
+   */
   async aggregateStatusTotalsInScope(
     scope: BookingScope,
     filter: BookingListFilter = {},
-  ): Promise<Array<{ status: IBooking["status"]; count: number; totalHuf: number; guests: number }>> {
-    return BookingModel.aggregate<{ status: IBooking["status"]; count: number; totalHuf: number; guests: number }>([
+  ): Promise<Array<{ status: IBooking["status"]; currency: string; count: number; totalHuf: number; guests: number }>> {
+    return BookingModel.aggregate<{ status: IBooking["status"]; currency: string; count: number; totalHuf: number; guests: number }>([
       { $match: buildBookingQuery(scope, filter) },
       {
         $group: {
-          _id: "$status",
+          _id: { status: "$status", currency: { $ifNull: ["$currency", "HUF"] } },
           count: { $sum: 1 },
           totalHuf: { $sum: { $ifNull: ["$totalHuf", 0] } },
           guests: { $sum: { $ifNull: ["$guests", 0] } },
         },
       },
-      { $project: { _id: 0, status: "$_id", count: 1, totalHuf: 1, guests: 1 } },
-      { $sort: { status: 1 } },
+      { $project: { _id: 0, status: "$_id.status", currency: "$_id.currency", count: 1, totalHuf: 1, guests: 1 } },
+      { $sort: { status: 1, currency: 1 } },
     ]).exec();
   },
   /**

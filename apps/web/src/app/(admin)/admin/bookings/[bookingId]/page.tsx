@@ -11,7 +11,7 @@ import {
   Table,
   VOUCHER_STATUS_TONES,
 } from "@tbook/ui";
-import { formatDateTime, formatHuf, requireAdminPage } from "@/lib/admin-page";
+import { formatDateTime, formatMoney, requireAdminPage } from "@/lib/admin-page";
 import { BookingActions } from "./booking-actions";
 
 export const dynamic = "force-dynamic";
@@ -103,15 +103,15 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
 
       <Card title="Price breakdown">
         {quoteLines.length === 0 ? (
-          <DescriptionList items={[{ label: "Total", value: formatHuf(booking.totalHuf, currency) }]} />
+          <DescriptionList items={[{ label: "Total", value: formatMoney(booking.totalHuf, currency) }]} />
         ) : (
           <DescriptionList
             items={[
               ...quoteLines.map((line) => ({
                 label: line.label ?? line.key ?? "—",
-                value: formatHuf(line.amountHuf ?? 0, currency),
+                value: formatMoney(line.amountHuf ?? 0, currency),
               })),
-              { label: <strong>Total</strong>, value: <strong>{formatHuf(booking.totalHuf, currency)}</strong> },
+              { label: <strong>Total</strong>, value: <strong>{formatMoney(booking.totalHuf, currency)}</strong> },
             ]}
           />
         )}

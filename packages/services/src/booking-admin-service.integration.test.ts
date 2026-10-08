@@ -184,8 +184,44 @@ describe("booking-admin-service", () => {
       await seedBooking({ status: "expired", totalHuf: 888888, customer: { name: "E", email: "e@example.com", phone: "+6" } });
 
       const result = await listBookingsForOrg(orgId);
-      expect(result.grandTotalHuf).toBe(15000);
+      expect(result.revenueByCurrency).toEqual([{ currency: "HUF", totalHuf: 15000 }]);
       expect(result.total).toBe(4);
+    });
+
+    it("keeps revenue separated per currency instead of inventing a combined sum", async () => {
+      // Real data motivates this: the Magyar Darts Szövetség's bookings are
+      // entirely EUR while another org's are HUF, and `totalHuf` actually
+      // holds the booking's own currency despite the field name.
+      await seedBooking({ status: "paid", totalHuf: 10000, currency: "HUF" });
+      await seedBooking({
+        status: "paid",
+        totalHuf: 40,
+        currency: "EUR",
+        customer: { name: "EU", email: "eu@example.com", phone: "+8" },
+      });
+
+      const result = await listBookingsForOrg(orgId);
+      expect(result.revenueByCurrency).toEqual([
+        { currency: "EUR", totalHuf: 40 },
+        { currency: "HUF", totalHuf: 10000 },
+      ]);
+    });
+
+    it("counts paid guests across currencies, which is safe to sum", async () => {
+      await seedBooking({ status: "paid", guests: 2, currency: "HUF" });
+      await seedBooking({
+        status: "paid",
+        guests: 3,
+        currency: "EUR",
+        customer: { name: "EU", email: "eu@example.com", phone: "+9" },
+      });
+      await seedBooking({
+        status: "pending",
+        guests: 7,
+        customer: { name: "P", email: "p2@example.com", phone: "+10" },
+      });
+
+      expect((await listBookingsForOrg(orgId)).paidGuests).toBe(5);
     });
 
     it("reports totals for the filtered set, not the whole org", async () => {
@@ -193,7 +229,7 @@ describe("booking-admin-service", () => {
       await seedBooking({ status: "pending", totalHuf: 7000, customer: { name: "P", email: "p@example.com", phone: "+7" } });
 
       const result = await listBookingsForOrg(orgId, { status: ["pending"] });
-      expect(result.statusTotals).toEqual([{ status: "pending", count: 1, totalHuf: 7000, guests: 2 }]);
+      expect(result.statusTotals).toEqual([{ status: "pending", currency: "HUF", count: 1, totalHuf: 7000, guests: 2 }]);
     });
   });
 

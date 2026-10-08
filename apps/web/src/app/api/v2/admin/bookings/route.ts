@@ -25,7 +25,8 @@ export async function GET(request: Request) {
         total: result.total,
         pageCount: result.pageCount,
         statusTotals: result.statusTotals,
-        grandTotalHuf: result.grandTotalHuf,
+        revenueByCurrency: result.revenueByCurrency,
+        paidGuests: result.paidGuests,
       },
     };
   });

@@ -43,6 +43,26 @@ npm run dev
 A Husky pre-push hook runs lint + typecheck + unit tests + build before
 anything reaches the remote.
 
+## Refreshing a dev database from production
+
+```bash
+node scripts/migrate/clone-database.mjs --uri mongodb://host:27017/ \
+  --from tbook-admin --to tbook-dev            # dry run: prints the plan
+node scripts/migrate/clone-database.mjs --uri mongodb://host:27017/ \
+  --from tbook-admin --to tbook-dev --yes      # perform the copy
+```
+
+Drops and replaces the target's matching collections, recreating the
+source's indexes (the unique `token` and `(bookingId, attendeeIndex)`
+indexes on `tbookvouchers` matter — without them a dev database would
+accept data production rejects). Refuses to write without `--yes`, refuses
+when source and target match, and refuses a production-looking target
+unless `--allow-prod-target` is also passed. Run `backfill:capacity`
+against the fresh copy afterwards.
+
+Note that a faithful copy carries real customer names, emails and phone
+numbers into the dev database — treat it accordingly.
+
 ## Launching against the legacy database
 
 `soldGuestCount` on `tbookevents` is **authoritative** in this rebuild —

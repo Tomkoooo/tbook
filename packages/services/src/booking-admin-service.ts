@@ -44,6 +44,14 @@ export interface AdminBookingListQuery extends BookingListFilter {
   sortDir?: "asc" | "desc";
 }
 
+export interface AdminBookingStatusTotal {
+  status: BookingStatus;
+  currency: string;
+  count: number;
+  totalHuf: number;
+  guests: number;
+}
+
 export interface AdminBookingListResult {
   bookings: IBooking[];
   total: number;
@@ -51,8 +59,18 @@ export interface AdminBookingListResult {
   pageSize: number;
   pageCount: number;
   /** Totals for the *filtered* set, so the summary row matches what's shown. */
-  statusTotals: Array<{ status: BookingStatus; count: number; totalHuf: number; guests: number }>;
-  grandTotalHuf: number;
+  statusTotals: AdminBookingStatusTotal[];
+  /**
+   * Collected revenue, one entry per currency.
+   *
+   * Not a single number: `totalHuf` is a legacy misnomer holding the amount
+   * in the booking's own currency, and an org can hold bookings in more
+   * than one, so a single scalar would be an invented sum. Callers render
+   * each entry separately.
+   */
+  revenueByCurrency: Array<{ currency: string; totalHuf: number }>;
+  /** Guests across paid + confirmed bookings — currency-independent, so safe to sum. */
+  paidGuests: number;
 }
 
 const MAX_PAGE_SIZE = 200;
@@ -70,6 +88,16 @@ export async function listBookingsForOrg(organizationId: string, query: AdminBoo
     bookingRepository.aggregateStatusTotalsInScope(scope, filter),
   ]);
 
+  // Revenue counts only money actually collected — a pending or expired
+  // booking's total is not income, and summing every row would badly
+  // overstate it on an event with heavy checkout abandonment.
+  const collected = statusTotals.filter((row) => row.status === "paid" || row.status === "confirmed");
+
+  const byCurrency = new Map<string, number>();
+  for (const row of collected) {
+    byCurrency.set(row.currency, (byCurrency.get(row.currency) ?? 0) + row.totalHuf);
+  }
+
   return {
     bookings,
     total,
@@ -77,12 +105,10 @@ export async function listBookingsForOrg(organizationId: string, query: AdminBoo
     pageSize,
     pageCount: Math.max(Math.ceil(total / pageSize), 1),
     statusTotals,
-    // Revenue counts only money actually collected — a pending or expired
-    // booking's total is not income, and summing every row would badly
-    // overstate it on an event with heavy checkout abandonment.
-    grandTotalHuf: statusTotals
-      .filter((row) => row.status === "paid" || row.status === "confirmed")
-      .reduce((sum, row) => sum + row.totalHuf, 0),
+    revenueByCurrency: [...byCurrency.entries()]
+      .map(([currency, totalHuf]) => ({ currency, totalHuf }))
+      .sort((a, b) => a.currency.localeCompare(b.currency)),
+    paidGuests: collected.reduce((sum, row) => sum + row.guests, 0),
   };
 }
 
