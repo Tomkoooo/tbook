@@ -71,6 +71,11 @@ describe("v2 admin API routes", () => {
 
   beforeAll(async () => {
     mongod = await MongoMemoryServer.create();
+    // The request layer's ensureDbConnection guard reads DATABASE_URL, the
+    // same way production does, so the test has to set it rather than rely
+    // on its own dbConnect call alone. dbConnect caches per URI, so this
+    // reuses the very connection opened on the next line.
+    process.env.DATABASE_URL = mongod.getUri();
     await dbConnect(mongod.getUri());
   });
 

@@ -1,7 +1,7 @@
 import { MongoDBAdapter } from "@auth/mongodb-adapter";
 import NextAuth from "next-auth";
 import Nodemailer from "next-auth/providers/nodemailer";
-import { getMongoClient, userRepository } from "@tbook/db";
+import { ensureDbConnection, getMongoClient, userRepository } from "@tbook/db";
 import { listOrganizationsForUser, maybeBootstrapAdmin, sendMail } from "@tbook/services";
 import { authConfig } from "./auth.config";
 import { getActiveOrganizationIdFromCookie } from "./lib/org-cookie";
@@ -111,6 +111,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (!lookupEmail) return session;
 
       try {
+        // The adapter uses its own raw MongoClient, but these reads go
+        // through Mongoose, which needs its own connection opened first.
+        await ensureDbConnection();
         const dbUser = await userRepository.findByEmail(lookupEmail);
         if (dbUser) {
           session.user.id = String(dbUser._id);

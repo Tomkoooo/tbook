@@ -1,4 +1,5 @@
 import { ActionError } from "@tbook/actions";
+import { ensureDbConnection } from "@tbook/db";
 import { auth } from "@/auth";
 import { requireOrgPermission as requireOrgPermissionService, type OrgAuthContext } from "@tbook/services";
 import type { Permission } from "@tbook/schemas";
@@ -19,8 +20,15 @@ export interface SessionUser {
   activeOrganizationId?: string;
 }
 
-/** Returns the signed-in user, or null if there's no session. Does not throw. */
+/**
+ * Returns the signed-in user, or null if there's no session. Does not throw.
+ *
+ * Also the connection guard for every admin page and server action: both
+ * resolve the session before touching data, and nothing else on those paths
+ * opens a Mongoose connection (see ensureDbConnection's note).
+ */
 export async function getSessionUser(): Promise<SessionUser | null> {
+  await ensureDbConnection();
   const session = await auth();
   if (!session?.user?.id) return null;
   return {

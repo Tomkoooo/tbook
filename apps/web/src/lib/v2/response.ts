@@ -1,4 +1,5 @@
 import { ActionError } from "@tbook/actions";
+import { ensureDbConnection } from "@tbook/db";
 import { NextResponse } from "next/server";
 
 /**
@@ -15,6 +16,8 @@ export interface V2Meta {
 
 export async function runV2<T>(fn: () => Promise<{ data: T; meta?: V2Meta }>): Promise<NextResponse> {
   try {
+    // Also the v2 surface's connection guard — see runV1's note.
+    await ensureDbConnection();
     const { data, meta } = await fn();
     return NextResponse.json({ data, meta: meta ?? {} });
   } catch (error) {

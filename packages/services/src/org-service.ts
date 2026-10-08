@@ -7,6 +7,7 @@ import {
   OrganizationModel,
   OrgInviteModel,
   OrgRoleModel,
+  eventGroupRepository,
   organizationRepository,
   orgInviteRepository,
   orgMembershipRepository,
@@ -131,14 +132,28 @@ export async function updateOrganization(id: string, patch: { name?: string; sta
   await organizationRepository.updateById(id, update);
 }
 
+/**
+ * Dashboard counters for one org.
+ *
+ * Events and bookings are counted with the same organizationId-or-group
+ * union the admin read models use, not a plain `{ organizationId }` match.
+ * A plain match silently undercounts: real production events and bookings
+ * exist with no `organizationId` field at all (see
+ * scripts/migration-fixtures), so the dashboard would report fewer events
+ * than the console's own lists show — which reads as data loss. Groups and
+ * members always carry the org directly, so they need no union.
+ */
 export async function getOrganizationStats(organizationId: string) {
-  const [groupCount, eventCount, bookingCount, memberCount] = await Promise.all([
-    EventGroupModel.countDocuments({ organizationId }),
-    EventModel.countDocuments({ organizationId }),
-    BookingModel.countDocuments({ organizationId }),
+  const groups = await eventGroupRepository.findByOrganizationId(organizationId);
+  const groupObjectIds = groups.map((group) => group._id);
+  const scoped = { $or: [{ organizationId: oid(organizationId) }, { groupId: { $in: groupObjectIds } }] };
+
+  const [eventCount, bookingCount, memberCount] = await Promise.all([
+    EventModel.countDocuments(scoped),
+    BookingModel.countDocuments(scoped),
     orgMembershipRepository.findByOrganizationId(organizationId).then((rows) => rows.filter((r) => r.status === "active").length),
   ]);
-  return { groupCount, eventCount, bookingCount, memberCount };
+  return { groupCount: groups.length, eventCount, bookingCount, memberCount };
 }
 
 // ---- Members ----------------------------------------------------------

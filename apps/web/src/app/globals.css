@@ -1,0 +1,694 @@
+/*
+ * The one stylesheet behind @tbook/ui's semantic class names.
+ *
+ * Why hand-written CSS with tokens rather than Tailwind: the design system
+ * already committed to semantic class names (`tbook-btn`, set by the first
+ * primitive in packages/ui), the console is a bounded set of surfaces, and
+ * this keeps the UI package dependency-free — a component can be rendered
+ * in a Vitest/jsdom test with no build pipeline at all. Swapping in
+ * Tailwind later means rewriting these rules, not the components.
+ *
+ * Every colour is a token on :root and redefined for dark mode, so no rule
+ * below hardcodes a colour.
+ */
+
+:root {
+  --tbook-bg: #f6f7f9;
+  --tbook-surface: #ffffff;
+  --tbook-surface-alt: #fafbfc;
+  --tbook-border: #e2e5ea;
+  --tbook-border-strong: #cfd4dc;
+  --tbook-text: #15181d;
+  --tbook-text-muted: #5f6672;
+  --tbook-text-faint: #868d99;
+  --tbook-accent: #1f5fd0;
+  --tbook-accent-hover: #184aa4;
+  --tbook-accent-text: #ffffff;
+
+  --tbook-info-bg: #e7effd;
+  --tbook-info-text: #11418f;
+  --tbook-success-bg: #e3f5ea;
+  --tbook-success-text: #0f5c32;
+  --tbook-warning-bg: #fdf0da;
+  --tbook-warning-text: #7a4b06;
+  --tbook-danger-bg: #fce8e8;
+  --tbook-danger-text: #8d1c1c;
+  --tbook-neutral-bg: #eceef1;
+  --tbook-neutral-text: #4a5160;
+
+  --tbook-radius: 8px;
+  --tbook-radius-sm: 5px;
+  --tbook-gap: 16px;
+  --tbook-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tbook-bg: #13161a;
+    --tbook-surface: #1b1f25;
+    --tbook-surface-alt: #21262d;
+    --tbook-border: #2c323b;
+    --tbook-border-strong: #3c444f;
+    --tbook-text: #e8eaee;
+    --tbook-text-muted: #a3abb8;
+    --tbook-text-faint: #7d8694;
+    --tbook-accent: #4b87ea;
+    --tbook-accent-hover: #6b9ef0;
+    --tbook-accent-text: #0d1117;
+
+    --tbook-info-bg: #16243c;
+    --tbook-info-text: #9cc2f7;
+    --tbook-success-bg: #14301f;
+    --tbook-success-text: #8fd6aa;
+    --tbook-warning-bg: #352709;
+    --tbook-warning-text: #e8bd72;
+    --tbook-danger-bg: #381818;
+    --tbook-danger-text: #f0a1a1;
+    --tbook-neutral-bg: #272c34;
+    --tbook-neutral-text: #aab2c0;
+    --tbook-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  --tbook-bg: #13161a;
+  --tbook-surface: #1b1f25;
+  --tbook-surface-alt: #21262d;
+  --tbook-border: #2c323b;
+  --tbook-border-strong: #3c444f;
+  --tbook-text: #e8eaee;
+  --tbook-text-muted: #a3abb8;
+  --tbook-text-faint: #7d8694;
+  --tbook-accent: #4b87ea;
+  --tbook-accent-hover: #6b9ef0;
+  --tbook-accent-text: #0d1117;
+
+  --tbook-info-bg: #16243c;
+  --tbook-info-text: #9cc2f7;
+  --tbook-success-bg: #14301f;
+  --tbook-success-text: #8fd6aa;
+  --tbook-warning-bg: #352709;
+  --tbook-warning-text: #e8bd72;
+  --tbook-danger-bg: #381818;
+  --tbook-danger-text: #f0a1a1;
+  --tbook-neutral-bg: #272c34;
+  --tbook-neutral-text: #aab2c0;
+  --tbook-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--tbook-bg);
+  color: var(--tbook-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--tbook-accent);
+}
+
+/* ---- App shell ------------------------------------------------------- */
+
+.tbook-admin {
+  min-height: 100vh;
+}
+
+.tbook-admin-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--tbook-gap);
+  flex-wrap: wrap;
+  padding: 12px 24px;
+  background: var(--tbook-surface);
+  border-bottom: 1px solid var(--tbook-border);
+}
+
+.tbook-admin-brand {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--tbook-text);
+  text-decoration: none;
+}
+
+.tbook-admin-nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tbook-admin-nav a {
+  padding: 6px 10px;
+  border-radius: var(--tbook-radius-sm);
+  color: var(--tbook-text-muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.tbook-admin-nav a:hover {
+  background: var(--tbook-surface-alt);
+  color: var(--tbook-text);
+}
+
+.tbook-admin-nav a[aria-current="page"] {
+  background: var(--tbook-info-bg);
+  color: var(--tbook-info-text);
+}
+
+.tbook-admin-bar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--tbook-text-muted);
+}
+
+.tbook-admin-main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ---- Page header ----------------------------------------------------- */
+
+.tbook-page-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--tbook-gap);
+  flex-wrap: wrap;
+}
+
+.tbook-page-title {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.015em;
+}
+
+.tbook-page-description {
+  margin: 4px 0 0;
+  color: var(--tbook-text-muted);
+  font-size: 14px;
+}
+
+.tbook-page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tbook-breadcrumb {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--tbook-text-faint);
+}
+
+.tbook-breadcrumb a {
+  color: var(--tbook-text-muted);
+  text-decoration: none;
+}
+
+.tbook-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Card ------------------------------------------------------------ */
+
+.tbook-card {
+  background: var(--tbook-surface);
+  border: 1px solid var(--tbook-border);
+  border-radius: var(--tbook-radius);
+  box-shadow: var(--tbook-shadow);
+}
+
+.tbook-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--tbook-gap);
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--tbook-border);
+  flex-wrap: wrap;
+}
+
+.tbook-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tbook-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tbook-card-body {
+  padding: 16px;
+}
+
+.tbook-card-body-flush {
+  padding: 0;
+}
+
+/* ---- Stats ----------------------------------------------------------- */
+
+.tbook-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.tbook-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--tbook-surface);
+  border: 1px solid var(--tbook-border);
+  border-radius: var(--tbook-radius);
+}
+
+.tbook-stat-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tbook-text-faint);
+}
+
+.tbook-stat-value {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tbook-stat-hint {
+  font-size: 12px;
+  color: var(--tbook-text-muted);
+}
+
+/* ---- Table ----------------------------------------------------------- */
+
+.tbook-table-scroll {
+  overflow-x: auto;
+}
+
+.tbook-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tbook-table th,
+.tbook-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--tbook-border);
+  white-space: nowrap;
+}
+
+.tbook-table th {
+  background: var(--tbook-surface-alt);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tbook-text-faint);
+}
+
+.tbook-table th a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tbook-table th a:hover {
+  color: var(--tbook-text);
+}
+
+.tbook-table tbody tr:hover {
+  background: var(--tbook-surface-alt);
+}
+
+.tbook-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.tbook-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tbook-wrap {
+  white-space: normal;
+  min-width: 180px;
+}
+
+.tbook-muted {
+  color: var(--tbook-text-muted);
+}
+
+.tbook-faint {
+  color: var(--tbook-text-faint);
+  font-size: 13px;
+}
+
+/* ---- Empty / pagination --------------------------------------------- */
+
+.tbook-empty {
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.tbook-empty-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.tbook-empty-hint {
+  margin: 6px 0 0;
+  color: var(--tbook-text-muted);
+  font-size: 14px;
+}
+
+.tbook-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--tbook-gap);
+  padding: 12px 16px;
+  border-top: 1px solid var(--tbook-border);
+  flex-wrap: wrap;
+}
+
+.tbook-pagination-summary {
+  margin: 0;
+  color: var(--tbook-text-muted);
+  font-size: 13px;
+}
+
+/* ---- Badge ----------------------------------------------------------- */
+
+.tbook-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tbook-badge-neutral {
+  background: var(--tbook-neutral-bg);
+  color: var(--tbook-neutral-text);
+}
+.tbook-badge-info {
+  background: var(--tbook-info-bg);
+  color: var(--tbook-info-text);
+}
+.tbook-badge-success {
+  background: var(--tbook-success-bg);
+  color: var(--tbook-success-text);
+}
+.tbook-badge-warning {
+  background: var(--tbook-warning-bg);
+  color: var(--tbook-warning-text);
+}
+.tbook-badge-danger {
+  background: var(--tbook-danger-bg);
+  color: var(--tbook-danger-text);
+}
+
+/* ---- Notice ---------------------------------------------------------- */
+
+.tbook-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--tbook-radius-sm);
+  font-size: 14px;
+}
+
+.tbook-notice-info {
+  background: var(--tbook-info-bg);
+  color: var(--tbook-info-text);
+}
+.tbook-notice-success {
+  background: var(--tbook-success-bg);
+  color: var(--tbook-success-text);
+}
+.tbook-notice-warning {
+  background: var(--tbook-warning-bg);
+  color: var(--tbook-warning-text);
+}
+.tbook-notice-danger {
+  background: var(--tbook-danger-bg);
+  color: var(--tbook-danger-text);
+}
+
+/* ---- Buttons --------------------------------------------------------- */
+
+.tbook-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--tbook-radius-sm);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 550;
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.tbook-btn-primary {
+  background: var(--tbook-accent);
+  color: var(--tbook-accent-text);
+}
+
+.tbook-btn-primary:hover:not(:disabled) {
+  background: var(--tbook-accent-hover);
+}
+
+.tbook-btn-secondary {
+  background: var(--tbook-surface);
+  border-color: var(--tbook-border-strong);
+  color: var(--tbook-text);
+}
+
+.tbook-btn-secondary:hover:not(:disabled) {
+  background: var(--tbook-surface-alt);
+}
+
+.tbook-btn-ghost {
+  background: transparent;
+  color: var(--tbook-text-muted);
+}
+
+.tbook-btn-ghost:hover:not(:disabled) {
+  background: var(--tbook-surface-alt);
+  color: var(--tbook-text);
+}
+
+.tbook-btn-danger {
+  background: var(--tbook-danger-bg);
+  color: var(--tbook-danger-text);
+  border-color: transparent;
+}
+
+.tbook-btn-danger:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.tbook-btn:disabled,
+.tbook-btn-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.tbook-btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+/* ---- Fields ---------------------------------------------------------- */
+
+.tbook-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tbook-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tbook-text-faint);
+}
+
+.tbook-field-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tbook-text-faint);
+}
+
+.tbook-field-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tbook-danger-text);
+}
+
+.tbook-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--tbook-border-strong);
+  border-radius: var(--tbook-radius-sm);
+  background: var(--tbook-surface);
+  color: var(--tbook-text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.tbook-input:focus-visible {
+  outline: 2px solid var(--tbook-accent);
+  outline-offset: -1px;
+  border-color: var(--tbook-accent);
+}
+
+.tbook-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--tbook-text-muted) 50%),
+    linear-gradient(135deg, var(--tbook-text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+}
+
+.tbook-filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.tbook-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+
+/* ---- Description list ----------------------------------------------- */
+
+.tbook-dl {
+  margin: 0;
+  display: grid;
+  gap: 0;
+}
+
+.tbook-dl-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 200px) 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--tbook-border);
+}
+
+.tbook-dl-row:last-child {
+  border-bottom: none;
+}
+
+.tbook-dl dt {
+  color: var(--tbook-text-faint);
+  font-size: 13px;
+}
+
+.tbook-dl dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+/* ---- Layout helpers -------------------------------------------------- */
+
+.tbook-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.tbook-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tbook-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Scanner --------------------------------------------------------- */
+
+.tbook-scan-input {
+  font-size: 18px;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tbook-scan-result {
+  padding: 16px;
+  border-radius: var(--tbook-radius);
+  text-align: center;
+}
+
+.tbook-scan-result-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.tbook-scan-result-name {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+/* ---- Auth / centered pages ------------------------------------------ */
+
+.tbook-centered {
+  max-width: 420px;
+  margin: 8vh auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .tbook-admin-bar {
+    padding: 10px 16px;
+  }
+
+  .tbook-dl-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

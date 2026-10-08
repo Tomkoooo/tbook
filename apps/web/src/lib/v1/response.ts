@@ -1,4 +1,5 @@
 import { ActionError } from "@tbook/actions";
+import { ensureDbConnection } from "@tbook/db";
 import { NextResponse } from "next/server";
 
 /**
@@ -72,9 +73,15 @@ export function v1ErrorResponse(error: unknown, request?: Request, fallback = "S
   return v1Json({ error: messageOf(error, fallback) }, statusOf(error), request);
 }
 
-/** Wraps a v1 route body: success -> legacy envelope, thrown error -> legacy error envelope. */
+/**
+ * Wraps a v1 route body: success -> legacy envelope, thrown error -> legacy
+ * error envelope. Also the v1 surface's database-connection guard — every
+ * v1 route funnels through here, and nothing else on the request path opens
+ * a connection (importing a Mongoose model does not).
+ */
 export async function runV1<T>(request: Request, fn: () => Promise<T>): Promise<NextResponse> {
   try {
+    await ensureDbConnection();
     const data = await fn();
     return v1Json({ ok: true, ...(data as object) }, 200, request);
   } catch (error) {

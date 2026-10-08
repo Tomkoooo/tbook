@@ -11,6 +11,7 @@ import {
   createRole,
   deleteRole,
   getDefaultMemberRoleIds,
+  getOrganizationStats,
   getOwnerRoleId,
   listInvites,
   listRoles,
@@ -163,5 +164,76 @@ describe("org-service", () => {
 
     const updated = await EventGroupModel.findById(group._id).exec();
     expect(updated?.apiKeyHash).not.toBe("old-hash");
+  });
+
+  describe("getOrganizationStats", () => {
+    it("counts events and bookings that carry no organizationId, via the org's groups", async () => {
+      const { organization } = await createOrganization({ name: "Sörfeszt" });
+      const { EventGroupModel, EventModel, BookingModel } = await import("@tbook/db");
+
+      const group = await EventGroupModel.create({
+        name: "Sörfeszt 2026",
+        organizationId: organization.id,
+        status: "active",
+        apiKeyHash: "hash",
+        apiKeyHint: "tbk_xxxx",
+        apiKeyCreatedAt: new Date(),
+      });
+
+      const baseEvent = {
+        groupId: group._id,
+        status: "active" as const,
+        startDate: new Date("2026-07-01"),
+        endDate: new Date("2026-07-02"),
+        ticketFeeHuf: 5000,
+      };
+      await EventModel.create({ ...baseEvent, name: "Tagged", organizationId: organization.id });
+      // Production drift: no organizationId field at all. A plain
+      // { organizationId } count would miss it and the dashboard would
+      // report fewer events than the console's own event list shows.
+      await EventModel.create({ ...baseEvent, name: "Legacy" });
+
+      const baseBooking = {
+        groupId: group._id,
+        eventId: baseEvent.groupId,
+        eventName: "Tagged",
+        customer: { name: "A", email: "a@example.com", phone: "+1" },
+        guests: 1,
+        quote: { guests: 1, ticketSubtotalHuf: 1, totalHuf: 1 },
+        totalHuf: 1,
+      };
+      await BookingModel.create({ ...baseBooking, organizationId: organization.id });
+      await BookingModel.create({ ...baseBooking, organizationId: null });
+
+      const stats = await getOrganizationStats(organization.id);
+      expect(stats.groupCount).toBe(1);
+      expect(stats.eventCount).toBe(2);
+      expect(stats.bookingCount).toBe(2);
+    });
+
+    it("does not count another org's events", async () => {
+      const { organization } = await createOrganization({ name: "Mine" });
+      const { organization: other } = await createOrganization({ name: "Theirs" });
+      const { EventGroupModel, EventModel } = await import("@tbook/db");
+
+      const otherGroup = await EventGroupModel.create({
+        name: "Theirs 2026",
+        organizationId: other.id,
+        status: "active",
+        apiKeyHash: "hash2",
+        apiKeyHint: "tbk_yyyy",
+        apiKeyCreatedAt: new Date(),
+      });
+      await EventModel.create({
+        groupId: otherGroup._id,
+        name: "Not mine",
+        status: "active",
+        startDate: new Date("2026-07-01"),
+        endDate: new Date("2026-07-02"),
+        ticketFeeHuf: 1000,
+      });
+
+      expect((await getOrganizationStats(organization.id)).eventCount).toBe(0);
+    });
   });
 });
