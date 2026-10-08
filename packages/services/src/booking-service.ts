@@ -384,3 +384,57 @@ export async function expireBooking(bookingId: string): Promise<IBooking | null>
   }
   return updated;
 }
+
+/**
+ * Admin cancellation. Releases the event-capacity reservation that
+ * createPendingBooking took — the gap this closes is real: before this
+ * existed, only expireBooking released capacity, so a cancelled booking
+ * held its seats forever and the event silently lost sellable capacity
+ * (and `soldGuestCount` drifted permanently above the true total).
+ *
+ * Voucher voiding is the caller's job (voucher-service's
+ * voidVouchersForBooking) rather than something done here, to keep this
+ * module free of a dependency on voucher-service — see
+ * booking-admin-service.cancelBookingAsAdmin, which composes the two.
+ *
+ * Idempotent: a booking already cancelled is returned untouched instead of
+ * throwing, and capacity is only released once (the status check is what
+ * guarantees that).
+ */
+export async function cancelBooking(bookingId: string, opts: { reason?: string } = {}): Promise<IBooking | null> {
+  const booking = await bookingRepository.findById(bookingId);
+  if (!booking) return null;
+  if (booking.status === "cancelled") return booking;
+
+  assertValidBookingStatusTransition(booking.status, "cancelled");
+
+  const reason = opts.reason?.trim();
+  // Append rather than overwrite — the guest's own checkout note is often
+  // what explains the cancellation in the first place.
+  const note = reason ? [booking.customer?.note, `[cancelled] ${reason}`].filter(Boolean).join("\n") : null;
+  const updated = await bookingRepository.markCancelled(bookingId, note);
+
+  // Mirrors createPendingBooking: capacity is only ever reserved for a
+  // capacity-capped event, so only such an event has anything to release.
+  const event = await eventRepository.findById(String(booking.eventId));
+  if (event?.capacity != null) {
+    await eventRepository.releaseCapacity(String(booking.eventId), booking.guests);
+  }
+
+  return updated;
+}
+
+/**
+ * Admin confirmation of a paid booking (paid → confirmed). Capacity stays
+ * reserved across this transition, so nothing to adjust — this is purely a
+ * bookkeeping state the admin drives, which is why it lives here next to
+ * the other transitions rather than in the admin read-model service.
+ */
+export async function confirmBooking(bookingId: string): Promise<IBooking | null> {
+  const booking = await bookingRepository.findById(bookingId);
+  if (!booking) return null;
+  if (booking.status === "confirmed") return booking;
+
+  assertValidBookingStatusTransition(booking.status, "confirmed");
+  return bookingRepository.updateById(bookingId, { status: "confirmed" });
+}

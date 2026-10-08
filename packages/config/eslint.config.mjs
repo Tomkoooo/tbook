@@ -25,6 +25,15 @@ export const baseConfig = tseslint.config(
     },
   },
   {
+    // Plain-JS Node scripts (migrations). They run under `node` directly,
+    // not through the TS build, so the Node globals have to be declared
+    // here — tseslint turns no-undef off for .ts files, but these are .mjs.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { console: "readonly", process: "readonly", URL: "readonly" },
+    },
+  },
+  {
     ignores: [
       "**/node_modules/**",
       "**/.next/**",

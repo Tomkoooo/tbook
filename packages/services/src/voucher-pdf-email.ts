@@ -71,6 +71,13 @@ export interface IssueVoucherPdfAndEmailOptions {
   loadFont?: () => Promise<Uint8Array>;
   /** Test seam — see mailer.ts's MailTransporter param. Defaults to a real nodemailer transport. */
   transporter?: Parameters<typeof sendMail>[2];
+  /**
+   * Send to an address other than the booking's own customer email.
+   * Exists for the admin "re-send entries" action (a guest who lost the
+   * mail, or asks for it at a different address); the paid-booking hook
+   * never passes it, so the default path is unchanged.
+   */
+  toEmail?: string;
 }
 
 /**
@@ -102,10 +109,11 @@ export async function issueVoucherPdfAndEmail(bookingId: string, opts: IssueVouc
   await voucherRepository.setPdfFileNameForBooking(bookingId, url);
 
   const template = org?.settings?.emailTemplates?.voucherDelivery;
+  const recipient = opts.toEmail?.trim() || booking.customer.email;
   await sendMail(
     organizationId,
     {
-      to: booking.customer.email,
+      to: recipient,
       subject: template?.subject?.trim() || `Your ticket for ${booking.eventName}`,
       html: template?.body?.trim() || defaultVoucherEmailHtml(booking, vouchers.length),
       attachments: [{ filename: `${booking.eventName.replace(/[^\w.-]+/g, "_")}.pdf`, content: Buffer.from(pdfBytes), contentType: "application/pdf" }],
@@ -113,7 +121,8 @@ export async function issueVoucherPdfAndEmail(bookingId: string, opts: IssueVouc
     opts.transporter,
   );
 
-  await voucherRepository.markEmailedForBooking(bookingId, booking.customer.email, booking.customer.name);
+  // Records where it actually went, which is the point of the audit field when an admin re-sent to another address.
+  await voucherRepository.markEmailedForBooking(bookingId, recipient, booking.customer.name);
   return url;
 }
 
