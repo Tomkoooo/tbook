@@ -61,6 +61,29 @@ It is idempotent and safe to re-run (and should be re-run after any
 out-of-band booking edit made directly in the database). Pass
 `--all-events` to also reconcile events with no capacity cap.
 
+## Integrations (outbound webhooks)
+
+Wiring tBook to another system (Zapier/Make/n8n, a CRM, a Slack relay, your
+own service) is configuration, not a code change: add an endpoint under
+**Admin → Integrations** (or `POST /api/v2/admin/webhooks`) and subscribe it
+to `booking.paid`, `booking.cancelled` and/or `voucher.checked_in`.
+
+Each delivery is a `POST` carrying `X-TBook-Event`, `X-TBook-Delivery` and
+`X-TBook-Signature: sha256=<hex HMAC-SHA256 of the raw body>` — the same
+scheme Stripe and GitHub use. Verify against the **raw** body before
+parsing, and compare in constant time. The signing secret is shown once at
+creation and is unrecoverable afterwards.
+
+Deliveries are best-effort and not retried: a failing endpoint must never
+block a booking from being paid or cancelled. Each endpoint's last status
+is recorded and shown in the console, so a broken integration is visible
+without log access.
+
+For integrations that need to run *inside* the app rather than over HTTP,
+the extension point is `AFTER_BOOKING_PAID_HOOKS` in
+`packages/services/src/checkout-service.ts` — invoicing, tDarts sync,
+voucher delivery and webhook dispatch all register into it the same way.
+
 ## Backwards compatibility
 
 - Same MongoDB collections/fields as the legacy plugin (see

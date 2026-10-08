@@ -15,6 +15,7 @@ import type { BookingStatus, InvoiceStatus } from "@tbook/schemas";
 import { cancelBooking, confirmBooking } from "./booking-service";
 import { voidVouchersForBooking } from "./voucher-service";
 import { issueVoucherPdfAndEmail } from "./voucher-pdf-email";
+import { bookingWebhookData, dispatchWebhookEvent } from "./webhook-service";
 
 /**
  * Read models + write orchestration behind the admin booking console. The
@@ -119,6 +120,12 @@ export async function cancelBookingAsAdmin(
   if (!updated) throw ActionError.notFound("Booking not found");
 
   await voidVouchersForBooking(bookingId);
+
+  // Best-effort: dispatchWebhookEvent never throws, so a broken customer
+  // integration cannot make a cancellation fail. The acting org is used
+  // rather than the booking's own field, which legacy rows may not have.
+  await dispatchWebhookEvent(organizationId, "booking.cancelled", bookingWebhookData(updated));
+
   return updated;
 }
 

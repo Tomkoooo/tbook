@@ -68,6 +68,23 @@ const EmailTemplateOverrideSchema = new Schema(
   { _id: false },
 );
 
+/** Outbound webhook endpoint. `secretEnc` holds the HMAC signing secret, encrypted like every other org secret. */
+const WebhookSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    url: { type: String, required: true },
+    description: { type: String, default: "" },
+    events: { type: [String], default: [] },
+    enabled: { type: Boolean, default: true },
+    secretEnc: { type: String, default: "" },
+    createdAt: { type: Date, default: null },
+    lastStatus: { type: Number, default: null },
+    lastError: { type: String, default: null },
+    lastDeliveredAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const OrganizationSchema = new Schema<IOrganization>(
   {
     name: { type: String, required: true },
@@ -85,6 +102,7 @@ const OrganizationSchema = new Schema<IOrganization>(
       },
       voucherPdfLayout: { type: Schema.Types.Mixed, default: undefined },
       tdarts: { type: TDartsSettingsSchema, default: undefined },
+      webhooks: { type: [WebhookSchema], default: undefined },
     },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },

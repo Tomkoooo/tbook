@@ -12,7 +12,10 @@ export const baseConfig = tseslint.config(
   ...tseslint.configs.recommended,
   {
     rules: {
-      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      // `varsIgnorePattern` matters for the `const { secret, ...rest } = x`
+      // idiom used to drop a field from an API response — the omitted
+      // binding is intentionally unused.
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
   },
   {

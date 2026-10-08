@@ -2,6 +2,7 @@ import { z } from "zod";
 import { bookingStatuses, invoiceStatuses } from "./booking";
 import { objectIdSchema } from "./common";
 import { voucherStatuses } from "./voucher";
+import { webhookEventTypeSchema } from "./organization";
 
 /**
  * Request shapes for the v2 admin API. These live here, next to the entity
@@ -84,3 +85,14 @@ export type AdminVoucherScan = z.infer<typeof adminVoucherScanSchema>;
 export const adminSetActiveOrgSchema = z.object({
   organizationId: objectIdSchema,
 });
+
+/** Create/update an outbound webhook endpoint from the integrations screen. */
+export const adminWebhookUpsertSchema = z.object({
+  /** Absent means "create a new endpoint". */
+  id: z.string().min(1).optional(),
+  url: z.string().trim().url("Must be a valid URL"),
+  description: z.string().trim().max(200).default(""),
+  events: z.array(webhookEventTypeSchema).min(1, "Pick at least one event"),
+  enabled: z.boolean().default(true),
+});
+export type AdminWebhookUpsert = z.infer<typeof adminWebhookUpsertSchema>;

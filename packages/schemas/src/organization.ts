@@ -58,6 +58,33 @@ export const orgEmailTemplatesSchema = z.object({
   invoiceSent: orgEmailTemplateOverrideSchema.nullable().optional(),
 });
 
+/**
+ * Outbound webhooks — the generic extension point for wiring tBook to
+ * anything (Zapier/Make/n8n, a CRM, a Slack relay, a custom service)
+ * without a code change per integration. Deliberately per-organization:
+ * each tenant owns its own endpoints and its own signing secret.
+ */
+export const webhookEventTypes = ["booking.paid", "booking.cancelled", "voucher.checked_in"] as const;
+export const webhookEventTypeSchema = z.enum(webhookEventTypes);
+export type WebhookEventType = z.infer<typeof webhookEventTypeSchema>;
+
+export const orgWebhookSchema = z.object({
+  /** Stable id so an endpoint can be edited/removed without positional addressing. */
+  id: z.string().min(1),
+  url: z.string().url().refine((value) => value.startsWith("https://") || value.startsWith("http://"), "Must be an http(s) URL"),
+  description: z.string().default(""),
+  events: z.array(webhookEventTypeSchema).min(1),
+  enabled: z.boolean().default(true),
+  /** Encrypted shared secret; deliveries are signed with it (HMAC-SHA256). */
+  secretEnc: z.string().default(""),
+  createdAt: z.date().nullable().default(null),
+  /** Delivery bookkeeping, so an admin can see a broken endpoint without log access. */
+  lastStatus: z.number().nullable().default(null),
+  lastError: z.string().nullable().default(null),
+  lastDeliveredAt: z.date().nullable().default(null),
+});
+export type OrgWebhook = z.infer<typeof orgWebhookSchema>;
+
 export const organizationSettingsSchema = z.object({
   currency: currencySchema.default("HUF"),
   stripe: orgStripeSettingsSchema.optional(),
@@ -69,6 +96,8 @@ export const organizationSettingsSchema = z.object({
   // reads this at render time, tolerating legacy/malformed data.
   voucherPdfLayout: voucherPdfLayoutSchema.nullable().default(null),
   tdarts: orgTDartsSettingsSchema.optional(),
+  /** Outbound webhook endpoints. Absent/empty means this org has none. */
+  webhooks: z.array(orgWebhookSchema).default([]),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
 

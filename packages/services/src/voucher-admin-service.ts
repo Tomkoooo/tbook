@@ -8,6 +8,7 @@ import {
 } from "@tbook/db";
 import { ActionError } from "@tbook/actions";
 import { scanVoucher, type ScanVoucherOptions, type VoucherScanResponse } from "./voucher-service";
+import { dispatchWebhookEvent, voucherWebhookData } from "./webhook-service";
 
 /**
  * Read models + write orchestration behind the admin check-in console.
@@ -99,7 +100,15 @@ export async function scanVoucherAsAdmin(
   opts: Omit<ScanVoucherOptions, "organizationId"> = {},
 ): Promise<VoucherScanResponse> {
   if (opts.eventId) await assertEventInOrg(organizationId, opts.eventId);
-  return scanVoucher(rawToken, { ...opts, organizationId });
+  const outcome = await scanVoucher(rawToken, { ...opts, organizationId });
+
+  // Only a real, first check-in is an event worth publishing — a duplicate
+  // scan or an invalid code is not, or a door queue would spam integrations.
+  if (outcome.result === "valid" && outcome.voucher && opts.mode !== "lookup") {
+    await dispatchWebhookEvent(organizationId, "voucher.checked_in", voucherWebhookData(outcome.voucher));
+  }
+
+  return outcome;
 }
 
 /**

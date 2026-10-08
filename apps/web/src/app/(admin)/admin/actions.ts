@@ -8,10 +8,15 @@ import {
   assertUserOrganizationAccess,
   cancelBookingAsAdmin,
   confirmBookingAsAdmin,
+  deleteWebhook,
   resendVoucherEmailAsAdmin,
   revertCheckInAsAdmin,
   scanVoucherAsAdmin,
+  sendTestWebhook,
+  upsertWebhook,
 } from "@tbook/services";
+import { adminWebhookUpsertSchema } from "@tbook/schemas";
+import { parseInput } from "@tbook/actions";
 import { getSessionUser, requireOrgPermission } from "@/lib/admin-auth";
 import { activeOrgCookieOptions } from "@/lib/org-cookie";
 
@@ -147,4 +152,79 @@ export async function selectOrganizationAction(formData: FormData): Promise<Acti
   // redirect() signals by throwing, so it has to happen outside `attempt`.
   if (result.ok) redirect("/admin");
   return result;
+}
+
+
+/* ---- Integrations (outbound webhooks) ------------------------------- */
+
+export interface WebhookActionResult extends ActionResult {
+  /** Returned exactly once, on creation — the secret is not readable afterwards. */
+  secret?: string;
+}
+
+/**
+ * Creates or updates an outbound webhook endpoint. Gated on org:update
+ * (this is organization configuration, not booking data) and validated
+ * against the same Zod schema the v2 route uses.
+ */
+export async function saveWebhookAction(formData: FormData): Promise<WebhookActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("org:update");
+
+    const input = parseInput(adminWebhookUpsertSchema, {
+      id: String(formData.get("id") ?? "").trim() || undefined,
+      url: String(formData.get("url") ?? ""),
+      description: String(formData.get("description") ?? ""),
+      // Checkbox group — getAll, since a single checkbox yields one entry.
+      events: formData.getAll("events").map(String),
+      enabled: formData.get("enabled") !== null,
+    });
+
+    const { secret } = await upsertWebhook({ organizationId, ...input });
+    revalidatePath("/admin/integrations");
+
+    return {
+      ok: true,
+      message: secret
+        ? "Endpoint created. Copy the signing secret now — it won't be shown again."
+        : "Endpoint updated.",
+      secret,
+    };
+  } catch (error) {
+    if (error instanceof ActionError) return { ok: false, message: error.message };
+    console.error("[admin webhook save]", error);
+    return { ok: false, message: "Something went wrong. Please try again." };
+  }
+}
+
+export async function deleteWebhookAction(webhookId: string): Promise<ActionResult> {
+  const result = await attempt(async () => {
+    const { organizationId } = await requireOrgPermission("org:update");
+    await deleteWebhook(organizationId, webhookId);
+    return "Endpoint removed.";
+  });
+
+  if (result.ok) revalidatePath("/admin/integrations");
+  return result;
+}
+
+/**
+ * Sends a sample payload so an admin can verify their receiver before a
+ * real booking depends on it. A failed delivery is reported as the
+ * endpoint's problem, not as an error in this console.
+ */
+export async function testWebhookAction(webhookId: string): Promise<ActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("org:update");
+    const outcome = await sendTestWebhook(organizationId, webhookId);
+    revalidatePath("/admin/integrations");
+
+    return outcome.ok
+      ? { ok: true, message: `Delivered (HTTP ${outcome.status}).` }
+      : { ok: false, message: `Delivery failed: ${outcome.error ?? "unknown error"}` };
+  } catch (error) {
+    if (error instanceof ActionError) return { ok: false, message: error.message };
+    console.error("[admin webhook test]", error);
+    return { ok: false, message: "Something went wrong. Please try again." };
+  }
 }
