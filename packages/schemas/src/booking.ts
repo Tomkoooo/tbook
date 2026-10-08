@@ -86,6 +86,42 @@ export const selectionValueSchema = z.union([
 export const selectionsSchema = z.record(z.string(), selectionValueSchema);
 export type Selections = z.infer<typeof selectionsSchema>;
 
+/**
+ * How a booking was paid. The legacy system only ever had Stripe, so
+ * "stripe" is the default and every existing document reads as that; the
+ * rest exist for an org manager recording a payment taken outside the
+ * platform (bank transfer, cash at the door, a comped entry).
+ */
+export const paymentMethods = ["stripe", "transfer", "cash", "comp", "other"] as const;
+export const paymentMethodSchema = z.enum(paymentMethods);
+export type PaymentMethod = z.infer<typeof paymentMethodSchema>;
+
+/** Where a booking came from. Legacy documents have no value and read as "storefront". */
+export const bookingSources = ["storefront", "admin"] as const;
+export const bookingSourceSchema = z.enum(bookingSources);
+export type BookingSource = z.infer<typeof bookingSourceSchema>;
+
+/**
+ * Record of a payment an org manager marked manually. Kept as its own
+ * object rather than loose fields so "who marked this paid, when, and on
+ * what evidence" stays answerable — the audit question an org manager
+ * actually gets asked.
+ */
+export const offlinePaymentSchema = z.object({
+  method: paymentMethodSchema.default("transfer"),
+  /** Bank transfer reference, receipt number, "cash at door", etc. */
+  reference: z.string().default(""),
+  note: z.string().default(""),
+  markedByUserId: objectIdSchema.nullable().default(null),
+  markedAt: z.date().nullable().default(null),
+});
+export type OfflinePayment = z.infer<typeof offlinePaymentSchema>;
+
+/** Whether an invoice came from Számlázz.hu or was recorded by hand. */
+export const invoiceSources = ["szamlazz", "manual"] as const;
+export const invoiceSourceSchema = z.enum(invoiceSources);
+export type InvoiceSource = z.infer<typeof invoiceSourceSchema>;
+
 export const bookingSchema = z.object({
   id: objectIdSchema,
   organizationId: objectIdSchema.nullable().default(null),
@@ -125,6 +161,19 @@ export const bookingSchema = z.object({
   checkoutReturnBaseUrl: z.string().nullable().default(null),
   expiresAt: z.date().nullable().default(null),
   tdartsSync: z.array(tdartsSyncEntrySchema).default([]),
+  /** "storefront" for every legacy document; "admin" for a manually created registration. */
+  source: bookingSourceSchema.default("storefront"),
+  createdByUserId: objectIdSchema.nullable().default(null),
+  /** How it was paid. Legacy documents default to "stripe", which is what they were. */
+  paymentMethod: paymentMethodSchema.default("stripe"),
+  /** Present only when an org manager recorded the payment by hand. */
+  offlinePayment: offlinePaymentSchema.nullable().default(null),
+  /** Distinguishes a Számlázz.hu invoice from an invoice number typed in by an admin. */
+  invoiceSource: invoiceSourceSchema.default("szamlazz"),
+  /** Human-readable invoice number when recorded manually (invoiceId stays the provider's id). */
+  invoiceNumber: z.string().nullable().default(null),
+  /** Free-form admin note, separate from the guest's own checkout note. */
+  adminNote: z.string().default(""),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

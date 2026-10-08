@@ -101,13 +101,37 @@ export interface BookingQuoteContext {
  * Used by the admin live preview, the public quote endpoint, and booking
  * creation — client-provided totals are never trusted.
  */
-export async function quote(input: QuoteRequest, opts?: { groupId?: string }): Promise<BookingQuoteContext> {
+/**
+ * Admin-only relaxations of the rules the public booking path enforces.
+ *
+ * Every one of these defaults to off, so the storefront and the v1 API are
+ * unaffected. They exist because an org manager's job routinely includes
+ * cases the public flow must refuse: recording a bank transfer that arrived
+ * after sales closed, adding a competitor the organizer agreed to take past
+ * a sold-out cap, or registering someone whose eligibility the organizer has
+ * verified by other means.
+ */
+export interface BookingPolicyOverrides {
+  /** Register into an event whose sales window has closed or not yet opened. */
+  allowClosedSales?: boolean;
+  /** Register into a draft or archived event. */
+  allowInactiveEvent?: boolean;
+  /** Register past the event's capacity cap. */
+  allowOverCapacity?: boolean;
+  /** Bypass the event's eligibility rules. */
+  skipEligibility?: boolean;
+}
+
+export type QuoteOptions = { groupId?: string } & BookingPolicyOverrides;
+
+export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<BookingQuoteContext> {
   const event = await eventRepository.findById(input.eventId);
-  if (!event || event.status !== "active") throw ActionError.notFound("Event not found or inactive.");
+  if (!event) throw ActionError.notFound("Event not found or inactive.");
+  if (event.status !== "active" && !opts?.allowInactiveEvent) throw ActionError.notFound("Event not found or inactive.");
   if (opts?.groupId && String(event.groupId) !== opts.groupId) throw ActionError.notFound("Event not found or inactive.");
 
   const salesState = getEventSalesState(event);
-  if (salesState !== "on_sale") {
+  if (salesState !== "on_sale" && !opts?.allowClosedSales) {
     throw ActionError.validation(salesState === "upcoming" ? "Ticket sales have not opened yet." : "Ticket sales are closed.", { salesState });
   }
 
@@ -274,7 +298,7 @@ export interface CreateBookingInput {
  * (would need a replica-set-mode test double), so reserve-then-compensate
  * is the chosen alternative to a single all-or-nothing transaction.
  */
-export async function createPendingBooking(input: CreateBookingInput, opts?: { groupId?: string }): Promise<IBooking> {
+export async function createPendingBooking(input: CreateBookingInput, opts?: QuoteOptions): Promise<IBooking> {
   const inferredTeamMemberCount =
     input.attendees && input.attendees.length > 0
       ? countRosterPlayers(input.attendees, { registrationUnit: "team", teamMemberLimit: 100 }, input.guests)
@@ -285,7 +309,11 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: { g
 
   let capacityReserved = false;
   if (event.capacity != null) {
-    const reserved = await eventRepository.reserveCapacity(String(event._id), input.guests);
+    // The unchecked variant is a separate repository method, so an
+    // over-capacity write can only happen when a caller explicitly asks.
+    const reserved = opts?.allowOverCapacity
+      ? await eventRepository.reserveCapacityUnchecked(String(event._id), input.guests)
+      : await eventRepository.reserveCapacity(String(event._id), input.guests);
     if (!reserved) throw ActionError.validation("Not enough capacity left for this event.");
     capacityReserved = true;
   }
@@ -310,13 +338,15 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: { g
     // matches the legacy Mongoose shape); @tbook/domain narrows it to EligibilityMatchOp for its
     // own type safety. The admin rule editor (Phase 5) is the only writer, so the value is always
     // one of the known ops at runtime — this cast just bridges the two packages' type strictness.
-    const eligibilityIssues = validateEligibility(
-      { ...event, eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null },
-      input.attendees,
-      registrationFieldSchema,
-      teamMemberFieldSchema,
-      playersPerTicket > 1 ? playersPerTicket : null,
-    );
+    const eligibilityIssues = opts?.skipEligibility
+      ? []
+      : validateEligibility(
+          { ...event, eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null },
+          input.attendees,
+          registrationFieldSchema,
+          teamMemberFieldSchema,
+          playersPerTicket > 1 ? playersPerTicket : null,
+        );
     if (eligibilityIssues.length > 0) throw ActionError.validation("This event has eligibility requirements that are not met.", { issues: eligibilityIssues });
 
     const attendees = normalizeAttendeePayload(registrationFieldSchema, input.attendees, teamMemberFieldSchema);

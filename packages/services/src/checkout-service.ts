@@ -177,7 +177,16 @@ export async function createBookingWithCheckout(input: CreateBookingWithCheckout
  */
 export const AFTER_BOOKING_PAID_HOOKS: Array<(booking: IBooking) => Promise<void>> = [];
 
-async function afterBookingPaid(booking: IBooking): Promise<void> {
+/**
+ * Runs every after-payment side effect: voucher rows, PDF + email,
+ * Számlázz.hu invoice, tDarts enrolment, outbound webhooks.
+ *
+ * Exported because a Stripe webhook is no longer the only way a booking
+ * gets paid — an org manager recording a bank transfer has to produce the
+ * same artefacts, or the guest gets no ticket and the organizer no invoice
+ * (see registration-admin-service's markBookingPaidOffline).
+ */
+export async function afterBookingPaid(booking: IBooking): Promise<void> {
   try {
     await issueVoucherRowsForBooking(String(booking._id));
   } catch (error) {

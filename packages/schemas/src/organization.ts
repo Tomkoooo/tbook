@@ -64,7 +64,13 @@ export const orgEmailTemplatesSchema = z.object({
  * without a code change per integration. Deliberately per-organization:
  * each tenant owns its own endpoints and its own signing secret.
  */
-export const webhookEventTypes = ["booking.paid", "booking.cancelled", "voucher.checked_in"] as const;
+export const webhookEventTypes = [
+  "booking.paid",
+  "booking.cancelled",
+  /** Contact or attendee details were edited by an org manager. */
+  "booking.updated",
+  "voucher.checked_in",
+] as const;
 export const webhookEventTypeSchema = z.enum(webhookEventTypes);
 export type WebhookEventType = z.infer<typeof webhookEventTypeSchema>;
 

@@ -253,7 +253,9 @@ describe("v2 admin API routes", () => {
       const payload = await body(response);
 
       expect(payload.meta).toMatchObject({ page: 1, pageSize: 10, total: 1, pageCount: 1 });
-      expect(payload.meta?.grandTotalHuf).toBe(10000);
+      // Revenue is per-currency, never a single scalar — see
+      // AdminBookingListResult's note on the totalHuf misnomer.
+      expect(payload.meta?.revenueByCurrency).toEqual([{ currency: "HUF", totalHuf: 10000 }]);
     });
 
     it("rejects a malformed filter instead of silently ignoring it", async () => {

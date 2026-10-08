@@ -66,6 +66,7 @@ export * from "./currency";
 export * from "./rate-limit";
 export * from "./webhook-service";
 export * from "./booking-admin-service";
+export * from "./registration-admin-service";
 export * from "./voucher-admin-service";
 export * from "./public-catalog-service";
 export * from "./bootstrap-admin";

@@ -1,5 +1,14 @@
 import mongoose, { Schema, type Document, type Model, Types } from "mongoose";
-import { billingTypes, bookingStatuses, invoiceStatuses, tdartsSyncStatuses, type Booking } from "@tbook/schemas";
+import {
+  billingTypes,
+  bookingSources,
+  bookingStatuses,
+  invoiceSources,
+  invoiceStatuses,
+  paymentMethods,
+  tdartsSyncStatuses,
+  type Booking,
+} from "@tbook/schemas";
 import { attendeeFieldDefSchema, bookingAttendeeSchema } from "./value-object-schemas";
 
 /** Ported from the legacy plugin's models/TBookBooking.ts. */
@@ -62,6 +71,21 @@ const TDartsSyncEntrySchema = new Schema(
   { _id: false },
 );
 
+/**
+ * Payment an org manager recorded by hand. Its own subdocument so "who
+ * marked this paid, when, on what evidence" stays answerable.
+ */
+const OfflinePaymentSchema = new Schema(
+  {
+    method: { type: String, enum: paymentMethods, default: "transfer" },
+    reference: { type: String, default: "" },
+    note: { type: String, default: "" },
+    markedByUserId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    markedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const BookingSchema = new Schema<IBooking>(
   {
     organizationId: { type: Schema.Types.ObjectId, ref: "TBookOrganization", default: null, index: true },
@@ -98,6 +122,16 @@ const BookingSchema = new Schema<IBooking>(
     checkoutReturnBaseUrl: { type: String, default: null },
     expiresAt: { type: Date, default: null },
     tdartsSync: { type: [TDartsSyncEntrySchema], default: [] },
+    // Every legacy document lacks these; the defaults are chosen so an
+    // existing booking reads exactly as what it actually was (a Stripe-paid
+    // storefront booking with a Számlázz.hu invoice).
+    source: { type: String, enum: bookingSources, default: "storefront", index: true },
+    createdByUserId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    paymentMethod: { type: String, enum: paymentMethods, default: "stripe" },
+    offlinePayment: { type: OfflinePaymentSchema, default: null },
+    invoiceSource: { type: String, enum: invoiceSources, default: "szamlazz" },
+    invoiceNumber: { type: String, default: null },
+    adminNote: { type: String, default: "" },
   },
   { timestamps: true },
 );

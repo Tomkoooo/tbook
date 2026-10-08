@@ -53,6 +53,16 @@ export const eventRepository = {
     ).exec();
   },
   /**
+   * Unconditional capacity increment, for an org manager deliberately
+   * registering past a sold-out cap (a comped entry, a late addition the
+   * organizer has agreed to). Separate method rather than a flag on
+   * reserveCapacity so overselling can never happen by passing the wrong
+   * argument on the public booking path — a caller has to name it.
+   */
+  reserveCapacityUnchecked(eventId: string, guests: number): Promise<IEvent | null> {
+    return EventModel.findOneAndUpdate({ _id: eventId }, { $inc: { soldGuestCount: guests } }, { returnDocument: "after" }).exec();
+  },
+  /**
    * Compensating release for `reserveCapacity` — used both by expireBooking
    * (releasing a no-longer-held reservation) and as a rollback when booking
    * creation fails after capacity was already reserved. Clamped at 0 so a
