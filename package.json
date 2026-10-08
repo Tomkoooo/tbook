@@ -22,6 +22,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:concurrency": "vitest run --config vitest.concurrency.config.ts",
     "test:coverage": "vitest run --coverage",
+    "backfill:capacity": "node scripts/migrate/backfill-sold-guest-count.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
