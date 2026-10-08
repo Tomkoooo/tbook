@@ -12,3 +12,4 @@ export * from "./org-membership";
 export * from "./org-role";
 export * from "./org-invite";
 export * from "./user";
+export * from "./admin-api";
