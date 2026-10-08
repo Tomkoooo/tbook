@@ -16,21 +16,56 @@ import type { AttendeeFieldDef, AttendeeFieldValue } from "@tbook/schemas";
  */
 
 /** Resolve display name from attendee fields or the booking's customer name. */
+/** Picks the field most likely to hold a person's name out of a field schema. */
+function findNameField(schema: AttendeeFieldDef[], fields: Record<string, AttendeeFieldValue>): string | null {
+  const labelled = schema.find((f) => f.type === "text" && (/név|name/i.test(f.label) || /név|name/i.test(f.key)));
+  if (labelled && fields[labelled.key]) return String(fields[labelled.key]).trim();
+
+  const firstText = schema.find((f) => f.type === "text" && fields[f.key]);
+  if (firstText && fields[firstText.key]) return String(fields[firstText.key]).trim();
+
+  return null;
+}
+
+/**
+ * The name printed on one entry ticket.
+ *
+ * For a team entry the ticket covers a roster, and the roster's own fields
+ * are what identify it — the entry's top-level `fields` are usually empty
+ * on such a booking (the real Hungarian Open Pairs data looks exactly like
+ * this). Falling straight through to the buyer's name, as this did before,
+ * printed "Klaus Lundberg" on a ticket covering five Danish players, which
+ * tells the door staff nothing about who may walk in. So a roster is named
+ * after its players.
+ *
+ * `teamMemberFieldSchema` is optional purely for backward compatibility
+ * with existing callers; without it the roster can't be read and the old
+ * buyer-name behaviour applies.
+ */
 export function resolveAttendeeDisplayName(
   attendeeIndex: number,
-  attendees: Array<{ fields: Record<string, AttendeeFieldValue> }>,
+  attendees: Array<{ fields: Record<string, AttendeeFieldValue>; members?: Array<{ fields: Record<string, AttendeeFieldValue> }> }>,
   attendeeFieldSchema: AttendeeFieldDef[],
   customerName: string,
   guests: number,
+  teamMemberFieldSchema: AttendeeFieldDef[] = [],
 ): string {
   const attendee = attendees[attendeeIndex];
   const fields = attendee?.fields ?? {};
 
-  const nameField = attendeeFieldSchema.find((f) => f.type === "text" && (/név|name/i.test(f.label) || /név|name/i.test(f.key)));
-  if (nameField && fields[nameField.key]) return String(fields[nameField.key]).trim();
+  const ownName = findNameField(attendeeFieldSchema, fields);
+  if (ownName) return ownName;
 
-  const firstTextField = attendeeFieldSchema.find((f) => f.type === "text" && fields[f.key]);
-  if (firstTextField && fields[firstTextField.key]) return String(fields[firstTextField.key]).trim();
+  const members = attendee?.members ?? [];
+  if (members.length > 0 && teamMemberFieldSchema.length > 0) {
+    const names = members.map((member) => findNameField(teamMemberFieldSchema, member.fields ?? {})).filter((name): name is string => Boolean(name));
+
+    if (names.length === 1) return names[0]!;
+    if (names.length === 2) return `${names[0]} & ${names[1]}`;
+    // Beyond a pair the full list would overflow the ticket layout, so the
+    // first player plus a count keeps it both short and unambiguous.
+    if (names.length > 2) return `${names[0]} +${names.length - 1}`;
+  }
 
   if (guests === 1) return customerName.trim();
   return `${customerName.trim()} (${attendeeIndex + 1}. vendég)`;
@@ -86,7 +121,14 @@ export async function issueVoucherRowsForBooking(bookingId: string): Promise<IVo
     attendeeIndex,
     token: randomUUID(),
     status: "active" as const,
-    displayName: resolveAttendeeDisplayName(attendeeIndex, booking.attendees ?? [], schema, booking.customer.name, booking.guests),
+    displayName: resolveAttendeeDisplayName(
+      attendeeIndex,
+      booking.attendees ?? [],
+      schema,
+      booking.customer.name,
+      booking.guests,
+      booking.teamMemberFieldSchema ?? [],
+    ),
     attendeeFields: booking.attendees?.[attendeeIndex]?.fields ?? {},
     eventSnapshot,
     pdfFileName: null,

@@ -14,8 +14,18 @@ import {
   scanVoucherAsAdmin,
   sendTestWebhook,
   upsertWebhook,
+  attachInvoiceToBooking,
+  createAdminRegistration,
+  markBookingPaidOffline,
+  updateBookingDetails,
 } from "@tbook/services";
-import { adminWebhookUpsertSchema } from "@tbook/schemas";
+import {
+  adminAttachInvoiceSchema,
+  adminCreateRegistrationSchema,
+  adminMarkPaidSchema,
+  adminUpdateBookingSchema,
+  adminWebhookUpsertSchema,
+} from "@tbook/schemas";
 import { parseInput } from "@tbook/actions";
 import { getSessionUser, requireOrgPermission } from "@/lib/admin-auth";
 import { activeOrgCookieOptions } from "@/lib/org-cookie";
@@ -227,4 +237,204 @@ export async function testWebhookAction(webhookId: string): Promise<ActionResult
     console.error("[admin webhook test]", error);
     return { ok: false, message: "Something went wrong. Please try again." };
   }
+}
+
+/* ---- Registration management ---------------------------------------- */
+
+/**
+ * Parses the registration form's flat FormData into the nested attendee
+ * shape the service expects. Field names are
+ * `attendee.<i>.<key>` for a person-unit entry and
+ * `attendee.<i>.member.<j>.<key>` for one roster slot of a team ticket —
+ * the same nesting the storefront produces, so both paths build identical
+ * documents.
+ */
+function parseAttendeesFromForm(formData: FormData, guests: number): Array<{ fields: Record<string, string>; members?: Array<{ fields: Record<string, string> }> }> {
+  const rows: Array<{ fields: Record<string, string>; members: Map<number, Record<string, string>> }> = Array.from(
+    { length: guests },
+    () => ({ fields: {}, members: new Map() }),
+  );
+
+  for (const [rawKey, rawValue] of formData.entries()) {
+    if (!rawKey.startsWith("attendee.")) continue;
+    const value = String(rawValue);
+
+    const memberMatch = /^attendee\.(\d+)\.member\.(\d+)\.(.+)$/.exec(rawKey);
+    if (memberMatch) {
+      const [, index, memberIndex, key] = memberMatch;
+      const row = rows[Number(index)];
+      if (!row) continue;
+      const member = row.members.get(Number(memberIndex)) ?? {};
+      member[key!] = value;
+      row.members.set(Number(memberIndex), member);
+      continue;
+    }
+
+    const fieldMatch = /^attendee\.(\d+)\.(.+)$/.exec(rawKey);
+    if (!fieldMatch) continue;
+    const [, index, key] = fieldMatch;
+    const row = rows[Number(index)];
+    if (row) row.fields[key!] = value;
+  }
+
+  return rows.map((row) => {
+    if (row.members.size === 0) return { fields: row.fields };
+    const members = [...row.members.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, fields]) => ({ fields }));
+    return { fields: row.fields, members };
+  });
+}
+
+export interface CreateRegistrationResult extends ActionResult {
+  bookingId?: string;
+}
+
+/**
+ * Registers people into an event by hand. Handles both single-person and
+ * team/multi-player events — the difference is entirely in the attendee
+ * shape, which the event's own schema determines.
+ */
+export async function createRegistrationAction(formData: FormData): Promise<CreateRegistrationResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("booking:manage");
+    const user = await getSessionUser();
+
+    const guests = Math.max(Number(formData.get("guests") ?? 1) || 1, 1);
+    const markPaidRequested = formData.get("markPaid") !== null;
+
+    const input = parseInput(adminCreateRegistrationSchema, {
+      eventId: String(formData.get("eventId") ?? ""),
+      guests,
+      customer: {
+        name: String(formData.get("customer.name") ?? ""),
+        email: String(formData.get("customer.email") ?? ""),
+        phone: String(formData.get("customer.phone") ?? ""),
+        note: String(formData.get("customer.note") ?? ""),
+      },
+      attendees: parseAttendeesFromForm(formData, guests),
+      adminNote: String(formData.get("adminNote") ?? ""),
+      overrides: {
+        allowClosedSales: formData.get("allowClosedSales") !== null,
+        allowInactiveEvent: formData.get("allowInactiveEvent") !== null,
+        allowOverCapacity: formData.get("allowOverCapacity") !== null,
+        skipEligibility: formData.get("skipEligibility") !== null,
+      },
+      ...(markPaidRequested
+        ? {
+            markPaid: {
+              method: String(formData.get("paymentMethod") ?? "transfer"),
+              reference: String(formData.get("paymentReference") ?? ""),
+              note: String(formData.get("paymentNote") ?? ""),
+            },
+          }
+        : {}),
+    });
+
+    const { booking, finalized } = await createAdminRegistration(organizationId, input, { userId: user?.id ?? null });
+    const bookingId = String(booking._id);
+
+    revalidatePath("/admin/bookings");
+    return {
+      ok: true,
+      bookingId,
+      message: finalized
+        ? "Registration created and marked paid. Entries and invoice are being issued."
+        : "Registration created as pending. Mark it paid once the payment arrives.",
+    };
+  } catch (error) {
+    if (error instanceof ActionError) return { ok: false, message: error.message };
+    console.error("[admin create registration]", error);
+    return { ok: false, message: "Something went wrong. Please try again." };
+  }
+}
+
+export async function markPaidAction(bookingId: string, formData: FormData): Promise<ActionResult> {
+  const result = await attempt(async () => {
+    const { organizationId } = await requireOrgPermission("booking:manage");
+    const user = await getSessionUser();
+
+    const input = parseInput(adminMarkPaidSchema, {
+      method: String(formData.get("method") ?? "transfer"),
+      reference: String(formData.get("reference") ?? ""),
+      note: String(formData.get("note") ?? ""),
+    });
+
+    await markBookingPaidOffline(organizationId, bookingId, input, { userId: user?.id ?? null });
+    return "Payment recorded. Entries and invoice are being issued.";
+  });
+
+  if (result.ok) revalidatePath(`/admin/bookings/${bookingId}`);
+  return result;
+}
+
+export interface UpdateBookingResult extends ActionResult {
+  vouchersSkipped?: number;
+  tdartsResyncRequired?: boolean;
+}
+
+/** Edits contact details and attendee data on an existing booking. */
+export async function updateBookingAction(bookingId: string, formData: FormData): Promise<UpdateBookingResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("booking:manage");
+
+    const guests = Math.max(Number(formData.get("guests") ?? 1) || 1, 1);
+    const editsAttendees = formData.get("editsAttendees") !== null;
+
+    const input = parseInput(adminUpdateBookingSchema, {
+      customer: {
+        name: String(formData.get("customer.name") ?? ""),
+        email: String(formData.get("customer.email") ?? ""),
+        phone: String(formData.get("customer.phone") ?? ""),
+      },
+      adminNote: String(formData.get("adminNote") ?? ""),
+      ...(editsAttendees ? { attendees: parseAttendeesFromForm(formData, guests) } : {}),
+    });
+
+    const result = await updateBookingDetails(organizationId, bookingId, input);
+    revalidatePath(`/admin/bookings/${bookingId}`);
+
+    const parts = ["Booking updated."];
+    if (result.vouchersRenamed > 0) parts.push(`${result.vouchersRenamed} entry name(s) updated.`);
+    if (result.vouchersSkipped > 0) {
+      parts.push(`${result.vouchersSkipped} already checked-in or void entry left unchanged.`);
+    }
+    if (result.tdartsResyncRequired) {
+      parts.push("tDarts still holds the old details — see the tDarts note below.");
+    }
+
+    return {
+      ok: true,
+      message: parts.join(" "),
+      vouchersSkipped: result.vouchersSkipped,
+      tdartsResyncRequired: result.tdartsResyncRequired,
+    };
+  } catch (error) {
+    if (error instanceof ActionError) return { ok: false, message: error.message };
+    console.error("[admin update booking]", error);
+    return { ok: false, message: "Something went wrong. Please try again." };
+  }
+}
+
+/** Records an invoice number (and optionally its PDF) issued outside the platform. */
+export async function attachInvoiceAction(bookingId: string, formData: FormData): Promise<ActionResult> {
+  const result = await attempt(async () => {
+    const { organizationId } = await requireOrgPermission("booking:manage");
+    const { invoiceNumber } = parseInput(adminAttachInvoiceSchema, {
+      invoiceNumber: String(formData.get("invoiceNumber") ?? ""),
+    });
+
+    const file = formData.get("pdf");
+    let pdf: { bytes: Buffer } | null = null;
+    if (file instanceof File && file.size > 0) {
+      if (file.size > 10 * 1024 * 1024) throw ActionError.validation("That PDF is larger than 10 MB.");
+      pdf = { bytes: Buffer.from(await file.arrayBuffer()) };
+    }
+
+    await attachInvoiceToBooking(organizationId, bookingId, { invoiceNumber, pdf });
+    return pdf ? "Invoice number and PDF attached." : "Invoice number recorded.";
+  });
+
+  if (result.ok) revalidatePath(`/admin/bookings/${bookingId}`);
+  return result;
 }

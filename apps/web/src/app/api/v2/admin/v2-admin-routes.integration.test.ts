@@ -56,6 +56,10 @@ const { POST: revertCheckIn } = await import("./vouchers/[voucherId]/revert-chec
 const { GET: listOrgs } = await import("./orgs/route");
 const { POST: setActiveOrg, DELETE: clearActiveOrg } = await import("./orgs/active/route");
 const { GET: getFilterOptions } = await import("./filter-options/route");
+const { GET: listRegistrable, POST: createRegistration } = await import("./registrations/route");
+const { POST: markPaid } = await import("./bookings/[bookingId]/mark-paid/route");
+const { PUT: putInvoice } = await import("./bookings/[bookingId]/invoice/route");
+const { PUT: putBooking } = await import("./bookings/[bookingId]/route");
 
 const OWNER_USER_ID = new Types.ObjectId().toHexString();
 const VIEWER_USER_ID = new Types.ObjectId().toHexString();
@@ -481,6 +485,126 @@ describe("v2 admin API routes", () => {
         groups: [{ id: groupId, name: "Sörfeszt 2026" }],
         events: [{ id: eventId, name: "Nyitónap" }],
       });
+    });
+  });
+
+  describe("manual registration", () => {
+    it("lists registrable events with their registration shape", async () => {
+      signIn(OWNER_USER_ID);
+      const payload = await body(await listRegistrable(new Request("http://localhost/x")));
+
+      expect((payload.data as Array<{ name: string }>).map((e) => e.name)).toContain("Nyitónap");
+    });
+
+    it("answers a price preview when given an event and a count", async () => {
+      signIn(OWNER_USER_ID);
+      const payload = await body(
+        await listRegistrable(new Request(`http://localhost/x?eventId=${eventId}&guests=2`)),
+      );
+
+      // 2 x 5000 net + 27% VAT — this fixture event has no explicit
+      // ticketPriceBasis, so it prices on a net basis.
+      expect((payload.data as { quote: { totalHuf: number } }).quote.totalHuf).toBe(12700);
+    });
+
+    it("denies a Viewer the registration endpoints (booking:manage)", async () => {
+      signIn(VIEWER_USER_ID);
+      expect((await listRegistrable(new Request("http://localhost/x"))).status).toBe(403);
+    });
+
+    it("creates a registration and marks it paid in one call", async () => {
+      signIn(OWNER_USER_ID);
+      const response = await createRegistration(
+        new Request("http://localhost/x", {
+          method: "POST",
+          body: JSON.stringify({
+            eventId,
+            guests: 1,
+            customer: { name: "Manual Guest", email: "manual@example.com", phone: "+36301112233" },
+            markPaid: { method: "transfer", reference: "REF-1" },
+            overrides: { allowClosedSales: true },
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await body(response);
+      expect(payload.data).toMatchObject({ status: "paid" });
+      expect(payload.meta?.finalized).toBe(true);
+    });
+
+    it("rejects a registration for another org's event", async () => {
+      signIn(OUTSIDER_USER_ID, { activeOrganizationId: otherOrgId });
+      const response = await createRegistration(
+        new Request("http://localhost/x", {
+          method: "POST",
+          body: JSON.stringify({
+            eventId,
+            guests: 1,
+            customer: { name: "X", email: "x@example.com", phone: "+1" },
+          }),
+        }),
+      );
+      expect(response.status).toBe(404);
+    });
+  });
+
+  describe("marking paid and editing", () => {
+    it("records an offline payment on a pending booking", async () => {
+      await BookingModel.updateOne({ _id: bookingId }, { $set: { status: "pending", paidAt: null } });
+      signIn(OWNER_USER_ID);
+
+      const response = await markPaid(
+        new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ method: "cash" }) }),
+        { params: Promise.resolve({ bookingId }) },
+      );
+
+      expect((await body(response)).data).toMatchObject({ status: "paid" });
+    });
+
+    it("denies a Viewer the mark-paid endpoint", async () => {
+      signIn(VIEWER_USER_ID);
+      const response = await markPaid(
+        new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ method: "cash" }) }),
+        { params: Promise.resolve({ bookingId }) },
+      );
+      expect(response.status).toBe(403);
+    });
+
+    it("edits contact details via PUT and reports voucher effects", async () => {
+      signIn(OWNER_USER_ID);
+      const response = await putBooking(
+        new Request("http://localhost/x", {
+          method: "PUT",
+          body: JSON.stringify({ customer: { phone: "+36309998888" } }),
+        }),
+        { params: Promise.resolve({ bookingId }) },
+      );
+
+      const payload = await body(response);
+      expect((payload.data as { customer: { phone: string; name: string } }).customer.phone).toBe("+36309998888");
+      // The dotted-path update must leave the siblings intact.
+      expect((payload.data as { customer: { name: string } }).customer.name).toBe("Kovács Béla");
+      expect(payload.meta).toHaveProperty("tdartsResyncRequired");
+    });
+
+    it("rejects an empty edit payload", async () => {
+      signIn(OWNER_USER_ID);
+      const response = await putBooking(
+        new Request("http://localhost/x", { method: "PUT", body: JSON.stringify({}) }),
+        { params: Promise.resolve({ bookingId }) },
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it("records a manual invoice number", async () => {
+      signIn(OWNER_USER_ID);
+      const response = await putInvoice(
+        new Request("http://localhost/x", { method: "PUT", body: JSON.stringify({ invoiceNumber: "SZ-2026-9" }) }),
+        { params: Promise.resolve({ bookingId }) },
+      );
+
+      expect((await body(response)).data).toMatchObject({ invoiceStatus: "issued" });
     });
   });
 });

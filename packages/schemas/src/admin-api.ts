@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { bookingStatuses, invoiceStatuses } from "./booking";
+import { billingInfoSchema, bookingStatuses, customerSchema, invoiceStatuses, paymentMethodSchema } from "./booking";
+import { bookingAttendeeSchema } from "./value-objects";
 import { objectIdSchema } from "./common";
 import { voucherStatuses } from "./voucher";
 import { webhookEventTypeSchema } from "./organization";
@@ -96,3 +97,70 @@ export const adminWebhookUpsertSchema = z.object({
   enabled: z.boolean().default(true),
 });
 export type AdminWebhookUpsert = z.infer<typeof adminWebhookUpsertSchema>;
+
+/* ---- Registration management ---------------------------------------- */
+
+/**
+ * One attendee row. `members` carries the roster for a team / multi-player
+ * ticket.
+ *
+ * Reuses the canonical `bookingAttendeeSchema` rather than redeclaring the
+ * shape: the admin form and the storefront must produce identical attendee
+ * documents, and a second definition is exactly the Zod/Mongoose drift this
+ * rebuild exists to eliminate.
+ */
+export const adminAttendeeInputSchema = bookingAttendeeSchema;
+
+/**
+ * Rules an org manager may knowingly override when registering by hand.
+ * Each defaults to false, so an admin has to opt in deliberately.
+ */
+export const adminRegistrationOverridesSchema = z.object({
+  allowClosedSales: z.boolean().default(false),
+  allowInactiveEvent: z.boolean().default(false),
+  allowOverCapacity: z.boolean().default(false),
+  skipEligibility: z.boolean().default(false),
+});
+
+export const adminMarkPaidSchema = z.object({
+  method: paymentMethodSchema.default("transfer"),
+  reference: z.string().trim().max(200).default(""),
+  note: z.string().trim().max(500).default(""),
+  /** Defaults to now when omitted. */
+  paidAt: z.coerce.date().optional(),
+});
+export type AdminMarkPaid = z.infer<typeof adminMarkPaidSchema>;
+
+export const adminCreateRegistrationSchema = z.object({
+  eventId: objectIdSchema,
+  /** Tickets/entries — for a team event this is teams, not people. */
+  guests: z.coerce.number().int().min(1).max(100),
+  customer: customerSchema,
+  billing: billingInfoSchema.nullable().optional(),
+  attendees: z.array(adminAttendeeInputSchema).optional(),
+  hotelId: objectIdSchema.nullable().optional(),
+  accommodationGuests: z.coerce.number().int().min(0).nullable().optional(),
+  nights: z.coerce.number().int().min(0).nullable().optional(),
+  adminNote: z.string().trim().max(1000).default(""),
+  overrides: adminRegistrationOverridesSchema.optional(),
+  /** Present to create the registration already paid, skipping checkout. */
+  markPaid: adminMarkPaidSchema.optional(),
+});
+export type AdminCreateRegistration = z.infer<typeof adminCreateRegistrationSchema>;
+
+export const adminUpdateBookingSchema = z
+  .object({
+    customer: customerSchema.partial().optional(),
+    billing: billingInfoSchema.nullable().optional(),
+    attendees: z.array(adminAttendeeInputSchema).optional(),
+    adminNote: z.string().trim().max(1000).optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "Nothing to update",
+  );
+export type AdminUpdateBooking = z.infer<typeof adminUpdateBookingSchema>;
+
+export const adminAttachInvoiceSchema = z.object({
+  invoiceNumber: z.string().trim().min(1).max(100),
+});

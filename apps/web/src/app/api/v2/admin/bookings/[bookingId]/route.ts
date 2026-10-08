@@ -1,5 +1,5 @@
-import { cancelBookingAsAdmin, confirmBookingAsAdmin, getBookingDetailForOrg } from "@tbook/services";
-import { adminBookingActionSchema } from "@tbook/schemas";
+import { cancelBookingAsAdmin, confirmBookingAsAdmin, getBookingDetailForOrg, updateBookingDetails } from "@tbook/services";
+import { adminBookingActionSchema, adminUpdateBookingSchema } from "@tbook/schemas";
 import { parseInput } from "@tbook/actions";
 import { requireOrgPermission } from "@/lib/admin-auth";
 import { readJsonBody, runV2 } from "@/lib/v2/response";
@@ -35,5 +35,31 @@ export async function PATCH(request: Request, context: { params: Promise<{ booki
         : await confirmBookingAsAdmin(organizationId, bookingId);
 
     return { data: toBookingDetail(booking) };
+  });
+}
+
+/**
+ * v2 — edit contact details and attendee data. Separate from PATCH, which
+ * drives status transitions: a rename and a cancellation are different kinds
+ * of operation and conflating them into one endpoint would make the
+ * permission story and the payload ambiguous.
+ */
+export async function PUT(request: Request, context: { params: Promise<{ bookingId: string }> }) {
+  return runV2(async () => {
+    const { organizationId } = await requireOrgPermission("booking:manage");
+    const { bookingId } = await context.params;
+    const input = parseInput(adminUpdateBookingSchema, await readJsonBody(request));
+
+    const result = await updateBookingDetails(organizationId, bookingId, input);
+    return {
+      data: toBookingDetail(result.booking),
+      meta: {
+        vouchersRenamed: result.vouchersRenamed,
+        vouchersSkipped: result.vouchersSkipped,
+        // The tDarts partner API has no update endpoint yet, so a stale
+        // roster has to be reported rather than silently tolerated.
+        tdartsResyncRequired: result.tdartsResyncRequired,
+      },
+    };
   });
 }

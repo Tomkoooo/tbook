@@ -32,6 +32,11 @@ export interface BookingListItemDto {
   currency: string;
   paidAt: string | null;
   invoiceStatus: string;
+  /** "admin" when an org manager created it by hand, "storefront" otherwise. */
+  source: string;
+  paymentMethod: string;
+  invoiceSource: string;
+  invoiceNumber: string | null;
 }
 
 /** The row shape the admin table renders — intentionally narrower than the detail DTO. */
@@ -55,6 +60,12 @@ export function toBookingListItem(booking: IBooking): BookingListItemDto {
     currency: booking.currency ?? "HUF",
     paidAt: iso(booking.paidAt),
     invoiceStatus: booking.invoiceStatus ?? "none",
+    // Defaults match the Mongoose defaults, so a legacy document reads as
+    // the Stripe-paid storefront booking it actually was.
+    source: booking.source ?? "storefront",
+    paymentMethod: booking.paymentMethod ?? "stripe",
+    invoiceSource: booking.invoiceSource ?? "szamlazz",
+    invoiceNumber: booking.invoiceNumber ?? null,
   };
 }
 
@@ -98,6 +109,9 @@ export interface BookingDetailDto extends BookingListItemDto {
   quote: Record<string, unknown>;
   invoiceId: string | null;
   invoiceError: string | null;
+  adminNote: string;
+  /** Present only when a payment was recorded by hand. */
+  offlinePayment: Record<string, unknown> | null;
   invoiceEmailSentAt: string | null;
   expiresAt: string | null;
   tdartsSync: unknown[];
@@ -115,6 +129,10 @@ export function toBookingDetail(booking: IBooking): BookingDetailDto {
     quote: booking.quote ? (JSON.parse(JSON.stringify(booking.quote)) as Record<string, unknown>) : {},
     invoiceId: booking.invoiceId ?? null,
     invoiceError: booking.invoiceError ?? null,
+    adminNote: booking.adminNote ?? "",
+    offlinePayment: booking.offlinePayment
+      ? (JSON.parse(JSON.stringify(booking.offlinePayment)) as Record<string, unknown>)
+      : null,
     invoiceEmailSentAt: iso(booking.invoiceEmailSentAt),
     expiresAt: iso(booking.expiresAt),
     tdartsSync: booking.tdartsSync ? (JSON.parse(JSON.stringify(booking.tdartsSync)) as unknown[]) : [],

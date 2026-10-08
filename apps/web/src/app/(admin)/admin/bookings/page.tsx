@@ -120,14 +120,21 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
         title="Bookings"
         description="Every booking in this organization, including those made through the legacy storefronts."
         actions={
-          permissions.has("booking:export") ? (
-            <a
-              className="tbook-btn tbook-btn-secondary"
-              href={`/api/v2/admin/bookings/export?${exportQuery.toString()}`}
-            >
-              Export CSV
-            </a>
-          ) : null
+          <>
+            {permissions.has("booking:manage") ? (
+              <Link className="tbook-btn tbook-btn-primary" href="/admin/bookings/new">
+                New registration
+              </Link>
+            ) : null}
+            {permissions.has("booking:export") ? (
+              <a
+                className="tbook-btn tbook-btn-secondary"
+                href={`/api/v2/admin/bookings/export?${exportQuery.toString()}`}
+              >
+                Export CSV
+              </a>
+            ) : null}
+          </>
         }
       />
 
@@ -164,6 +171,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                     })}
                     <th className="tbook-num">Guests</th>
                     <th>Status</th>
+                    <th>Paid via</th>
                     <th>Invoice</th>
                     <th />
                   </tr>
@@ -186,11 +194,14 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                         <td className="tbook-num">{booking.guests}</td>
                         <td>
                           <Badge tone={BOOKING_STATUS_TONES[booking.status] ?? "neutral"}>{booking.status}</Badge>
+                          {booking.source === "admin" ? <Badge tone="info">admin</Badge> : null}
                         </td>
+                        <td className="tbook-faint">{booking.paymentMethod ?? "stripe"}</td>
                         <td>
                           <Badge tone={INVOICE_STATUS_TONES[booking.invoiceStatus] ?? "neutral"}>
                             {booking.invoiceStatus}
                           </Badge>
+                          {booking.invoiceSource === "manual" ? <Badge tone="neutral">manual</Badge> : null}
                         </td>
                         <td>
                           <Link className="tbook-btn tbook-btn-ghost tbook-btn-sm" href={`/admin/bookings/${id}`}>

@@ -50,15 +50,22 @@ node scripts/migrate/clone-database.mjs --uri mongodb://host:27017/ \
   --from tbook-admin --to tbook-dev            # dry run: prints the plan
 node scripts/migrate/clone-database.mjs --uri mongodb://host:27017/ \
   --from tbook-admin --to tbook-dev --yes      # perform the copy
+
+# REQUIRED before exercising any payment flow against the copy:
+node scripts/migrate/sanitize-dev-database.mjs --uri mongodb://host:27017/ --db tbook-dev
+
+DATABASE_URL=mongodb://host:27017/tbook-dev npm run backfill:capacity
 ```
 
-Drops and replaces the target's matching collections, recreating the
-source's indexes (the unique `token` and `(bookingId, attendeeIndex)`
-indexes on `tbookvouchers` matter — without them a dev database would
-accept data production rejects). Refuses to write without `--yes`, refuses
-when source and target match, and refuses a production-looking target
-unless `--allow-prod-target` is also passed. Run `backfill:capacity`
-against the fresh copy afterwards.
+**Sanitize before testing.** A faithful clone carries every organization's
+real credentials — the Számlázz.hu agent key, the SMTP password, the Stripe
+secret key, the tDarts partner secret. Marking one booking paid in such a
+database runs the full after-payment pipeline, which would issue a *real*
+invoice, email a *real* customer and enrol someone into a *real* tournament
+roster. `sanitize-dev-database.mjs` disables those integrations and clears
+any configured webhook endpoints; pass `--redirect-email you@example.com`
+to also point every customer address at yourself so voucher delivery can be
+exercised safely.
 
 Note that a faithful copy carries real customer names, emails and phone
 numbers into the dev database — treat it accordingly.
@@ -80,6 +87,33 @@ DATABASE_URL=mongodb://host/tbook-admin npm run backfill:capacity
 It is idempotent and safe to re-run (and should be re-run after any
 out-of-band booking edit made directly in the database). Pass
 `--all-events` to also reconcile events with no capacity cap.
+
+## Managing registrations
+
+The admin console covers the cases the storefront cannot:
+
+- **Register by hand** (`/admin/bookings/new`) — individual or team/pair
+  entries. The event's own `registrationUnit` / `playersPerTicket` /
+  `teamMemberFieldSchema` drive the form, so a pairs event asks for both
+  players and a 5-a-side team asks for its roster. Four rules can be
+  knowingly overridden (closed sales window, inactive event, over capacity,
+  eligibility), each off by default.
+- **Record a payment taken outside the platform** — bank transfer, cash, or
+  a comped entry, with a reference and note, attributed to the manager who
+  recorded it. This runs the same after-payment pipeline a Stripe webhook
+  does, so entries, the invoice and the integrations all happen as normal.
+- **Edit contact details and attendee/roster data** — renaming an attendee
+  re-points their entry ticket. Entries already checked in are left alone
+  (they record who was admitted) and reported as skipped.
+- **Attach an invoice number and PDF** issued from another system, for an
+  org that invoices from its own accounting software or whose automatic
+  Számlázz.hu issue failed.
+
+tDarts: enrolment happens automatically on payment. Correcting a name or
+withdrawing a cancelled entry is **not yet possible** — the tDarts partner
+API is create-only. The console surfaces a warning when an edit leaves the
+tournament roster stale; see `docs/tdarts-partner-api-requirements.md` for
+the two endpoints that would close this.
 
 ## Integrations (outbound webhooks)
 

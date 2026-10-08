@@ -364,6 +364,7 @@ async function refreshVoucherNames(
       booking.attendeeFieldSchema ?? [],
       booking.customer?.name ?? "",
       booking.guests,
+      booking.teamMemberFieldSchema ?? [],
     );
     if (!displayName || displayName === voucher.displayName) continue;
 
