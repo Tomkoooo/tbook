@@ -3,12 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/**
+ * Each link carries the permission its page requires, so the nav shows
+ * only what this member can actually open — otherwise a Viewer sees
+ * "Integrations", clicks it, and gets bounced back to the dashboard with a
+ * permission error, which reads as a broken console rather than a
+ * deliberate restriction. The pages enforce it regardless; this is the
+ * affordance.
+ */
 const LINKS = [
-  { href: "/admin", label: "Dashboard" },
-  { href: "/admin/bookings", label: "Bookings" },
-  { href: "/admin/check-in", label: "Check-in" },
-  { href: "/admin/integrations", label: "Integrations" },
-];
+  { href: "/admin", label: "Dashboard", permission: null },
+  { href: "/admin/bookings", label: "Bookings", permission: "booking:read" },
+  { href: "/admin/check-in", label: "Check-in", permission: "voucher:read" },
+  { href: "/admin/integrations", label: "Integrations", permission: "org:update" },
+] as const;
 
 /**
  * Client component purely so the active link can be marked from the
@@ -19,12 +27,17 @@ export function AdminNav({
   organizationName,
   userEmail,
   isSystemAdmin,
+  permissions,
 }: {
   organizationName: string | null;
   userEmail: string | null;
   isSystemAdmin: boolean;
+  /** The acting member's permissions; empty when no org is selected yet. */
+  permissions: string[];
 }) {
   const pathname = usePathname();
+  const granted = new Set(permissions);
+  const visible = LINKS.filter((link) => !link.permission || granted.has(link.permission));
 
   return (
     <div className="tbook-admin-bar">
@@ -33,7 +46,7 @@ export function AdminNav({
       </Link>
 
       <nav className="tbook-admin-nav">
-        {LINKS.map((link) => {
+        {visible.map((link) => {
           const active = link.href === "/admin" ? pathname === "/admin" : pathname.startsWith(link.href);
           return (
             <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined}>
