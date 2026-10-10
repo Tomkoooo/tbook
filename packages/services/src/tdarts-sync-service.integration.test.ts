@@ -2,7 +2,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import { BookingModel, EventModel, OrganizationModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptOrgSecret } from "./org-secrets";
-import { syncBookingToTDarts } from "./tdarts-sync-service";
+import { resyncBookingTeamsToTDarts, syncBookingToTDarts, withdrawBookingFromTDarts } from "./tdarts-sync-service";
 
 async function createOrg() {
   return OrganizationModel.create({
@@ -109,17 +109,120 @@ describe("syncBookingToTDarts", () => {
     expect(reloaded?.tdartsSync[0]).toMatchObject({ status: "synced", playerId: "pp1" });
   });
 
-  it("skips (never calls the API for) team tournaments with more than 2 roster slots", async () => {
+  const memberSchema = [
+    { key: "fullName", label: "Név", type: "text", required: true, helpText: "", sortOrder: 0 },
+    { key: "email", label: "Email", type: "email", required: false, helpText: "", sortOrder: 1 },
+  ];
+  const fourPlayers = [
+    { fields: { fullName: "Kiss Anna", email: "" } },
+    { fields: { fullName: "Nagy Béla", email: "Bela@Example.com" } },
+    { fields: { fullName: "Tóth Cili", email: "cili@example.com" } },
+    { fields: { fullName: "Vas Dani", email: "" } },
+  ];
+
+  async function createTeamBooking(overrides: Partial<Record<string, unknown>> = {}) {
     const org = await createOrg();
-    const event = await createEvent(String(org._id), { registrationUnit: "team", teamMemberLimit: 4 });
-    const booking = await createBooking(String(org._id), String(event._id), { attendees: [{ fields: {}, members: [] }] });
-    const fetchImpl = jsonFetch({});
+    const event = await createEvent(String(org._id), { registrationUnit: "team", teamMemberLimit: 8 });
+    const booking = await createBooking(String(org._id), String(event._id), {
+      attendeeFieldSchema: [{ key: "team", label: "Csapatnév", type: "text", required: false, helpText: "", sortOrder: 0 }],
+      teamMemberFieldSchema: memberSchema,
+      teamMemberLimit: 8,
+      attendees: [{ fields: { team: "Bulls SE" }, members: fourPlayers }],
+      ...overrides,
+    });
+    return { org, event, booking };
+  }
+
+  // Old expectation: a team with more than 2 roster slots was marked "skipped"
+  // and never sent, because tDarts had no team endpoint. It has one now.
+  it("enrolls a 4-player team ticket as one tDarts team; a retry is a no-op on tDarts' side", async () => {
+    const { booking } = await createTeamBooking();
+    const fetchImpl = jsonFetch({ teamPlayerId: "team-1", rosterStatus: "applied" });
 
     await syncBookingToTDarts(String(booking._id), { fetchImpl });
 
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.tdarts.hu/partner/tournaments/WDF2026/enroll-team");
+    const body = JSON.parse(init.body as string);
+    expect(body.teamName).toBe("Bulls SE");
+    expect(body.orderId).toBe(`${String(booking._id)}:0`);
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe(body.orderId);
+    // The first member with their own email is the contact; nobody gets the buyer's address.
+    expect(body.members.map((m: { name: string }) => m.name)).toEqual(["Nagy Béla", "Kiss Anna", "Tóth Cili", "Vas Dani"]);
+    expect(body.members.map((m: { email?: string }) => m.email)).toEqual(["bela@example.com", undefined, "cili@example.com", undefined]);
+    expect(JSON.stringify(body)).not.toContain("anna@example.com");
+
     const reloaded = await BookingModel.findById(booking._id).exec();
-    expect(reloaded?.tdartsSync[0]?.status).toBe("skipped");
+    expect(reloaded?.tdartsSync).toHaveLength(1);
+    expect(reloaded?.tdartsSync[0]).toMatchObject({ status: "synced", playerId: "team-1" });
+
+    // Same orderId on the retry: tDarts answers with the first result and creates nothing.
+    await syncBookingToTDarts(String(booking._id), { fetchImpl });
+    const retryBody = JSON.parse((fetchImpl.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(retryBody.orderId).toBe(body.orderId);
+  });
+
+  it("refuses a team with a blank member name, and one where nobody has an email — without calling tDarts", async () => {
+    const blankName = await createTeamBooking({
+      attendees: [{ fields: {}, members: [...fourPlayers.slice(0, 3), { fields: { fullName: "", email: "" } }] }],
+    });
+    const fetchImpl = jsonFetch({ teamPlayerId: "team-1", rosterStatus: "applied" });
+    await syncBookingToTDarts(String(blankName.booking._id), { fetchImpl });
+    let reloaded = await BookingModel.findById(blankName.booking._id).exec();
+    expect(reloaded?.tdartsSync[0]).toMatchObject({ status: "failed" });
+    expect(reloaded?.tdartsSync[0]?.error).toContain("Team member 4 has no name");
+
+    await Promise.all([OrganizationModel.deleteMany({}), EventModel.deleteMany({})]);
+    const noEmail = await createTeamBooking({
+      attendees: [{ fields: {}, members: fourPlayers.map((m) => ({ fields: { ...m.fields, email: "" } })) }],
+    });
+    await syncBookingToTDarts(String(noEmail.booking._id), { fetchImpl });
+    reloaded = await BookingModel.findById(noEmail.booking._id).exec();
+    expect(reloaded?.tdartsSync[0]?.error).toContain("No team member has an email");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("pushes an edited roster to tDarts and keeps the entry when tDarts refuses the edit", async () => {
+    const { booking } = await createTeamBooking({
+      tdartsSync: [{ participantKey: "0", tournamentCode: "WDF2026", status: "synced", playerId: "team-1", rosterStatus: "applied", syncedAt: new Date() }],
+    });
+    const ok = jsonFetch({ updated: ["members"] });
+    await expect(resyncBookingTeamsToTDarts(String(booking._id), { fetchImpl: ok })).resolves.toEqual({ amended: 1, failed: 0 });
+    const [url, init] = ok.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://api.tdarts.hu/partner/tournaments/WDF2026/enrollments/${encodeURIComponent(`${String(booking._id)}:0`)}`);
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toMatchObject({ orderId: `${String(booking._id)}:0`, teamName: "Bulls SE" });
+
+    const refused = jsonFetch({ error: "Cannot remove Kiss Anna: already on a lineup of this tournament", code: "PLAYER_ALREADY_PLAYED" }, 422);
+    await expect(resyncBookingTeamsToTDarts(String(booking._id), { fetchImpl: refused })).resolves.toEqual({ amended: 0, failed: 1 });
+    const reloaded = await BookingModel.findById(booking._id).exec();
+    // Still enrolled on tDarts as before — only the reason the edit did not land is recorded.
+    expect(reloaded?.tdartsSync[0]).toMatchObject({ status: "synced", playerId: "team-1" });
+    expect(reloaded?.tdartsSync[0]?.error).toContain("[PLAYER_ALREADY_PLAYED]");
+  });
+
+  it("withdraws a cancelled team, and records it when tDarts will not release the place", async () => {
+    const { booking } = await createTeamBooking({
+      tdartsSync: [{ participantKey: "0", tournamentCode: "WDF2026", status: "synced", playerId: "team-1", rosterStatus: "applied", syncedAt: new Date() }],
+    });
+    const drawn = jsonFetch({ error: "A team can only be withdrawn before the first stage is drawn", code: "DRAW_ALREADY_MADE" }, 422);
+    await expect(withdrawBookingFromTDarts(String(booking._id), { fetchImpl: drawn })).resolves.toEqual({ withdrawn: 0, failed: 1 });
+    let reloaded = await BookingModel.findById(booking._id).exec();
+    expect(reloaded?.tdartsSync[0]).toMatchObject({ status: "synced" });
+    expect(reloaded?.tdartsSync[0]?.error).toContain("[DRAW_ALREADY_MADE]");
+
+    const ok = jsonFetch({ withdrawnNow: true, promotedEntrantId: null });
+    await expect(withdrawBookingFromTDarts(String(booking._id), { fetchImpl: ok })).resolves.toEqual({ withdrawn: 1, failed: 0 });
+    const [url, init] = ok.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/enrollments\/.+\/withdraw$/);
+    expect(JSON.parse(init.body as string)).toEqual({ orderId: `${String(booking._id)}:0` });
+    reloaded = await BookingModel.findById(booking._id).exec();
+    expect(reloaded?.tdartsSync[0]).toMatchObject({ status: "withdrawn", error: null });
+
+    // Nothing left to withdraw: no second call.
+    await expect(withdrawBookingFromTDarts(String(booking._id), { fetchImpl: ok })).resolves.toEqual({ withdrawn: 0, failed: 0 });
+    expect(ok).toHaveBeenCalledTimes(1);
   });
 
   it("no-ops when the event has tDarts disabled", async () => {

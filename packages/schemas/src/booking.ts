@@ -25,7 +25,7 @@ export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>;
 export const billingTypes = ["personal", "company", "sport"] as const;
 export const billingTypeSchema = z.enum(billingTypes);
 
-export const tdartsSyncStatuses = ["pending", "synced", "waiting", "failed", "skipped"] as const;
+export const tdartsSyncStatuses = ["pending", "synced", "waiting", "failed", "skipped", "withdrawn"] as const;
 export const tdartsSyncStatusSchema = z.enum(tdartsSyncStatuses);
 
 export const customerSchema = z.object({

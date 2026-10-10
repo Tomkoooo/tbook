@@ -147,12 +147,24 @@ export async function cancelBookingAsAdmin(
 
   await voidVouchersForBooking(bookingId);
 
+  // A cancelled team must not keep its place on the tDarts tournament. Never
+  // throws; a refusal (e.g. the draw is already made) is recorded on
+  // booking.tdartsSync for the org manager to act on.
+  let result = updated;
+  if ((updated.tdartsSync ?? []).length > 0) {
+    const { withdrawBookingFromTDarts } = await import("./tdarts-sync-service");
+    const outcome = await withdrawBookingFromTDarts(bookingId);
+    if (outcome.withdrawn + outcome.failed > 0) {
+      result = (await bookingRepository.findById(bookingId)) ?? updated;
+    }
+  }
+
   // Best-effort: dispatchWebhookEvent never throws, so a broken customer
   // integration cannot make a cancellation fail. The acting org is used
   // rather than the booking's own field, which legacy rows may not have.
-  await dispatchWebhookEvent(organizationId, "booking.cancelled", bookingWebhookData(updated));
+  await dispatchWebhookEvent(organizationId, "booking.cancelled", bookingWebhookData(result));
 
-  return updated;
+  return result;
 }
 
 export async function confirmBookingAsAdmin(organizationId: string, bookingId: string): Promise<IBooking> {

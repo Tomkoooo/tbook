@@ -1,8 +1,18 @@
-import crypto from "node:crypto";
 import { bookingRepository, eventRepository, organizationRepository, type IBooking } from "@tbook/db";
 import type { AttendeeFieldDef, AttendeeFieldValue } from "@tbook/schemas";
 import { AFTER_BOOKING_PAID_HOOKS } from "./checkout-service";
-import { decryptOrgSecret } from "./org-secrets";
+import {
+  enrollTDartsPair,
+  enrollTDartsPlayer,
+  enrollTDartsTeam,
+  resolveTDartsCredentials,
+  TDartsApiError,
+  updateTDartsTeam,
+  withdrawTDartsTeam,
+  type FetchLike,
+  type TDartsCredentials,
+  type TDartsTeamMember,
+} from "./tdarts-partner-client";
 
 /**
  * Ported from the legacy plugin's services/tdarts-sync-service.ts +
@@ -16,123 +26,25 @@ import { decryptOrgSecret } from "./org-secrets";
  * the payment path): resyncEvent / syncAllPaidBookingsForEvent backfill.
  */
 
-// ---------------------------------------------------------------------------
-// Credentials + signed partner requests.
-// ---------------------------------------------------------------------------
-
-export interface TDartsCredentials {
-  apiBaseUrl: string;
-  partnerClientId: string;
-  partnerClientSecret: string;
-}
-
-export interface OrgTDartsSettingsLike {
-  enabled: boolean;
-  apiBaseUrl: string;
-  partnerClientId: string;
-  partnerClientSecretEnc: string;
-}
-
-export function resolveTDartsCredentials(settings: OrgTDartsSettingsLike | null | undefined): TDartsCredentials | null {
-  if (!settings?.enabled) return null;
-  const apiBaseUrl = settings.apiBaseUrl?.trim().replace(/\/+$/, "");
-  const partnerClientId = settings.partnerClientId?.trim();
-  const partnerClientSecret = decryptOrgSecret(settings.partnerClientSecretEnc);
-  if (!apiBaseUrl || !partnerClientId || !partnerClientSecret) return null;
-  return { apiBaseUrl, partnerClientId, partnerClientSecret };
-}
-
-/** HMAC-SHA256 over `${timestamp}.${rawBody}`, keyed by the partner client secret — must match the real tDarts partner API exactly. */
-export function signTDartsRequest(secret: string, timestamp: string, rawBody: string): string {
-  return crypto.createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
-}
-
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-
-type PartnerFetchResult = { ok: true; data: unknown } | { ok: false; status: number; error: string };
-
-async function partnerFetch(
-  creds: TDartsCredentials,
-  path: string,
-  init: { method: "GET" | "POST"; body?: unknown; idempotencyKey?: string },
-  fetchImpl: FetchLike = fetch,
-): Promise<PartnerFetchResult> {
-  const rawBody = init.body !== undefined ? JSON.stringify(init.body) : "";
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = signTDartsRequest(creds.partnerClientSecret, timestamp, rawBody);
-
-  const headers: Record<string, string> = {
-    "X-Client-Id": creds.partnerClientId,
-    "X-Timestamp": timestamp,
-    "X-Signature": signature,
-  };
-  if (init.body !== undefined) headers["Content-Type"] = "application/json";
-  if (init.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
-
-  let res: Response;
-  try {
-    res = await fetchImpl(`${creds.apiBaseUrl}${path}`, { method: init.method, headers, body: init.body !== undefined ? rawBody : undefined });
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : "Network error" };
-  }
-
-  let json: unknown = null;
-  try {
-    json = await res.json();
-  } catch {
-    // non-JSON body
-  }
-  if (!res.ok) {
-    const message = json && typeof json === "object" && "error" in json ? String((json as { error: unknown }).error) : `tDarts API ${res.status}`;
-    return { ok: false, status: res.status, error: message };
-  }
-  return { ok: true, data: json };
-}
-
-export interface TDartsEnrollResult {
-  playerId: string;
-  rosterStatus: "applied" | "waiting";
-}
-
-/** Idempotent on (clientId, orderId) — safe to retry. */
-export async function enrollTDartsPlayer(
-  creds: TDartsCredentials,
-  input: { tournamentCode: string; email: string; name: string; country?: string; birthDate?: string; orderId: string; amount?: number; currency?: string; paidAt?: string },
-  fetchImpl?: FetchLike,
-): Promise<TDartsEnrollResult> {
-  const { tournamentCode, orderId, ...body } = input;
-  const result = await partnerFetch(creds, `/partner/tournaments/${tournamentCode}/enroll`, { method: "POST", body, idempotencyKey: orderId }, fetchImpl);
-  if (!result.ok) throw new Error(result.error);
-  const data = result.data as { playerId: string; rosterStatus: "applied" | "waiting" };
-  return { playerId: data.playerId, rosterStatus: data.rosterStatus };
-}
-
-export interface TDartsEnrollPairResult {
-  pairPlayerId: string;
-  rosterStatus: "applied" | "waiting";
-}
-
-/** One call registers both members as a single roster unit — orderId must be unique per pair, not per member. */
-export async function enrollTDartsPair(
-  creds: TDartsCredentials,
-  input: {
-    tournamentCode: string;
-    member1: { email: string; name: string; country?: string; birthDate?: string };
-    member2: { email: string; name: string; country?: string; birthDate?: string };
-    orderId: string;
-    amount?: number;
-    currency?: string;
-    paidAt?: string;
-  },
-  fetchImpl?: FetchLike,
-): Promise<TDartsEnrollPairResult> {
-  const { tournamentCode, member1, member2, orderId, ...rest } = input;
-  const body = { email: member1.email, name: member1.name, country: member1.country, birthDate: member1.birthDate, partner: member2, ...rest };
-  const result = await partnerFetch(creds, `/partner/tournaments/${tournamentCode}/enroll`, { method: "POST", body, idempotencyKey: orderId }, fetchImpl);
-  if (!result.ok) throw new Error(result.error);
-  const data = result.data as { pairPlayerId: string; rosterStatus: "applied" | "waiting" };
-  return { pairPlayerId: data.pairPlayerId, rosterStatus: data.rosterStatus };
-}
+// Signing, credentials and the HTTP calls live in tdarts-partner-client.ts;
+// re-exported here because callers and tests have always imported them from
+// this module.
+export {
+  enrollTDartsPair,
+  enrollTDartsPlayer,
+  enrollTDartsTeam,
+  resolveTDartsCredentials,
+  signTDartsRequest,
+  TDartsApiError,
+  updateTDartsTeam,
+  withdrawTDartsTeam,
+  type FetchLike,
+  type OrgTDartsSettingsLike,
+  type TDartsCredentials,
+  type TDartsEnrollPairResult,
+  type TDartsEnrollResult,
+  type TDartsTeamMember,
+} from "./tdarts-partner-client";
 
 // ---------------------------------------------------------------------------
 // Fraud-guard contact extraction — refuses to enroll a participant whose
@@ -258,13 +170,76 @@ export function extractParticipantContact(
 }
 
 // ---------------------------------------------------------------------------
+// Team roster (3+ players per ticket) → tDarts `enroll-team` payload.
+// ---------------------------------------------------------------------------
+
+const TEAM_NAME_KEYWORDS = ["csapat", "team", "klub", "club"];
+
+function schemaEmailField(schema: AttendeeFieldDef[]): AttendeeFieldDef | undefined {
+  return schema.find((f) => f.type === "email") ?? findFieldByKeywords(schema, ["email", "mail"]);
+}
+
+export type TDartsTeamRoster = { ok: true; teamName: string; members: TDartsTeamMember[] } | { ok: false; error: string };
+
+/**
+ * Builds the team tDarts will see from one team ticket.
+ *
+ * The fraud guard is stricter than for solo tickets, because a roster is
+ * usually typed by one person: a member is only ever given the email typed
+ * into *their own* field. A member without one becomes a guest player on
+ * tDarts — never an account under the buyer's address. A blank name is
+ * refused outright. tDarts needs one contact with an email, so the first
+ * member who has one is sent first; a team where nobody has one is refused.
+ *
+ * Team name: a team-level field that looks like one ("Csapatnév", "Team
+ * name", "Club"), else "<first player> +N" — the same wording the voucher
+ * uses, and a moderator can rename it on tDarts.
+ */
+export function buildTDartsTeamRoster(
+  teamFieldSchema: AttendeeFieldDef[],
+  teamFields: Record<string, AttendeeFieldValue> | undefined,
+  memberFieldSchema: AttendeeFieldDef[],
+  members: { fields?: Record<string, AttendeeFieldValue> }[],
+  buyer: { name: string; email: string },
+): TDartsTeamRoster {
+  if (members.length < 3) {
+    return { ok: false, error: `A team ticket needs at least 3 roster members, got ${members.length}.` };
+  }
+  const emailField = schemaEmailField(memberFieldSchema);
+  const roster: TDartsTeamMember[] = [];
+  for (const [index, member] of members.entries()) {
+    const contact = extractParticipantContact(memberFieldSchema, member.fields, buyer);
+    if (contact.nameIsFallback || !contact.name.trim()) {
+      return { ok: false, error: `Team member ${index + 1} has no name — refusing to enroll them on tDarts as the booking buyer.` };
+    }
+    const ownEmail = emailField ? String(member.fields?.[emailField.key] ?? "").trim().toLowerCase() : "";
+    roster.push({ name: contact.name, email: ownEmail || undefined, country: contact.country, birthDate: contact.birthDate });
+  }
+
+  const emails = roster.map((m) => m.email).filter(Boolean);
+  if (new Set(emails).size !== emails.length) {
+    return { ok: false, error: "Two team members have the same email address — each player needs their own (or none)." };
+  }
+  const contactIndex = roster.findIndex((m) => m.email);
+  if (contactIndex === -1) {
+    return { ok: false, error: "No team member has an email address — tDarts needs at least one contact per team." };
+  }
+  const ordered = [roster[contactIndex]!, ...roster.filter((_, i) => i !== contactIndex)];
+
+  const nameField = findFieldByKeywords(teamFieldSchema, TEAM_NAME_KEYWORDS, ["text"]);
+  const typedName = nameField ? String(teamFields?.[nameField.key] ?? "").trim() : "";
+  const teamName = typedName.length >= 2 ? typedName : `${roster[0]!.name} +${roster.length - 1}`;
+  return { ok: true, teamName: teamName.slice(0, 120), members: ordered };
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration — three enrollment strategies keyed off registrationUnit/playersPerTicket.
 // ---------------------------------------------------------------------------
 
 export type TDartsSyncEntryResult = {
   participantKey: string;
   tournamentCode: string;
-  status: "synced" | "waiting" | "failed" | "skipped";
+  status: "synced" | "waiting" | "failed" | "skipped" | "withdrawn";
   playerId: string | null;
   rosterStatus: "applied" | "waiting" | null;
   error: string | null;
@@ -275,30 +250,49 @@ function entry(participantKey: string, tournamentCode: string, patch: Partial<TD
   return { participantKey, tournamentCode, status: "failed", playerId: null, rosterStatus: null, error: null, syncedAt: null, ...patch };
 }
 
-/**
- * `person` (solo) → one enroll call per attendee. `team` with exactly 2
- * roster slots (doubles/pairs) → one pair-enroll call per ticket. `team`
- * with 3+ roster slots → tDarts' partner API has no team-roster concept;
- * these are marked `skipped`, never sent to tDarts (moderators manage those
- * rosters directly on tdarts.hu).
- */
-export async function syncBookingToTDarts(bookingId: string, opts?: { fetchImpl?: FetchLike }): Promise<void> {
+type SyncContext = {
+  booking: IBooking;
+  tournamentCode: string;
+  creds: TDartsCredentials;
+  isTeamEvent: boolean;
+  isPairEvent: boolean;
+};
+
+/** Everything a tDarts call for this booking needs — or null when the event/organization is not linked to tDarts. */
+async function loadSyncContext(bookingId: string, purpose: string): Promise<SyncContext | null> {
   const booking = await bookingRepository.findById(bookingId);
-  if (!booking) return;
+  if (!booking) return null;
 
   const event = await eventRepository.findById(String(booking.eventId));
   const tournamentCode = event?.tdarts?.enabled ? event.tdarts.tournamentCode : null;
-  if (!tournamentCode) return;
+  if (!tournamentCode) return null;
 
   const org = booking.organizationId ? await organizationRepository.findById(String(booking.organizationId)) : null;
   const creds = resolveTDartsCredentials(org?.settings?.tdarts ?? null);
   if (!creds) {
-    console.warn(`[tbook] tDarts sync skipped for booking ${bookingId} — organization has no tDarts partner credentials configured`);
-    return;
+    console.warn(`[tbook] tDarts ${purpose} skipped for booking ${bookingId} — organization has no tDarts partner credentials configured`);
+    return null;
   }
-
   const isTeamEvent = event?.registrationUnit === "team";
-  const isPairEvent = isTeamEvent && event?.teamMemberLimit === 2;
+  return { booking, tournamentCode, creds, isTeamEvent, isPairEvent: isTeamEvent && event?.teamMemberLimit === 2 };
+}
+
+/** tDarts' own wording plus its stable code, so the org manager sees why and support can search for it. */
+function describeTDartsError(error: unknown, fallback: string): string {
+  if (error instanceof TDartsApiError && error.code) return `${error.message} [${error.code}]`;
+  return error instanceof Error ? error.message : fallback;
+}
+
+/**
+ * `person` (solo) → one enroll call per attendee. `team` with exactly 2
+ * roster slots (doubles/pairs) → one pair-enroll call per ticket. `team`
+ * with 3+ roster slots → one `enroll-team` call per ticket: the whole roster
+ * becomes a single team entrant on a tDarts team tournament.
+ */
+export async function syncBookingToTDarts(bookingId: string, opts?: { fetchImpl?: FetchLike }): Promise<void> {
+  const context = await loadSyncContext(bookingId, "sync");
+  if (!context) return;
+  const { booking, tournamentCode, creds, isTeamEvent, isPairEvent } = context;
   const attendees = booking.attendees ?? [];
   const attendeeFieldSchema = booking.attendeeFieldSchema ?? [];
   const teamMemberFieldSchema = booking.teamMemberFieldSchema ?? [];
@@ -349,12 +343,28 @@ export async function syncBookingToTDarts(bookingId: string, opts?: { fetchImpl?
     }
   }
 
+  async function syncTeam(key: string, attendee: { fields?: Record<string, AttendeeFieldValue>; members?: { fields?: Record<string, AttendeeFieldValue> }[] }) {
+    const roster = buildTDartsTeamRoster(attendeeFieldSchema, attendee.fields, teamMemberFieldSchema, attendee.members ?? [], customer);
+    if (!roster.ok) {
+      results.push(entry(key, tournamentCode!, { status: "failed", error: roster.error }));
+      return;
+    }
+    try {
+      const enrolled = await enrollTDartsTeam(
+        creds!,
+        { tournamentCode: tournamentCode!, teamName: roster.teamName, members: roster.members, orderId: `${bookingId}:${key}`, amount: totalHuf, currency, paidAt: paidAt?.toISOString() },
+        opts?.fetchImpl,
+      );
+      results.push(entry(key, tournamentCode!, { status: enrolled.rosterStatus === "waiting" ? "waiting" : "synced", playerId: enrolled.teamPlayerId, rosterStatus: enrolled.rosterStatus, syncedAt: new Date() }));
+    } catch (error) {
+      results.push(entry(key, tournamentCode!, { status: "failed", error: describeTDartsError(error, "tDarts team enroll failed") }));
+    }
+  }
+
   if (attendees.length === 0) {
     if (!isTeamEvent && booking.guests === 1) await syncSolo("0", undefined);
   } else if (isTeamEvent && !isPairEvent) {
-    attendees.forEach((_, ai) => {
-      results.push(entry(`${ai}`, tournamentCode!, { status: "skipped", error: "Team tournaments with more than 2 roster slots are not auto-synced to tDarts — managed directly on tdarts.hu." }));
-    });
+    await Promise.all(attendees.map((a, ai) => syncTeam(`${ai}`, a)));
   } else if (isPairEvent) {
     await Promise.all(attendees.map((a, ai) => syncPair(`${ai}`, a.members ?? [])));
   } else {
@@ -364,6 +374,122 @@ export async function syncBookingToTDarts(bookingId: string, opts?: { fetchImpl?
   if (results.length > 0) {
     await bookingRepository.updateById(bookingId, { tdartsSync: results as unknown as IBooking["tdartsSync"] });
   }
+}
+
+type StoredSyncEntry = TDartsSyncEntryResult;
+
+function storedEntries(booking: IBooking): StoredSyncEntry[] {
+  // toObject-free copy: the entries are Mongoose subdocuments.
+  return (booking.tdartsSync ?? []).map((e) => ({
+    participantKey: e.participantKey,
+    tournamentCode: e.tournamentCode,
+    status: e.status as StoredSyncEntry["status"],
+    playerId: e.playerId ?? null,
+    rosterStatus: e.rosterStatus ?? null,
+    error: e.error ?? null,
+    syncedAt: e.syncedAt ?? null,
+  }));
+}
+
+export interface TDartsTeamResyncResult {
+  /** Team tickets whose tDarts entry now matches the booking. */
+  amended: number;
+  /** Team tickets tDarts refused or could not be reached for — details are on `booking.tdartsSync[].error`. */
+  failed: number;
+}
+
+/**
+ * Pushes an edited roster to tDarts for every team ticket (3+ players) of the
+ * booking that is already enrolled there. A ticket that never made it to
+ * tDarts is enrolled now. Never throws: the outcome is recorded per ticket.
+ *
+ * Solo and pair tickets are left alone — tDarts cannot amend those yet.
+ */
+export async function resyncBookingTeamsToTDarts(bookingId: string, opts?: { fetchImpl?: FetchLike }): Promise<TDartsTeamResyncResult> {
+  const context = await loadSyncContext(bookingId, "team resync");
+  if (!context || !context.isTeamEvent || context.isPairEvent) return { amended: 0, failed: 0 };
+  const { booking, tournamentCode, creds } = context;
+
+  const entries = storedEntries(booking);
+  const buyer = { name: booking.customer.name, email: booking.customer.email };
+  let amended = 0;
+  let failed = 0;
+
+  for (const [index, attendee] of (booking.attendees ?? []).entries()) {
+    const key = `${index}`;
+    const at = entries.findIndex((e) => e.participantKey === key);
+    const current = at >= 0 ? entries[at]! : entry(key, tournamentCode, { status: "failed" });
+    if (current.status === "withdrawn") continue;
+
+    const roster = buildTDartsTeamRoster(booking.attendeeFieldSchema ?? [], attendee.fields, booking.teamMemberFieldSchema ?? [], attendee.members ?? [], buyer);
+    let next: StoredSyncEntry;
+    if (!roster.ok) {
+      next = { ...current, error: roster.error };
+      failed += 1;
+    } else {
+      const orderId = `${bookingId}:${key}`;
+      try {
+        if (current.playerId) {
+          await updateTDartsTeam(creds, { tournamentCode, orderId, teamName: roster.teamName, members: roster.members }, opts?.fetchImpl);
+          next = { ...current, error: null, syncedAt: new Date() };
+        } else {
+          const enrolled = await enrollTDartsTeam(
+            creds,
+            { tournamentCode, teamName: roster.teamName, members: roster.members, orderId, amount: booking.totalHuf, currency: booking.currency, paidAt: booking.paidAt?.toISOString() },
+            opts?.fetchImpl,
+          );
+          next = entry(key, tournamentCode, { status: enrolled.rosterStatus === "waiting" ? "waiting" : "synced", playerId: enrolled.teamPlayerId, rosterStatus: enrolled.rosterStatus, syncedAt: new Date() });
+        }
+        amended += 1;
+      } catch (error) {
+        // The tDarts entry is unchanged and still valid — keep its status, record why the edit did not land.
+        next = { ...current, error: describeTDartsError(error, "tDarts team update failed") };
+        failed += 1;
+      }
+    }
+    if (at >= 0) entries[at] = next;
+    else entries.push(next);
+  }
+
+  await bookingRepository.updateById(bookingId, { tdartsSync: entries as unknown as IBooking["tdartsSync"] });
+  return { amended, failed };
+}
+
+export interface TDartsWithdrawResult {
+  withdrawn: number;
+  /** Tickets tDarts would not release (e.g. the draw is already made) — a moderator has to handle those on tdarts.hu. */
+  failed: number;
+}
+
+/**
+ * Cancellation / refund: takes the booking's team tickets off the tDarts
+ * tournament so the place goes to the waiting list. Never throws. Solo and
+ * pair tickets cannot be withdrawn through the partner API yet and are left
+ * as they are.
+ */
+export async function withdrawBookingFromTDarts(bookingId: string, opts?: { fetchImpl?: FetchLike }): Promise<TDartsWithdrawResult> {
+  const context = await loadSyncContext(bookingId, "withdraw");
+  if (!context || !context.isTeamEvent || context.isPairEvent) return { withdrawn: 0, failed: 0 };
+  const { booking, tournamentCode, creds } = context;
+
+  const entries = storedEntries(booking);
+  let withdrawn = 0;
+  let failed = 0;
+  for (const [at, current] of entries.entries()) {
+    if (!current.playerId || current.status === "withdrawn") continue;
+    try {
+      await withdrawTDartsTeam(creds, { tournamentCode, orderId: `${bookingId}:${current.participantKey}` }, opts?.fetchImpl);
+      entries[at] = { ...current, status: "withdrawn", rosterStatus: null, error: null, syncedAt: new Date() };
+      withdrawn += 1;
+    } catch (error) {
+      entries[at] = { ...current, error: describeTDartsError(error, "tDarts withdraw failed") };
+      failed += 1;
+    }
+  }
+  if (withdrawn + failed > 0) {
+    await bookingRepository.updateById(bookingId, { tdartsSync: entries as unknown as IBooking["tdartsSync"] });
+  }
+  return { withdrawn, failed };
 }
 
 /** Registered into checkout-service's AFTER_BOOKING_PAID_HOOKS below. syncBookingToTDarts already no-ops when the event/org isn't tDarts-configured. */

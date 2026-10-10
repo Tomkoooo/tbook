@@ -234,6 +234,10 @@ export interface UpdateBookingDetailsInput {
   adminNote?: string;
 }
 
+function memberSchemaOf(booking: IBooking) {
+  return booking.teamMemberFieldSchema ?? [];
+}
+
 export interface UpdateBookingDetailsResult {
   booking: IBooking;
   /** Active vouchers whose display name was updated to match the edit. */
@@ -320,12 +324,24 @@ export async function updateBookingDetails(
     ? await refreshVoucherNames(bookingId, updated)
     : { updated: 0, skipped: 0 };
 
-  const tdartsResyncRequired = attendeesChanged && (updated.tdartsSync ?? []).length > 0;
+  // Team rosters (3+ players) are pushed to tDarts straight away; the manual
+  // "resync required" warning stays for solo and pair tickets, which tDarts
+  // cannot amend yet, and for a team edit tDarts refused or could not receive.
+  let tdartsResyncRequired = attendeesChanged && (updated.tdartsSync ?? []).length > 0;
+  let latest = updated;
+  if (tdartsResyncRequired && memberSchemaOf(updated).length > 0 && (updated.teamMemberLimit ?? null) !== 2) {
+    const { resyncBookingTeamsToTDarts } = await import("./tdarts-sync-service");
+    const outcome = await resyncBookingTeamsToTDarts(bookingId);
+    if (outcome.amended + outcome.failed > 0) {
+      tdartsResyncRequired = outcome.failed > 0;
+      latest = (await BookingModel.findById(bookingId).exec()) ?? updated;
+    }
+  }
 
   await dispatchWebhookEvent(organizationId, "booking.updated", bookingWebhookData(updated));
 
   return {
-    booking: updated,
+    booking: latest,
     vouchersRenamed: voucherChanges.updated,
     vouchersSkipped: voucherChanges.skipped,
     tdartsResyncRequired,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { enrollTDartsPair, enrollTDartsPlayer, extractParticipantContact, resolveTDartsCredentials, signTDartsRequest } from "./tdarts-sync-service";
+import { buildTDartsTeamRoster, enrollTDartsPair, enrollTDartsPlayer, extractParticipantContact, resolveTDartsCredentials, signTDartsRequest, TDartsApiError } from "./tdarts-sync-service";
 
 describe("signTDartsRequest", () => {
   it("is deterministic HMAC-SHA256 over `${timestamp}.${rawBody}`", () => {
@@ -93,5 +93,43 @@ describe("enrollTDartsPlayer / enrollTDartsPair", () => {
     const body = JSON.parse(init.body as string);
     expect(body.email).toBe("a@example.com");
     expect(body.partner.email).toBe("b@example.com");
+  });
+});
+
+describe("buildTDartsTeamRoster", () => {
+  const memberSchema = [
+    { key: "fullName", label: "Név", type: "text" as const, required: true, helpText: "", sortOrder: 0 },
+    { key: "email", label: "Email", type: "email" as const, required: false, helpText: "", sortOrder: 1 },
+  ];
+  const buyer = { name: "Buyer", email: "buyer@example.com" };
+  const member = (fullName: string, email = "") => ({ fields: { fullName, email } });
+
+  it("falls back to '<first player> +N' when the ticket has no team-name field", () => {
+    const roster = buildTDartsTeamRoster([], {}, memberSchema, [member("Anna", "a@example.com"), member("Béla"), member("Cili")], buyer);
+    expect(roster).toMatchObject({ ok: true, teamName: "Anna +2" });
+  });
+
+  it("never hands a member the buyer's email, even when the member schema has no email field at all", () => {
+    const nameOnly = [memberSchema[0]!];
+    const roster = buildTDartsTeamRoster([], {}, nameOnly, [member("Anna"), member("Béla"), member("Cili")], buyer);
+    // No own email anywhere → refused rather than enrolled under the buyer's address.
+    expect(roster).toEqual({ ok: false, error: expect.stringContaining("No team member has an email") });
+  });
+
+  it("refuses duplicate member emails and rosters that are really a pair", () => {
+    const dup = buildTDartsTeamRoster([], {}, memberSchema, [member("Anna", "x@example.com"), member("Béla", "X@example.com"), member("Cili")], buyer);
+    expect(dup).toMatchObject({ ok: false });
+    const pair = buildTDartsTeamRoster([], {}, memberSchema, [member("Anna", "a@example.com"), member("Béla")], buyer);
+    expect(pair).toMatchObject({ ok: false });
+  });
+});
+
+describe("TDartsApiError", () => {
+  it("carries tDarts' stable refusal code", async () => {
+    const creds = { apiBaseUrl: "https://api.tdarts.hu", partnerClientId: "client-1", partnerClientSecret: "secret" };
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "Registration is closed", code: "TOURNAMENT_ALREADY_STARTED" }), { status: 422 }));
+    const error = await enrollTDartsPlayer(creds, { tournamentCode: "WDF2026", email: "a@example.com", name: "A", orderId: "x" }, fetchImpl).catch((e) => e);
+    expect(error).toBeInstanceOf(TDartsApiError);
+    expect(error).toMatchObject({ status: 422, code: "TOURNAMENT_ALREADY_STARTED", message: "Registration is closed" });
   });
 });

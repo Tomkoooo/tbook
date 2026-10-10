@@ -164,3 +164,37 @@ of guessing. Lower priority than 1 and 2 — we can live without it.
 Both will be registered the same way the current enrol is — best-effort,
 per-participant status recorded on `booking.tdartsSync`, never allowed to
 fail the booking operation that triggered them.
+
+## Status — 2026-10-10: delivered for teams
+
+tDarts shipped the amend / withdraw / list endpoints for **team** enrolments
+(3+ players per ticket). The authoritative description is
+`tdarts_torunament/docs/api/partner-embed-and-enroll.md`; what differs from
+the request above:
+
+| Asked for | What tDarts built |
+|---|---|
+| `PATCH …/enrollments/{idempotencyKey}` | Same path. Body must repeat `orderId` (the signature covers the body, not the path). `members` is the whole roster afterwards. |
+| `DELETE …/enrollments/{idempotencyKey}` | `POST …/enrollments/{idempotencyKey}/withdraw` with body `{ orderId }` — same reason. Safe to repeat. A withdrawn `orderId` is spent. |
+| `partner.enrollment.list` | `GET /partner/tournaments/{code}/enrollments`, not paginated. |
+| Stable error codes | `{ error, code }` on every refusal, with a real 404/409/422 instead of 500. |
+| — | `POST …/enroll-team` enrols a whole team; `capacity` now returns `participationMode` and `teamRuleSet.minPlayers`. |
+
+Still **not** available: amend and withdraw for solo and pair enrolments
+(`422 UNSUPPORTED_ENROLLMENT_TYPE`). The `tdartsResyncRequired` banner
+therefore stays for those.
+
+What tbook does now (`packages/services/src/tdarts-sync-service.ts`,
+`tdarts-partner-client.ts`):
+
+- A paid team ticket is enrolled with `enroll-team` (it used to be marked
+  `skipped`). A member only ever gets the email typed into their own field;
+  one without becomes a guest on tDarts. A blank member name, or a team where
+  nobody has an email, is refused before any call.
+- Editing a team roster on a synced booking calls the amend endpoint
+  (`resyncBookingTeamsToTDarts`); the banner shows only if tDarts refused.
+- Admin cancellation calls withdraw (`withdrawBookingFromTDarts`); the entry
+  becomes `withdrawn`, or keeps its status with the refusal (e.g.
+  `[DRAW_ALREADY_MADE]`) in its error column.
+- Not used yet: `capacity` before payment and the list endpoint for drift
+  checks.
