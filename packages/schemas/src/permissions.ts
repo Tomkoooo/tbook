@@ -19,6 +19,7 @@ export const TBOOK_PERMISSIONS = [
   "booking:read",
   "booking:export",
   "booking:manage",
+  "sale:create",
   "voucher:read",
   "voucher:scan",
   "voucher:manage",

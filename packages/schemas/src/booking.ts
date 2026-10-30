@@ -90,14 +90,15 @@ export type Selections = z.infer<typeof selectionsSchema>;
  * How a booking was paid. The legacy system only ever had Stripe, so
  * "stripe" is the default and every existing document reads as that; the
  * rest exist for an org manager recording a payment taken outside the
- * platform (bank transfer, cash at the door, a comped entry).
+ * platform (bank transfer, cash at the door, a card taken on a terminal, a
+ * comped entry).
  */
-export const paymentMethods = ["stripe", "transfer", "cash", "comp", "other"] as const;
+export const paymentMethods = ["stripe", "transfer", "cash", "card", "comp", "other"] as const;
 export const paymentMethodSchema = z.enum(paymentMethods);
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>;
 
 /** Where a booking came from. Legacy documents have no value and read as "storefront". */
-export const bookingSources = ["storefront", "admin"] as const;
+export const bookingSources = ["storefront", "admin", "pos"] as const;
 export const bookingSourceSchema = z.enum(bookingSources);
 export type BookingSource = z.infer<typeof bookingSourceSchema>;
 

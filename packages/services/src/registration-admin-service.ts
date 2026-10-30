@@ -51,6 +51,8 @@ export interface AdminRegistrationInput {
   nights?: number | null;
   selections?: Selections;
   adminNote?: string;
+  /** Where the registration was made. Defaults to the admin console. */
+  source?: "admin" | "pos";
   /** Rules an org manager may knowingly override. All default to off. */
   overrides?: BookingPolicyOverrides;
   /** Record the registration as already paid, skipping checkout entirely. */
@@ -145,7 +147,7 @@ export async function createAdminRegistration(
   // Provenance is set after creation rather than threaded through
   // createPendingBooking, so the public path's signature stays untouched.
   await bookingRepository.updateById(bookingId, {
-    source: "admin",
+    source: input.source ?? "admin",
     createdByUserId: actor.userId ? new Types.ObjectId(actor.userId) : null,
     adminNote: input.adminNote?.trim() ?? "",
   } as Partial<IBooking>);

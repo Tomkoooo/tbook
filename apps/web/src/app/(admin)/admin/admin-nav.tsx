@@ -9,6 +9,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   ScanLine,
+  ShoppingCart,
   Ticket,
   Webhook,
   type LucideIcon,
@@ -37,8 +38,8 @@ interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** The permission the page requires; null = visible to every member. */
-  permission: string | null;
+  /** Permission(s) the page requires, any one of which suffices; null = visible to every member. */
+  permission: string | readonly string[] | null;
 }
 
 /**
@@ -57,6 +58,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Sales",
     items: [
+      { href: "/admin/sales", label: "Point of sale", icon: ShoppingCart, permission: ["sale:create", "booking:manage"] },
       { href: "/admin/bookings", label: "Bookings", icon: Ticket, permission: "booking:read" },
       { href: "/admin/check-in", label: "Check-in", icon: ScanLine, permission: "voucher:read" },
     ],
@@ -124,7 +126,9 @@ export function AdminNav({
 
       <SidebarContent>
         {GROUPS.map((group) => {
-          const items = group.items.filter((item) => !item.permission || granted.has(item.permission));
+          const items = group.items.filter(
+            (item) => !item.permission || [item.permission].flat().some((permission) => granted.has(permission)),
+          );
           if (items.length === 0) return null;
           return (
             <SidebarGroup key={group.label}>

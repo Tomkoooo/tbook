@@ -79,3 +79,13 @@ export const adminHotelInputSchema = z.object({
   packages: z.array(packageDealSchema).default([]),
 });
 export type AdminHotelInput = z.infer<typeof adminHotelInputSchema>;
+
+/**
+ * A sale made by a seller on-site. Unlike a console registration the
+ * invoice is mandatory (the seller always hands over a paid ticket and an
+ * invoice), so billing is required rather than optional, and the payment
+ * can only be a method that physically happens at the counter.
+ */
+export const posPaymentMethods = ["cash", "card"] as const;
+export const posPaymentMethodSchema = z.enum(posPaymentMethods);
+export type PosPaymentMethod = z.infer<typeof posPaymentMethodSchema>;

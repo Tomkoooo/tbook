@@ -69,5 +69,6 @@ export * from "./booking-admin-service";
 export * from "./registration-admin-service";
 export * from "./voucher-admin-service";
 export * from "./catalog-admin-service";
+export * from "./pos-service";
 export * from "./public-catalog-service";
 export * from "./bootstrap-admin";

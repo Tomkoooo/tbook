@@ -1,5 +1,7 @@
+import type { PaymentMethod } from "@tbook/schemas";
 import { bookingRepository, eventRepository, hotelRepository, organizationRepository, type IBooking } from "@tbook/db";
 import { AFTER_BOOKING_PAID_HOOKS } from "./checkout-service";
+import { sendMail, type MailTransporter } from "./mailer";
 import { storeFile } from "./media-storage";
 import { decryptOrgSecret } from "./org-secrets";
 
@@ -137,6 +139,8 @@ export interface IssueInvoiceInput {
   buyer: InvoiceBuyer;
   items: InvoiceLineItem[];
   orderNumber: string;
+  /** How the buyer paid; drives the "fizetési mód" printed on the invoice. Defaults to card. */
+  paymentMethod?: PaymentMethod;
 }
 
 export interface IssueInvoiceOutput {
@@ -163,7 +167,12 @@ export const defaultSzamlazzProvider: SzamlazzInvoiceProvider = {
     });
 
     const invoice = new Invoice({
-      paymentMethod: PaymentMethods.CreditCard,
+      paymentMethod:
+        input.paymentMethod === "cash"
+          ? PaymentMethods.Cash
+          : input.paymentMethod === "transfer"
+            ? PaymentMethods.BankTransfer
+            : PaymentMethods.CreditCard,
       currency: input.currency === "EUR" ? Currencies.EUR : Currencies.HUF,
       language: input.currency === "EUR" ? Languages.English : Languages.Hungarian,
       seller: new Seller({
@@ -201,7 +210,10 @@ export const defaultSzamlazzProvider: SzamlazzInvoiceProvider = {
  * admin retry, never thrown. Idempotent — already-issued invoices are a
  * no-op (email delivery is deferred, see file header).
  */
-export async function issueInvoiceForBooking(bookingId: string, opts?: { provider?: SzamlazzInvoiceProvider }): Promise<void> {
+export async function issueInvoiceForBooking(
+  bookingId: string,
+  opts?: { provider?: SzamlazzInvoiceProvider; transporter?: MailTransporter },
+): Promise<void> {
   const provider = opts?.provider ?? defaultSzamlazzProvider;
   const booking = await bookingRepository.findById(bookingId);
   if (!booking) return;
@@ -257,6 +269,7 @@ export async function issueInvoiceForBooking(bookingId: string, opts?: { provide
       },
       items,
       orderNumber: String(booking._id),
+      paymentMethod: booking.paymentMethod,
     });
 
     const invoicePdfFileName = result.pdfBuffer ? (await storeFile(result.pdfBuffer, { subdir: "invoices", fileName: `${result.invoiceId}.pdf` })).url : null;
@@ -267,11 +280,47 @@ export async function issueInvoiceForBooking(bookingId: string, opts?: { provide
       invoicePdfFileName,
       invoiceError: null,
     });
+
+    await emailInvoiceIfNeeded(bookingId, organizationId, result.pdfBuffer ?? null, opts?.transporter);
   } catch (error) {
     await bookingRepository.updateById(bookingId, {
       invoiceStatus: "failed",
       invoiceError: error instanceof Error ? error.message : "Invoice issuance failed.",
     });
+  }
+}
+
+/**
+ * Emails the invoice PDF to the customer, for bookings made at the counter
+ * or in the console. Storefront bookings are left alone: that flow already
+ * had its own customer communication before this existed, and sending here
+ * would double it. Never throws — a mail failure must not flip an issued
+ * invoice back to "failed".
+ */
+async function emailInvoiceIfNeeded(
+  bookingId: string,
+  organizationId: string | null,
+  pdf: Buffer | null,
+  transporter?: MailTransporter,
+): Promise<void> {
+  try {
+    const booking = await bookingRepository.findById(bookingId);
+    if (!booking || !pdf || booking.invoiceEmailSentAt) return;
+    if ((booking.source ?? "storefront") === "storefront") return;
+
+    await sendMail(
+      organizationId,
+      {
+        to: booking.customer.email,
+        subject: `Invoice for ${booking.eventName}`,
+        html: `<p>Hi ${booking.customer.name},</p><p>Thank you for your purchase of <strong>${booking.eventName}</strong>. Your invoice is attached.</p>`,
+        attachments: [{ filename: `invoice-${booking.invoiceId ?? bookingId}.pdf`, content: pdf, contentType: "application/pdf" }],
+      },
+      transporter,
+    );
+    await bookingRepository.updateById(bookingId, { invoiceEmailSentAt: new Date() });
+  } catch (error) {
+    console.error("[tbook] invoice email failed", bookingId, error);
   }
 }
 
