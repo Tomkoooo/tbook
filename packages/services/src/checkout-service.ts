@@ -296,3 +296,61 @@ export async function loadBookingForGuestCheckout(bookingId: string, stripeSessi
   }
   return booking;
 }
+
+/**
+ * Stripe webhook entry point. The route hands over the raw body and the
+ * signature header; nothing in the payload is trusted until the signature
+ * has been verified.
+ *
+ * Each organization can have its own Stripe account and so its own webhook
+ * signing secret. The secret to verify with depends on which org the event
+ * belongs to, and that is only known from inside the payload — so the
+ * unverified body is read *only* to pick candidate secrets, and the
+ * signature is then checked against those. A forged payload naming some
+ * other org still fails, because it cannot be signed with that org's secret.
+ */
+export async function handleStripeWebhook(rawBody: string, signature: string): Promise<{ handled: boolean; type: string }> {
+  let organizationId: string | null = null;
+  try {
+    const hint = JSON.parse(rawBody) as { data?: { object?: { metadata?: Record<string, string> } } };
+    organizationId = hint.data?.object?.metadata?.tBookOrganizationId || null;
+  } catch {
+    throw ActionError.validation("Invalid webhook body.");
+  }
+
+  const candidates: string[] = [];
+  if (organizationId) {
+    const org = await organizationRepository.findById(organizationId);
+    const orgSecret = decryptOrgSecret(org?.settings?.stripe?.webhookSecretEnc);
+    if (orgSecret) candidates.push(orgSecret);
+  }
+  const platformSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+  if (platformSecret) candidates.push(platformSecret);
+  if (candidates.length === 0) throw ActionError.validation("No Stripe webhook secret is configured.");
+
+  // constructEvent only does HMAC work; the key on the client is irrelevant to it.
+  const verifier = new Stripe("sk_unused", { apiVersion: STRIPE_API_VERSION });
+  let event: Stripe.Event | null = null;
+  for (const secret of candidates) {
+    try {
+      event = verifier.webhooks.constructEvent(rawBody, signature, secret);
+      break;
+    } catch {
+      // try the next candidate
+    }
+  }
+  if (!event) throw ActionError.validation("Invalid webhook signature.");
+
+  switch (event.type) {
+    case "checkout.session.completed":
+    case "checkout.session.async_payment_succeeded":
+      await finalizeBookingFromStripeSession(event.data.object as Stripe.Checkout.Session);
+      return { handled: true, type: event.type };
+    case "checkout.session.expired":
+    case "checkout.session.async_payment_failed":
+      await expireBookingFromStripeSession(event.data.object as Stripe.Checkout.Session);
+      return { handled: true, type: event.type };
+    default:
+      return { handled: false, type: event.type };
+  }
+}
