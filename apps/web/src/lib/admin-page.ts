@@ -102,3 +102,13 @@ export function formatDate(value: Date | string | null | undefined): string {
   if (!value) return "—";
   return new Intl.DateTimeFormat("hu-HU", { dateStyle: "medium" }).format(new Date(value));
 }
+
+/** `yyyy-mm-dd` for <input type="date">. */
+export function toDateInput(value: Date | string | null | undefined): string {
+  return value ? new Date(value).toISOString().slice(0, 10) : "";
+}
+
+/** `yyyy-mm-ddThh:mm` for <input type="datetime-local">. */
+export function toDateTimeInput(value: Date | string | null | undefined): string {
+  return value ? new Date(value).toISOString().slice(0, 16) : "";
+}

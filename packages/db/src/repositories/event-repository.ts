@@ -7,6 +7,16 @@ export const eventRepository = {
   findByGroupId(groupId: string): Promise<IEvent[]> {
     return EventModel.find({ groupId }).sort({ sortOrder: 1, startDate: 1 }).exec();
   },
+  /**
+   * Admin listing: an org's events by the same two-way rule as the booking
+   * scope — events carrying the organizationId, plus events of the org's
+   * groups (legacy production events have no organizationId of their own).
+   */
+  findForOrgScope(organizationId: string, groupIds: string[]): Promise<IEvent[]> {
+    return EventModel.find({ $or: [{ organizationId }, { groupId: { $in: groupIds } }] })
+      .sort({ startDate: -1 })
+      .exec();
+  },
   /** Public storefront read: active events for a group, in display order. */
   findActiveByGroupId(groupId: string): Promise<IEvent[]> {
     return EventModel.find({ groupId, status: "active" }).sort({ sortOrder: 1, startDate: 1 }).exec();

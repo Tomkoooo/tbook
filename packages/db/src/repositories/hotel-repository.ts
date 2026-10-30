@@ -7,6 +7,11 @@ export const hotelRepository = {
   findByGroupId(groupId: string): Promise<IHotel[]> {
     return HotelModel.find({ groupId }).sort({ sortOrder: 1 }).exec();
   },
+  findForOrgScope(organizationId: string, groupIds: string[]): Promise<IHotel[]> {
+    return HotelModel.find({ $or: [{ organizationId }, { groupId: { $in: groupIds } }] })
+      .sort({ name: 1 })
+      .exec();
+  },
   create(data: Partial<IHotel>): Promise<IHotel> {
     return HotelModel.create(data);
   },

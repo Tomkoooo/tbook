@@ -1,0 +1,97 @@
+import { notFound } from "next/navigation";
+import { ActionError } from "@tbook/actions";
+import { getEventForOrg, listGroupsForOrg } from "@tbook/services";
+import { PageTitle } from "@/components/page-title";
+import { requireAdminPage, toDateInput, toDateTimeInput } from "@/lib/admin-page";
+import { EventForm, type EventFormValues } from "./event-form";
+
+export const dynamic = "force-dynamic";
+
+export default async function EventPage({ params }: { params: Promise<{ eventId: string }> }) {
+  const { eventId } = await params;
+  const isNew = eventId === "new";
+  const { organizationId, permissions } = await requireAdminPage(isNew ? "event:write" : "event:read");
+
+  const groups = (await listGroupsForOrg(organizationId)).map((group) => ({ id: String(group._id), name: group.name }));
+
+  if (isNew) {
+    const today = toDateInput(new Date());
+    const initial: EventFormValues = {
+      groupId: groups[0]?.id ?? "",
+      name: "",
+      description: "",
+      address: "",
+      startDate: today,
+      endDate: today,
+      startTime: "",
+      endTime: "",
+      salesOpensAt: "",
+      salesClosesAt: "",
+      currency: "HUF",
+      ticketFeeHuf: 0,
+      ticketFeeMode: "per_person",
+      registrationUnit: "person",
+      playersPerTicket: 1,
+      ticketPriceBasis: "net",
+      ticketVatPercent: 27,
+      capacity: null,
+      vouchersEnabled: true,
+      publicListing: "listed",
+      status: "draft",
+      tdartsEnabled: false,
+      tdartsTournamentCode: "",
+    };
+    return (
+      <>
+        <PageTitle title="New event" />
+        <EventForm eventId={null} initial={initial} groups={groups} />
+      </>
+    );
+  }
+
+  const event = await getEventForOrg(organizationId, eventId).catch((error) => {
+    if (error instanceof ActionError) return null;
+    throw error;
+  });
+  if (!event) notFound();
+
+  if (!permissions.has("event:write")) {
+    return <PageTitle title={event.name} description="You have read-only access to this event." />;
+  }
+
+  return (
+    <>
+      <PageTitle title={event.name} />
+      <EventForm
+        eventId={eventId}
+        groups={groups}
+        soldGuestCount={event.soldGuestCount}
+        initial={{
+          groupId: event.groupId ? String(event.groupId) : "",
+          name: event.name,
+          description: event.description ?? "",
+          address: event.location?.address ?? "",
+          startDate: toDateInput(event.startDate),
+          endDate: toDateInput(event.endDate),
+          startTime: event.startTime ?? "",
+          endTime: event.endTime ?? "",
+          salesOpensAt: toDateTimeInput(event.salesOpensAt),
+          salesClosesAt: toDateTimeInput(event.salesClosesAt),
+          currency: event.currency,
+          ticketFeeHuf: event.ticketFeeHuf,
+          ticketFeeMode: event.ticketFeeMode,
+          registrationUnit: event.registrationUnit,
+          playersPerTicket: event.playersPerTicket,
+          ticketPriceBasis: event.ticketPriceBasis,
+          ticketVatPercent: event.ticketVatPercent,
+          capacity: event.capacity,
+          vouchersEnabled: event.vouchersEnabled,
+          publicListing: event.publicListing,
+          status: event.status,
+          tdartsEnabled: event.tdarts?.enabled ?? false,
+          tdartsTournamentCode: event.tdarts?.tournamentCode ?? "",
+        }}
+      />
+    </>
+  );
+}

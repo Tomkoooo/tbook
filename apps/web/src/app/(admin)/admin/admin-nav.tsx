@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ChevronsUpDown,
+  BedDouble,
+  CalendarDays,
+  FolderKanban,
   LayoutDashboard,
   ScanLine,
   Ticket,
@@ -56,6 +59,14 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/admin/bookings", label: "Bookings", icon: Ticket, permission: "booking:read" },
       { href: "/admin/check-in", label: "Check-in", icon: ScanLine, permission: "voucher:read" },
+    ],
+  },
+  {
+    label: "Catalog",
+    items: [
+      { href: "/admin/groups", label: "Event groups", icon: FolderKanban, permission: "group:read" },
+      { href: "/admin/events", label: "Events", icon: CalendarDays, permission: "event:read" },
+      { href: "/admin/hotels", label: "Hotels", icon: BedDouble, permission: "hotel:read" },
     ],
   },
   {
