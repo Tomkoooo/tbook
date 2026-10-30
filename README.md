@@ -138,6 +138,41 @@ the extension point is `AFTER_BOOKING_PAID_HOOKS` in
 `packages/services/src/checkout-service.ts` — invoicing, tDarts sync,
 voucher delivery and webhook dispatch all register into it the same way.
 
+## Day-pass events
+
+An event with `kind: "day_pass"` sells passes for individual days of a
+long run (say a month), at a weekday or weekend price, with a capacity per
+day. Backwards compatible: every existing event is `kind: "standard"` and
+behaves exactly as before.
+
+On the public API, `GET /api/v1/events` returns `kind` and, for a day-pass
+event, `dayPass.days[]` — `{ date, weekend, unitPriceGrossHuf, remaining,
+closed, bookable }` per day (sold counts are never exposed). The buyer's
+basket travels in `selections`:
+
+```json
+POST /api/v1/quote   (and POST /api/v1/bookings)
+{ "eventId": "…", "guests": 1, "customer": { … },
+  "selections": { "dayPasses": { "2026-07-04": 2, "2026-07-05": 1 } } }
+```
+
+`guests` is ignored for a day-pass event — the size of the basket decides
+it. Reserving the basket is all-or-nothing: every day's counter lives on
+the event document, so one atomic update checks and increments them all
+(`eventRepository.reserveDayCapacity`). Each ticket becomes a voucher dated
+to its day; the door scanner answers `wrong_day` outside that date (the
+venue's time zone is `Europe/Budapest`).
+
+## Point of sale
+
+`/admin/sales` is the seller screen: pick an event (or, for a day-pass
+event, the days), take cash or card, enter the customer and billing
+details. The sale is recorded as paid (`source: "pos"`), the ticket PDF is
+emailed, the Számlázz.hu invoice is issued with the real payment method
+and its PDF is emailed too. A seller needs the `sale:create` permission;
+`booking:manage` also works, so existing Owner roles can sell without a
+role edit. A seller can never override capacity or the sales window.
+
 ## Backwards compatibility
 
 - Same MongoDB collections/fields as the legacy plugin (see
