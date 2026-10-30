@@ -123,6 +123,29 @@ export const invoiceSources = ["szamlazz", "manual"] as const;
 export const invoiceSourceSchema = z.enum(invoiceSources);
 export type InvoiceSource = z.infer<typeof invoiceSourceSchema>;
 
+/**
+ * A card payment collected through a SumUp Solo reader. Kept on the booking
+ * so a webhook (or a poll) arriving later can find which sale it settles,
+ * and so a failed or abandoned attempt leaves a record of why.
+ */
+export const cardCheckoutStatuses = ["waiting", "successful", "failed", "cancelled"] as const;
+export const cardCheckoutSchema = z.object({
+  provider: z.literal("sumup").default("sumup"),
+  readerId: z.string(),
+  readerName: z.string().default(""),
+  /** SumUp's id for the in-flight transaction; the webhook and status lookups key on it. */
+  clientTransactionId: z.string(),
+  /** Random path segment of the webhook URL we gave SumUp for this one checkout. */
+  webhookToken: z.string(),
+  status: z.enum(cardCheckoutStatuses).default("waiting"),
+  failureReason: z.string().nullable().default(null),
+  /** SumUp's transaction code once paid — the number printed on the customer's receipt. */
+  transactionCode: z.string().nullable().default(null),
+  startedAt: z.date(),
+  settledAt: z.date().nullable().default(null),
+});
+export type CardCheckout = z.infer<typeof cardCheckoutSchema>;
+
 export const bookingSchema = z.object({
   id: objectIdSchema,
   organizationId: objectIdSchema.nullable().default(null),
@@ -173,6 +196,8 @@ export const bookingSchema = z.object({
   invoiceSource: invoiceSourceSchema.default("szamlazz"),
   /** Human-readable invoice number when recorded manually (invoiceId stays the provider's id). */
   invoiceNumber: z.string().nullable().default(null),
+  /** Present when a seller charged the card on a SumUp reader from the point of sale. */
+  cardCheckout: cardCheckoutSchema.nullable().default(null),
   /** Free-form admin note, separate from the guest's own checkout note. */
   adminNote: z.string().default(""),
   createdAt: z.date(),

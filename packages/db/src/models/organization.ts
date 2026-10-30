@@ -60,6 +60,26 @@ const TDartsSettingsSchema = new Schema(
   { _id: false },
 );
 
+const SumUpSettingsSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    merchantCode: { type: String, default: "" },
+    apiKeyEnc: { type: String, default: "" },
+    affiliateAppId: { type: String, default: "" },
+    affiliateKeyEnc: { type: String, default: "" },
+    readers: {
+      type: [
+        new Schema(
+          { id: { type: String, required: true }, name: { type: String, required: true }, model: { type: String, default: "solo" } },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+  },
+  { _id: false },
+);
+
 const EmailTemplateOverrideSchema = new Schema(
   {
     subject: { type: String, default: "" },
@@ -102,6 +122,7 @@ const OrganizationSchema = new Schema<IOrganization>(
       },
       voucherPdfLayout: { type: Schema.Types.Mixed, default: undefined },
       tdarts: { type: TDartsSettingsSchema, default: undefined },
+      sumup: { type: SumUpSettingsSchema, default: undefined },
       webhooks: { type: [WebhookSchema], default: undefined },
     },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },

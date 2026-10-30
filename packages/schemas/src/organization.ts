@@ -47,6 +47,32 @@ export const orgTDartsSettingsSchema = z.object({
   partnerClientSecretEnc: z.string().default(""),
 });
 
+/**
+ * SumUp card terminals, driven remotely by the Cloud API. Only SumUp Solo
+ * readers support this; other terminals (Air, 3G, PIN+) can't be paired, so
+ * a seller keeps recording those card payments by hand.
+ */
+export const orgSumUpReaderSchema = z.object({
+  /** SumUp's reader id, returned when the reader is paired. */
+  id: z.string().min(1),
+  name: z.string().min(1),
+  /** "solo" or "virtual-solo" (the sandbox simulator). */
+  model: z.string().default("solo"),
+});
+export type OrgSumUpReader = z.infer<typeof orgSumUpReaderSchema>;
+
+export const orgSumUpSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** The merchant's short code, e.g. "MH4H92C7". */
+  merchantCode: z.string().default(""),
+  apiKeyEnc: z.string().default(""),
+  /** Affiliate app id and key (required by SumUp on every reader checkout). */
+  affiliateAppId: z.string().default(""),
+  affiliateKeyEnc: z.string().default(""),
+  readers: z.array(orgSumUpReaderSchema).default([]),
+});
+export type OrgSumUpSettings = z.infer<typeof orgSumUpSettingsSchema>;
+
 export const orgEmailTemplateOverrideSchema = z.object({
   subject: z.string().default(""),
   body: z.string().default(""),
@@ -102,6 +128,7 @@ export const organizationSettingsSchema = z.object({
   // reads this at render time, tolerating legacy/malformed data.
   voucherPdfLayout: voucherPdfLayoutSchema.nullable().default(null),
   tdarts: orgTDartsSettingsSchema.optional(),
+  sumup: orgSumUpSettingsSchema.optional(),
   /** Outbound webhook endpoints. Absent/empty means this org has none. */
   webhooks: z.array(orgWebhookSchema).default([]),
 });

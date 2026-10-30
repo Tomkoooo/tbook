@@ -82,6 +82,34 @@ export const bookingRepository = {
   findByStripeSessionId(stripeSessionId: string): Promise<IBooking | null> {
     return BookingModel.findOne({ stripeSessionId }).exec();
   },
+  /** SumUp webhook lookup: the random token we put in that checkout's return URL. */
+  findByCardCheckoutToken(token: string): Promise<IBooking | null> {
+    return BookingModel.findOne({ "cardCheckout.webhookToken": token }).exec();
+  },
+  /**
+   * Moves a card checkout out of "waiting", once. The status condition makes
+   * it a compare-and-set: a webhook and a poll settling the same checkout at
+   * the same moment cannot both win, so only one runs the after-payment
+   * pipeline.
+   */
+  settleCardCheckout(
+    bookingId: string,
+    status: "successful" | "failed" | "cancelled",
+    patch: { failureReason?: string | null; transactionCode?: string | null },
+  ): Promise<IBooking | null> {
+    return BookingModel.findOneAndUpdate(
+      { _id: bookingId, "cardCheckout.status": "waiting" },
+      {
+        $set: {
+          "cardCheckout.status": status,
+          "cardCheckout.failureReason": patch.failureReason ?? null,
+          "cardCheckout.transactionCode": patch.transactionCode ?? null,
+          "cardCheckout.settledAt": new Date(),
+        },
+      },
+      { returnDocument: "after" },
+    ).exec();
+  },
   findByCheckoutBundleId(checkoutBundleId: string): Promise<IBooking[]> {
     return BookingModel.find({ checkoutBundleId }).exec();
   },

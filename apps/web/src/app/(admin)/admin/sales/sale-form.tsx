@@ -1,19 +1,26 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Banknote, CheckCircle2, CreditCard, Minus, Plus } from "lucide-react";
+import { Banknote, CheckCircle2, CreditCard, Loader2, Minus, Plus } from "lucide-react";
 import type { AttendeeFieldDef } from "@tbook/schemas";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { FormField, ResultNotice } from "@/components/form-bits";
+import { FormField, NativeSelect, ResultNotice } from "@/components/form-bits";
 import { cn } from "@/lib/utils";
 import { AttendeeFields } from "../bookings/new/attendee-fields";
-import { createPosSaleAction, type PosSaleActionResult } from "../sales-actions";
+import type { PosSaleResult } from "@tbook/services";
+import {
+  cancelCardSaleAction,
+  createPosSaleAction,
+  pollCardSaleAction,
+  startCardSaleAction,
+  type PosSaleActionResult,
+} from "../sales-actions";
 
 const METHODS = [
   { value: "cash", label: "Cash", icon: Banknote },
@@ -36,7 +43,9 @@ export function SaleForm({
   total: totalFromServer,
   attendeeFields,
   teamMemberFields,
+  readers,
 }: {
+  readers: Array<{ id: string; name: string }>;
   event: { id: string; teamMemberLimit: number | null; playersPerTicket: number };
   tickets: number;
   /** Present for day-pass events: the days a seller can put in the basket. */
@@ -71,17 +80,40 @@ export function SaleForm({
       return next;
     });
   }
-  const [state, action, pending] = useActionState(
-    async (_prev: PosSaleActionResult | null, formData: FormData) => createPosSaleAction(formData),
-    null,
-  );
+  // "reader" pushes the amount to a SumUp Solo; "manual" records a card the seller took some other way.
+  const [cardMode, setCardMode] = useState<"reader" | "manual">(readers.length > 0 ? "reader" : "manual");
+  const [waitingFor, setWaitingFor] = useState<string | null>(null);
+  const [paidSale, setPaidSale] = useState<PosSaleResult | null>(null);
+  const [cardMessage, setCardMessage] = useState<string | null>(null);
+
+  const [state, action, pending] = useActionState(async (_prev: PosSaleActionResult | null, formData: FormData) => {
+    if (method === "card" && cardMode === "reader") {
+      setCardMessage(null);
+      const started = await startCardSaleAction(formData);
+      if (started.ok && started.bookingId) setWaitingFor(started.bookingId);
+      return started.ok ? null : { ok: false, message: started.message };
+    }
+    return createPosSaleAction(formData);
+  }, null);
+
+  function finishCardSale(result: { state?: string; sale?: PosSaleResult; message?: string }) {
+    if (result.state === "paid" && result.sale) {
+      setPaidSale(result.sale);
+      setWaitingFor(null);
+    } else if (result.state && result.state !== "waiting") {
+      // Declined, cancelled or mismatched: back to the form, which kept everything typed.
+      setCardMessage(result.message ?? "The card payment did not go through.");
+      setWaitingFor(null);
+    }
+  }
 
   const isTeam = teamMemberFields.length > 0;
   const rosterSize = event.playersPerTicket > 1 ? event.playersPerTicket : null;
   const money = (amount: number) => `${amount.toLocaleString("hu-HU")} ${currency}`;
 
-  if (state?.ok && state.sale && state.sale.bookingId !== dismissedId) {
-    const sale = state.sale;
+  const completedSale = paidSale ?? (state?.ok ? (state.sale ?? null) : null);
+  if (completedSale && completedSale.bookingId !== dismissedId) {
+    const sale = completedSale;
     return (
       <Card className="max-w-2xl">
         <CardHeader>
@@ -121,7 +153,9 @@ export function SaleForm({
   }
 
   return (
-    <form action={action} className="grid max-w-3xl gap-6">
+    <>
+      {waitingFor ? <CardWaiting bookingId={waitingFor} total={money(total)} onResult={finishCardSale} /> : null}
+    <form action={action} className={cn("grid max-w-3xl gap-6", waitingFor && "hidden")}>
       <input type="hidden" name="eventId" value={event.id} />
       <input type="hidden" name="paymentMethod" value={method} />
       <input type="hidden" name="tickets" value={Math.max(tickets, 1)} />
@@ -315,24 +349,116 @@ export function SaleForm({
               </button>
             ))}
           </div>
-          <FormField
-            label={method === "card" ? "Terminal receipt / transaction no. (optional)" : "Receipt no. (optional)"}
-            htmlFor="reference"
-          >
-            <Input id="reference" name="reference" autoComplete="off" />
-          </FormField>
+          {method === "card" && readers.length > 0 ? (
+            <div className="grid gap-3 rounded-lg border p-3">
+              <div className="flex gap-4 text-sm">
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={cardMode === "reader"} onChange={() => setCardMode("reader")} /> Charge on a SumUp reader
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={cardMode === "manual"} onChange={() => setCardMode("manual")} /> Already taken another way
+                </label>
+              </div>
+              {cardMode === "reader" ? (
+                <FormField label="Reader" htmlFor="readerId" hint="The amount appears on the reader for the customer to tap or insert their card.">
+                  <NativeSelect id="readerId" name="readerId" defaultValue={readers[0]?.id}>
+                    {readers.map((reader) => (
+                      <option key={reader.id} value={reader.id}>
+                        {reader.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </FormField>
+              ) : null}
+            </div>
+          ) : null}
+          {method === "cash" || cardMode === "manual" || readers.length === 0 ? (
+            <FormField
+              label={method === "card" ? "Terminal receipt / transaction no. (optional)" : "Receipt no. (optional)"}
+              htmlFor="reference"
+            >
+              <Input id="reference" name="reference" autoComplete="off" />
+            </FormField>
+          ) : null}
           <FormField label="Internal note (optional)" htmlFor="note">
             <Input id="note" name="note" placeholder="Never shown to the customer" />
           </FormField>
         </CardContent>
       </Card>
 
+      {cardMessage ? (
+        <Alert variant="destructive">
+          <AlertDescription>{cardMessage}</AlertDescription>
+        </Alert>
+      ) : null}
       <ResultNotice result={state && !state.ok ? state : null} />
       <div>
         <Button type="submit" size="lg" disabled={pending || (dayOptions !== null && tickets === 0)}>
-          {pending ? "Processing…" : `Record ${method} payment of ${money(total)} & send`}
+          {pending
+            ? "Processing…"
+            : method === "card" && cardMode === "reader" && readers.length > 0
+              ? `Send ${money(total)} to the reader`
+              : `Record ${method} payment of ${money(total)} & send`}
         </Button>
       </div>
     </form>
+    </>
+  );
+}
+
+/**
+ * Shown while the customer pays on the reader. Polls the server, which
+ * asks SumUp what happened — so it works even when SumUp's webhook can't
+ * reach the app (local development, a firewall).
+ */
+function CardWaiting({
+  bookingId,
+  total,
+  onResult,
+}: {
+  bookingId: string;
+  total: string;
+  onResult: (result: { state?: string; sale?: PosSaleResult; message?: string }) => void;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  // Kept in a ref so a re-render of the parent doesn't restart the polling timer.
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
+
+  useEffect(() => {
+    let stopped = false;
+    const timer = setInterval(async () => {
+      const result = await pollCardSaleAction(bookingId);
+      if (!stopped && result.state !== "waiting") onResultRef.current(result);
+    }, 2500);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [bookingId]);
+
+  return (
+    <Card className="max-w-2xl">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Loader2 className="size-5 animate-spin" /> Waiting for the customer to pay {total}
+        </CardTitle>
+        <CardDescription>Ask the customer to tap or insert their card on the reader. This screen updates by itself.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={cancelling}
+          onClick={async () => {
+            setCancelling(true);
+            onResult(await cancelCardSaleAction(bookingId));
+            setCancelling(false);
+          }}
+        >
+          {cancelling ? "Cancelling…" : "Cancel payment"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

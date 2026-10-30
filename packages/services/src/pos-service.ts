@@ -44,14 +44,10 @@ export interface PosSaleResult {
   invoiceEmailed: boolean;
 }
 
-export async function createPosSale(
-  organizationId: string,
-  input: PosSaleInput,
-  actor: { userId: string | null },
-): Promise<PosSaleResult> {
+export function posRegistration(input: PosSaleInput): AdminRegistrationInput {
   if (!input.billing) throw ActionError.validation("Billing details are required so an invoice can be issued.");
 
-  const registration: AdminRegistrationInput = {
+  return {
     eventId: input.eventId,
     guests: input.tickets,
     customer: input.customer,
@@ -63,23 +59,39 @@ export async function createPosSale(
     // No overrides: a seller must not be able to sell past capacity or
     // outside the sales window. Only a console manager can do that.
     overrides: {},
+  };
+}
+
+export async function createPosSale(
+  organizationId: string,
+  input: PosSaleInput,
+  actor: { userId: string | null },
+): Promise<PosSaleResult> {
+  const registration: AdminRegistrationInput = {
+    ...posRegistration(input),
     markPaid: { method: input.paymentMethod, reference: input.reference },
   };
 
   const { booking } = await createAdminRegistration(organizationId, registration, actor);
-  const fresh = (await bookingRepository.findById(String(booking._id))) ?? booking;
+  return buildPosSaleResult(String(booking._id));
+}
+
+/** Reads back what a finished sale produced: tickets, invoice state and whether the invoice mail went out. */
+export async function buildPosSaleResult(bookingId: string): Promise<PosSaleResult> {
+  const booking = await bookingRepository.findById(bookingId);
+  if (!booking) throw ActionError.notFound("Booking not found");
 
   const { voucherRepository } = await import("@tbook/db");
-  const vouchers = await voucherRepository.findByBookingId(String(fresh._id));
+  const vouchers = await voucherRepository.findByBookingId(bookingId);
 
   return {
-    bookingId: String(fresh._id),
-    totalHuf: fresh.totalHuf,
-    currency: fresh.currency,
+    bookingId,
+    totalHuf: booking.totalHuf,
+    currency: booking.currency,
     vouchersIssued: vouchers.length,
-    invoiceStatus: fresh.invoiceStatus,
-    invoiceError: fresh.invoiceError ?? null,
-    invoiceEmailed: Boolean(fresh.invoiceEmailSentAt),
+    invoiceStatus: booking.invoiceStatus,
+    invoiceError: booking.invoiceError ?? null,
+    invoiceEmailed: Boolean(booking.invoiceEmailSentAt),
   };
 }
 

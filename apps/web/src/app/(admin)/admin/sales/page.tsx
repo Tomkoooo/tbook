@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Ticket } from "lucide-react";
 import { ActionError } from "@tbook/actions";
-import { getDayPassSaleOptions, listRegistrableEvents, previewAdminRegistration } from "@tbook/services";
+import { getDayPassSaleOptions, listRegistrableEvents, listSellableReaders, previewAdminRegistration } from "@tbook/services";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +28,7 @@ export default async function SalesPage({
   }
 
   const { eventId, tickets: rawTickets } = await searchParams;
+  const readers = await listSellableReaders(organizationId);
   const events = (await listRegistrableEvents(organizationId)).filter((event) => event.status === "active");
   const tickets = Math.min(Math.max(Number(rawTickets ?? 1) || 1, 1), 50);
   const selected = eventId ? events.find((event) => event.id === eventId) : undefined;
@@ -122,6 +123,7 @@ export default async function SalesPage({
             teamMemberLimit: selected.teamMemberLimit,
             playersPerTicket: selected.playersPerTicket,
           }}
+          readers={readers.map((reader) => ({ id: reader.id, name: reader.name }))}
           tickets={tickets}
           dayOptions={dayOptions?.days ?? null}
           currency={preview.event.currency}

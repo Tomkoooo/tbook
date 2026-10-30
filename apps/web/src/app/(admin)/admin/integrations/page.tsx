@@ -1,7 +1,8 @@
-import { listWebhooks } from "@tbook/services";
+import { getSumUpSettings, listWebhooks } from "@tbook/services";
 import { webhookEventTypes } from "@tbook/schemas";
 import { Badge, Card, EmptyState, PageHeader, Table } from "@tbook/ui";
 import { formatDateTime, requireAdminPage } from "@/lib/admin-page";
+import { SumUpCard } from "./sumup-card";
 import { WebhookForm } from "./webhook-form";
 import { WebhookRowActions } from "./webhook-row-actions";
 
@@ -15,7 +16,8 @@ export const dynamic = "force-dynamic";
 
 export default async function IntegrationsPage() {
   const { organizationId } = await requireAdminPage("org:update");
-  const webhooks = await listWebhooks(organizationId);
+  const [webhooks, sumup] = await Promise.all([listWebhooks(organizationId), getSumUpSettings(organizationId)]);
+  const webhookReachable = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().startsWith("https://");
 
   return (
     <>
@@ -23,6 +25,8 @@ export default async function IntegrationsPage() {
         title="Integrations"
         description="Send booking and check-in events to another system as they happen."
       />
+
+      <SumUpCard {...sumup} webhookReachable={webhookReachable} />
 
       <Card title="Endpoints">
         <div className="tbook-card-body-flush">

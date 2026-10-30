@@ -6,6 +6,7 @@ import {
   invoiceSources,
   invoiceStatuses,
   paymentMethods,
+  cardCheckoutStatuses,
   tdartsSyncStatuses,
   type Booking,
 } from "@tbook/schemas";
@@ -86,6 +87,22 @@ const OfflinePaymentSchema = new Schema(
   { _id: false },
 );
 
+const CardCheckoutSchema = new Schema(
+  {
+    provider: { type: String, default: "sumup" },
+    readerId: { type: String, required: true },
+    readerName: { type: String, default: "" },
+    clientTransactionId: { type: String, required: true },
+    webhookToken: { type: String, required: true },
+    status: { type: String, enum: cardCheckoutStatuses, default: "waiting" },
+    failureReason: { type: String, default: null },
+    transactionCode: { type: String, default: null },
+    startedAt: { type: Date, required: true },
+    settledAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const BookingSchema = new Schema<IBooking>(
   {
     organizationId: { type: Schema.Types.ObjectId, ref: "TBookOrganization", default: null, index: true },
@@ -131,6 +148,7 @@ const BookingSchema = new Schema<IBooking>(
     offlinePayment: { type: OfflinePaymentSchema, default: null },
     invoiceSource: { type: String, enum: invoiceSources, default: "szamlazz" },
     invoiceNumber: { type: String, default: null },
+    cardCheckout: { type: CardCheckoutSchema, default: null },
     adminNote: { type: String, default: "" },
   },
   { timestamps: true },
