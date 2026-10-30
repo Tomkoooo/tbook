@@ -5,6 +5,9 @@ import { getActiveOrganizationIdFromCookie } from "@/lib/org-cookie";
 import { organizationRepository } from "@tbook/db";
 import { resolveMembershipPermissions } from "@tbook/services";
 import { TBOOK_OWNER_PERMISSIONS } from "@tbook/schemas";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { AdminHeader } from "./admin-header";
 import { AdminNav } from "./admin-nav";
 
 /**
@@ -43,14 +46,19 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       : [...((await resolveMembershipPermissions(activeOrgId, user.id))?.permissions ?? [])];
 
   return (
-    <div className="tbook-admin">
-      <AdminNav
-        organizationName={activeOrg?.name ?? null}
-        userEmail={user.email}
-        isSystemAdmin={user.isSystemAdmin}
-        permissions={permissions}
-      />
-      <main className="tbook-admin-main">{children}</main>
-    </div>
+    <TooltipProvider>
+      <SidebarProvider>
+        <AdminNav
+          organizationName={activeOrg?.name ?? null}
+          userEmail={user.email}
+          isSystemAdmin={user.isSystemAdmin}
+          permissions={permissions}
+        />
+        <SidebarInset>
+          <AdminHeader />
+          <main className="tbook-admin-main w-full">{children}</main>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }

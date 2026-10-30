@@ -12,6 +12,14 @@
  * below hardcodes a colour.
  */
 
+/* Tailwind theme + utilities only. Preflight is left out on purpose: the
+ * legacy `tbook-*` pages still depend on the browser defaults it would reset. */
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
 :root {
   --tbook-bg: #f6f7f9;
   --tbook-surface: #ffffff;
@@ -691,4 +699,71 @@ a {
     grid-template-columns: 1fr;
     gap: 2px;
   }
+}
+
+/* ---- shadcn semantic tokens, mapped onto the tbook palette ------------
+ * One source of truth: the shadcn names resolve to the --tbook-* tokens, so
+ * light/dark switching (prefers-color-scheme and data-theme) keeps working
+ * for both the legacy pages and the shadcn components. */
+:root {
+  --background: var(--tbook-bg);
+  --foreground: var(--tbook-text);
+  --card: var(--tbook-surface);
+  --card-foreground: var(--tbook-text);
+  --popover: var(--tbook-surface);
+  --popover-foreground: var(--tbook-text);
+  --primary: var(--tbook-accent);
+  --primary-foreground: var(--tbook-accent-text);
+  --secondary: var(--tbook-neutral-bg);
+  --secondary-foreground: var(--tbook-text);
+  --muted: var(--tbook-surface-alt);
+  --muted-foreground: var(--tbook-text-muted);
+  --accent: var(--tbook-info-bg);
+  --accent-foreground: var(--tbook-info-text);
+  --destructive: #d13b3b;
+  --border: var(--tbook-border);
+  --input: var(--tbook-border-strong);
+  --ring: var(--tbook-accent);
+  --radius: 0.5rem;
+  --sidebar: var(--tbook-surface);
+  --sidebar-foreground: var(--tbook-text-muted);
+  --sidebar-primary: var(--tbook-accent);
+  --sidebar-primary-foreground: var(--tbook-accent-text);
+  --sidebar-accent: var(--tbook-info-bg);
+  --sidebar-accent-foreground: var(--tbook-info-text);
+  --sidebar-border: var(--tbook-border);
+  --sidebar-ring: var(--tbook-accent);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }

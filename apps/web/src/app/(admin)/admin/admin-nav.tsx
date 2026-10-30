@@ -2,26 +2,71 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  ChevronsUpDown,
+  LayoutDashboard,
+  ScanLine,
+  Ticket,
+  Webhook,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+} from "@/components/ui/sidebar";
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  /** The permission the page requires; null = visible to every member. */
+  permission: string | null;
+}
 
 /**
- * Each link carries the permission its page requires, so the nav shows
+ * Each link carries the permission its page requires, so the sidebar shows
  * only what this member can actually open — otherwise a Viewer sees
  * "Integrations", clicks it, and gets bounced back to the dashboard with a
  * permission error, which reads as a broken console rather than a
  * deliberate restriction. The pages enforce it regardless; this is the
  * affordance.
  */
-const LINKS = [
-  { href: "/admin", label: "Dashboard", permission: null },
-  { href: "/admin/bookings", label: "Bookings", permission: "booking:read" },
-  { href: "/admin/check-in", label: "Check-in", permission: "voucher:read" },
-  { href: "/admin/integrations", label: "Integrations", permission: "org:update" },
-] as const;
+const GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Overview",
+    items: [{ href: "/admin", label: "Dashboard", icon: LayoutDashboard, permission: null }],
+  },
+  {
+    label: "Sales",
+    items: [
+      { href: "/admin/bookings", label: "Bookings", icon: Ticket, permission: "booking:read" },
+      { href: "/admin/check-in", label: "Check-in", icon: ScanLine, permission: "voucher:read" },
+    ],
+  },
+  {
+    label: "Settings",
+    items: [{ href: "/admin/integrations", label: "Integrations", icon: Webhook, permission: "org:update" }],
+  },
+];
 
 /**
  * Client component purely so the active link can be marked from the
- * pathname — `usePathname` has no server equivalent, and `aria-current`
- * matters more here than shaving a few kB of JS off an admin console.
+ * pathname — `usePathname` has no server equivalent.
  */
 export function AdminNav({
   organizationName,
@@ -37,41 +82,70 @@ export function AdminNav({
 }) {
   const pathname = usePathname();
   const granted = new Set(permissions);
-  const visible = LINKS.filter((link) => !link.permission || granted.has(link.permission));
 
   return (
-    <div className="tbook-admin-bar">
-      <Link className="tbook-admin-brand" href="/admin">
-        tBook
-      </Link>
+    <Sidebar collapsible="icon">
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
+                  <div className="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg text-sm font-semibold">
+                    {(organizationName ?? "t").slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-semibold">{organizationName ?? "No organization"}</span>
+                    <span className="truncate text-xs">tBook{isSystemAdmin ? " · system admin" : ""}</span>
+                  </div>
+                  <ChevronsUpDown className="ml-auto size-4" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width) min-w-56" align="start">
+                <DropdownMenuItem asChild>
+                  <Link href="/admin/select-org">Switch organization</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
 
-      <nav className="tbook-admin-nav">
-        {visible.map((link) => {
-          const active = link.href === "/admin" ? pathname === "/admin" : pathname.startsWith(link.href);
+      <SidebarContent>
+        {GROUPS.map((group) => {
+          const items = group.items.filter((item) => !item.permission || granted.has(item.permission));
+          if (items.length === 0) return null;
           return (
-            <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined}>
-              {link.label}
-            </Link>
+            <SidebarGroup key={group.label}>
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {items.map((item) => {
+                    const active = item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
+                    return (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
+                          <Link href={item.href} aria-current={active ? "page" : undefined}>
+                            <item.icon />
+                            <span>{item.label}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
           );
         })}
-      </nav>
+      </SidebarContent>
 
-      <div className="tbook-admin-bar-end">
-        {organizationName ? (
-          <>
-            <span>{organizationName}</span>
-            <Link className="tbook-btn tbook-btn-ghost tbook-btn-sm" href="/admin/select-org">
-              Switch
-            </Link>
-          </>
-        ) : (
-          <Link className="tbook-btn tbook-btn-secondary tbook-btn-sm" href="/admin/select-org">
-            Select organization
-          </Link>
-        )}
-        {isSystemAdmin ? <span className="tbook-badge tbook-badge-info">System admin</span> : null}
-        <span className="tbook-faint">{userEmail}</span>
-      </div>
-    </div>
+      <SidebarFooter>
+        <p className="text-muted-foreground truncate px-2 text-xs group-data-[collapsible=icon]:hidden">
+          {userEmail}
+        </p>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
   );
 }
