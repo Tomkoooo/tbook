@@ -8,6 +8,7 @@ const RESULT_TONES: Record<string, string> = {
   valid: "success",
   duplicate: "warning",
   wrong_event: "warning",
+  wrong_day: "warning",
   invalid: "danger",
 };
 
@@ -15,6 +16,7 @@ const RESULT_TITLES: Record<string, string> = {
   valid: "Admitted",
   duplicate: "Already checked in",
   wrong_event: "Wrong event",
+  wrong_day: "Wrong day",
   invalid: "Not valid",
 };
 

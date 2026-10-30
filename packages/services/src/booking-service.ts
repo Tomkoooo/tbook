@@ -11,15 +11,23 @@ import {
   type IHotel,
 } from "@tbook/db";
 import {
+  DAY_PASS_SELECTION_KEY,
   calculateBookingQuote,
+  calculateDayPassQuote,
+  dayCapacity,
   normalizeHotelPricing,
   packageUnitsFromSelections,
   remainingHotelBookingCapacity,
   remainingHotelRoomInventory,
+  parseDayTickets,
+  todayDayKey,
+  totalDayTickets,
   totalPackageUnits,
+  validateDayTickets,
   validateEligibility,
   validateHotelSelections,
   validateSelections,
+  type DayTickets,
   type EligibilityRulesConfig,
   type PriceQuoteResult,
 } from "@tbook/domain";
@@ -87,6 +95,14 @@ export interface QuoteRequest {
 
 export interface BookingQuoteContext {
   event: IEvent;
+  /**
+   * Entries being bought. Equals the requested `guests` for a standard
+   * event; for a day-pass event it is the size of the day basket, because
+   * the basket — not a separate number — is what the buyer is paying for.
+   */
+  guests: number;
+  /** The validated day basket (day-pass events only). */
+  dayTickets: DayTickets | null;
   quote: PriceQuoteResult;
   hotelName: string;
   nights: number;
@@ -136,6 +152,9 @@ export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<B
   }
 
   const group = event.groupId ? await eventGroupRepository.findById(String(event.groupId)) : null;
+
+  if (event.kind === "day_pass") return quoteDayPass(event, group, input, opts);
+
   const groupOptions = group?.defaultBookingOptions ?? [];
 
   const selections: Selections = input.selections ?? {};
@@ -199,6 +218,8 @@ export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<B
 
   return {
     event,
+    guests: input.guests,
+    dayTickets: null,
     quote: quoteResult,
     hotelName,
     nights: quoteResult.nights,
@@ -212,6 +233,71 @@ export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<B
         mode: event.attendeeFieldSchemaMode,
       }),
       hotelRegistrationFields,
+    ),
+    teamMemberFieldSchema: resolveTeamMemberFieldSchema({
+      registrationUnit: event.registrationUnit,
+      groupSchema: group?.defaultAttendeeFieldSchema,
+      eventTeamMemberSchema: event.teamMemberFieldSchema,
+      eventTicketSchema: event.attendeeFieldSchema,
+      mode: event.attendeeFieldSchemaMode,
+    }),
+  };
+}
+
+/**
+ * Quote for a day-pass event: the buyer's basket of `date → passes` is the
+ * whole order. Hotels and group add-ons are deliberately not combined with
+ * passes — a day pass is a ticket for one day, not a stay.
+ */
+async function quoteDayPass(
+  event: IEvent,
+  group: Awaited<ReturnType<typeof eventGroupRepository.findById>>,
+  input: QuoteRequest,
+  opts?: QuoteOptions,
+): Promise<BookingQuoteContext> {
+  if (!event.dayPass) throw ActionError.validation("This day-pass event has no pass pricing configured.");
+
+  const { tickets, errors } = parseDayTickets((input.selections ?? {}) as Record<string, unknown>);
+  if (errors.length > 0) throw ActionError.validation(errors.join(" "), { errors });
+
+  const issues = validateDayTickets({
+    config: event.dayPass,
+    startDate: event.startDate,
+    endDate: event.endDate,
+    tickets,
+    daySold: event.daySold as Record<string, number> | undefined,
+    today: todayDayKey(new Date()),
+    // Selling a day that has started is a counter/console decision, tied to
+    // the same override that lets a manager sell outside the sales window.
+    allowPastDays: opts?.allowClosedSales,
+    allowOverCapacity: opts?.allowOverCapacity,
+  });
+  if (issues.length > 0) throw ActionError.validation(issues.map((issue) => issue.message).join(" "), { issues });
+
+  const priceQuote = calculateDayPassQuote({
+    config: event.dayPass,
+    tickets,
+    priceBasis: event.ticketPriceBasis,
+    vatPercent: event.ticketVatPercent,
+  });
+
+  return {
+    event,
+    guests: totalDayTickets(tickets),
+    dayTickets: tickets,
+    quote: priceQuote,
+    hotelName: "",
+    nights: 0,
+    selections: { [DAY_PASS_SELECTION_KEY]: tickets },
+    currency: event.currency,
+    registrationFieldSchema: mergeRegistrationFieldSchemas(
+      resolveTicketAttendeeFieldSchema({
+        registrationUnit: event.registrationUnit,
+        groupSchema: group?.defaultAttendeeFieldSchema,
+        eventSchema: event.attendeeFieldSchema,
+        mode: event.attendeeFieldSchemaMode,
+      }),
+      [],
     ),
     teamMemberFieldSchema: resolveTeamMemberFieldSchema({
       registrationUnit: event.registrationUnit,
@@ -305,16 +391,35 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       : (input.teamMemberCount ?? undefined);
 
   const ctx = await quote({ ...input, teamMemberCount: inferredTeamMemberCount }, opts);
-  const { event, quote: priceQuote, hotelName, nights, selections, currency, registrationFieldSchema, teamMemberFieldSchema } = ctx;
+  const { event, quote: priceQuote, hotelName, nights, selections, currency, registrationFieldSchema, teamMemberFieldSchema, guests } = ctx;
+
+  // Per-day passes are reserved first: it is the stricter, multi-counter
+  // reservation, and if the optional overall cap then fails we release it.
+  let dayReserved: DayTickets | null = null;
+  if (ctx.dayTickets && event.dayPass) {
+    const dayConfig = event.dayPass;
+    const reservedDays = opts?.allowOverCapacity
+      ? await eventRepository.reserveDayCapacityUnchecked(String(event._id), ctx.dayTickets)
+      : await eventRepository.reserveDayCapacity(
+          String(event._id),
+          ctx.dayTickets,
+          Object.fromEntries(Object.keys(ctx.dayTickets).map((day) => [day, dayCapacity(dayConfig, day)])),
+        );
+    if (!reservedDays) throw ActionError.validation("One of the selected days just sold out. Please pick again.");
+    dayReserved = ctx.dayTickets;
+  }
 
   let capacityReserved = false;
   if (event.capacity != null) {
     // The unchecked variant is a separate repository method, so an
     // over-capacity write can only happen when a caller explicitly asks.
     const reserved = opts?.allowOverCapacity
-      ? await eventRepository.reserveCapacityUnchecked(String(event._id), input.guests)
-      : await eventRepository.reserveCapacity(String(event._id), input.guests);
-    if (!reserved) throw ActionError.validation("Not enough capacity left for this event.");
+      ? await eventRepository.reserveCapacityUnchecked(String(event._id), guests)
+      : await eventRepository.reserveCapacity(String(event._id), guests);
+    if (!reserved) {
+      if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
+      throw ActionError.validation("Not enough capacity left for this event.");
+    }
     capacityReserved = true;
   }
 
@@ -323,11 +428,11 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
 
     if (hasHotel && input.hotelId) {
       const hotel = await hotelRepository.findById(input.hotelId);
-      if (hotel) await assertHotelInventoryAvailable(hotel, selections, priceQuote.accommodationGuests ?? input.guests);
+      if (hotel) await assertHotelInventoryAvailable(hotel, selections, priceQuote.accommodationGuests ?? guests);
     }
 
     const playersPerTicket = resolvePlayersPerTicket(event);
-    const attendeeIssues = validateAttendees(registrationFieldSchema, input.guests, input.attendees, event.registrationUnit, {
+    const attendeeIssues = validateAttendees(registrationFieldSchema, guests, input.attendees, event.registrationUnit, {
       teamMemberFieldSchema,
       teamMemberLimit: event.teamMemberLimit ?? null,
       playersPerTicket: playersPerTicket > 1 ? playersPerTicket : null,
@@ -373,7 +478,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       teamMemberLimit: event.teamMemberLimit ?? null,
       playersPerTicket,
       attendees,
-      guests: input.guests,
+      guests: guests,
       nights,
       selections,
       quote: priceQuote,
@@ -382,8 +487,28 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       status: "pending",
     });
   } catch (error) {
-    if (capacityReserved) await eventRepository.releaseCapacity(String(event._id), input.guests);
+    if (capacityReserved) await eventRepository.releaseCapacity(String(event._id), guests);
+    if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
     throw error;
+  }
+}
+
+/**
+ * Gives back everything createPendingBooking reserved for a booking: the
+ * event-wide count for a capped event, and each day's passes for a
+ * day-pass event. Mirrors the reservation exactly, so only what was
+ * actually reserved is released.
+ */
+async function releaseBookingCapacity(booking: IBooking): Promise<void> {
+  const event = await eventRepository.findById(String(booking.eventId));
+  if (!event) return;
+
+  if (event.capacity != null) {
+    await eventRepository.releaseCapacity(String(booking.eventId), booking.guests);
+  }
+  if (event.kind === "day_pass") {
+    const { tickets } = parseDayTickets(booking.selections as Record<string, unknown>);
+    if (Object.keys(tickets).length > 0) await eventRepository.releaseDayCapacity(String(booking.eventId), tickets);
   }
 }
 
@@ -408,10 +533,7 @@ export async function expireBooking(bookingId: string): Promise<IBooking | null>
   if (booking.status !== "pending" && booking.status !== "checkout_started") return booking;
 
   const updated = await bookingRepository.updateById(bookingId, { status: "expired" });
-  const event = await eventRepository.findById(String(booking.eventId));
-  if (event?.capacity != null) {
-    await eventRepository.releaseCapacity(String(booking.eventId), booking.guests);
-  }
+  await releaseBookingCapacity(booking);
   return updated;
 }
 
@@ -444,12 +566,7 @@ export async function cancelBooking(bookingId: string, opts: { reason?: string }
   const note = reason ? [booking.customer?.note, `[cancelled] ${reason}`].filter(Boolean).join("\n") : null;
   const updated = await bookingRepository.markCancelled(bookingId, note);
 
-  // Mirrors createPendingBooking: capacity is only ever reserved for a
-  // capacity-capped event, so only such an event has anything to release.
-  const event = await eventRepository.findById(String(booking.eventId));
-  if (event?.capacity != null) {
-    await eventRepository.releaseCapacity(String(booking.eventId), booking.guests);
-  }
+  await releaseBookingCapacity(booking);
 
   return updated;
 }

@@ -78,6 +78,34 @@ export const eventTDartsLinkSchema = z.object({
   tournamentCode: z.string().nullable().default(null),
 });
 
+/**
+ * "standard" is every event that existed before this: one entry, one price,
+ * one capacity. "day_pass" is a long-running event (a month of play) where
+ * the buyer picks individual days and a number of passes per day.
+ */
+export const eventKinds = ["standard", "day_pass"] as const;
+export const eventKindSchema = z.enum(eventKinds);
+export type EventKind = z.infer<typeof eventKindSchema>;
+
+/** `yyyy-mm-dd`, the key every per-day map is indexed by. */
+export const dayKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be a yyyy-mm-dd date");
+
+export const dayPassConfigSchema = z.object({
+  /** Price of one pass on an ordinary day (basis/VAT come from the event's ticket settings). */
+  weekdayPriceHuf: z.number().min(0),
+  /** Price of one pass on a weekend day. */
+  weekendPriceHuf: z.number().min(0),
+  /** JS weekday numbers (0 = Sunday … 6 = Saturday) priced at the weekend rate. */
+  weekendDays: z.array(z.number().int().min(0).max(6)).default([6, 0]),
+  /** Passes available per day. Null = unlimited. */
+  dailyCapacity: z.number().int().min(0).nullable().default(null),
+  /** Per-day capacity that replaces dailyCapacity (a smaller room on one date, a final with more space). */
+  capacityOverrides: z.record(dayKeySchema, z.number().int().min(0)).default({}),
+  /** Days inside the event's range that aren't sold (a rest day, a venue closure). */
+  closedDays: z.array(dayKeySchema).default([]),
+});
+export type DayPassConfig = z.infer<typeof dayPassConfigSchema>;
+
 export const eventSchema = z.object({
   id: objectIdSchema,
   organizationId: objectIdSchema.nullable().default(null),
@@ -100,6 +128,11 @@ export const eventSchema = z.object({
   teamMemberFieldSchema: z.array(attendeeFieldDefSchema).default([]),
   ticketPriceBasis: priceBasisSchema.default("net"),
   ticketVatPercent: vatPercentSchema.default(27),
+  kind: eventKindSchema.default("standard"),
+  /** Present only when kind is "day_pass". */
+  dayPass: dayPassConfigSchema.nullable().default(null),
+  /** Passes sold so far, per day (`yyyy-mm-dd` → count). Only maintained for day-pass events. */
+  daySold: z.record(dayKeySchema, z.number().min(0)).default({}),
   capacity: z.number().nullable().default(null),
   soldGuestCount: z.number().min(0).default(0),
   heroImage: z.string().default(""),

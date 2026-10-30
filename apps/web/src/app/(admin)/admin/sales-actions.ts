@@ -44,6 +44,16 @@ export async function createPosSaleAction(formData: FormData): Promise<PosSaleAc
     const user = await getSessionUser();
 
     const tickets = Math.max(Number(formData.get("tickets") ?? 1) || 1, 1);
+    // Day-pass baskets arrive as JSON; the server re-derives the count and price from them.
+    const rawBasket = String(formData.get("dayPasses") ?? "").trim();
+    let selections: Record<string, Record<string, number>> | undefined;
+    if (rawBasket) {
+      try {
+        selections = { dayPasses: JSON.parse(rawBasket) as Record<string, number> };
+      } catch {
+        throw ActionError.validation("Could not read the selected days.");
+      }
+    }
     const str = (key: string) => String(formData.get(key) ?? "").trim();
     const company = formData.get("billingCompany") !== null;
 
@@ -68,7 +78,7 @@ export async function createPosSaleAction(formData: FormData): Promise<PosSaleAc
 
     const sale = await createPosSale(
       organizationId,
-      { ...input, attendees: parseAttendeesFromForm(formData, tickets) },
+      { ...input, selections, attendees: parseAttendeesFromForm(formData, tickets) },
       { userId: user?.id ?? null },
     );
 

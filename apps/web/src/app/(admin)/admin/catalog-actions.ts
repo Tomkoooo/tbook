@@ -57,6 +57,24 @@ function jsonRows(form: FormData, key: string): unknown[] {
   }
 }
 
+/** Reads the day-pass section of the event form. Rows come as JSON, closed days as free text. */
+function dayPassFromForm(form: FormData) {
+  const overrides: Record<string, number> = {};
+  for (const row of jsonRows(form, "capacityOverrides") as Array<{ date?: string; capacity?: number | string }>) {
+    if (row?.date && row.capacity !== "" && row.capacity != null) overrides[row.date] = Number(row.capacity);
+  }
+  return {
+    weekdayPriceHuf: requiredNumber(form, "weekdayPriceHuf"),
+    weekendPriceHuf: requiredNumber(form, "weekendPriceHuf"),
+    weekendDays: form.getAll("weekendDays").map(Number),
+    dailyCapacity: optionalNumber(form, "dailyCapacity"),
+    capacityOverrides: overrides,
+    closedDays: text(form, "closedDays")
+      .split(/[\s,;]+/)
+      .filter(Boolean),
+  };
+}
+
 export async function saveGroupAction(groupId: string | null, formData: FormData): Promise<CatalogActionResult> {
   try {
     const { organizationId } = await requireOrgPermission("group:write");
@@ -98,7 +116,10 @@ export async function saveEventAction(eventId: string | null, formData: FormData
   try {
     const { organizationId } = await requireOrgPermission("event:write");
     const tdartsEnabled = flag(formData, "tdartsEnabled");
+    const kind = text(formData, "kind") || "standard";
     const input = parseInput(adminEventInputSchema, {
+      kind,
+      dayPass: kind === "day_pass" ? dayPassFromForm(formData) : null,
       groupId: text(formData, "groupId"),
       name: text(formData, "name"),
       description: text(formData, "description"),
@@ -110,7 +131,8 @@ export async function saveEventAction(eventId: string | null, formData: FormData
       salesOpensAt: optionalDate(formData, "salesOpensAt"),
       salesClosesAt: optionalDate(formData, "salesClosesAt"),
       currency: text(formData, "currency").toUpperCase() || "HUF",
-      ticketFeeHuf: requiredNumber(formData, "ticketFeeHuf"),
+      // A day-pass event is priced per day, so the flat ticket fee is unused.
+      ticketFeeHuf: kind === "day_pass" ? 0 : requiredNumber(formData, "ticketFeeHuf"),
       ticketFeeMode: text(formData, "ticketFeeMode") || "per_person",
       registrationUnit: text(formData, "registrationUnit") || "person",
       playersPerTicket: requiredNumber(formData, "playersPerTicket") || 1,

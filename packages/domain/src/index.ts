@@ -6,3 +6,4 @@ export * from "./pricing";
 export * from "./eligibility";
 export * from "./package-inventory";
 export * from "./wizard-flow";
+export * from "./day-pass";

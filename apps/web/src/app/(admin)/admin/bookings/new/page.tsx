@@ -51,6 +51,25 @@ export default async function NewRegistrationPage({
     );
   }
 
+  if (selected.kind === "day_pass") {
+    return (
+      <>
+        <PageHeader breadcrumb={<Link href="/admin/bookings/new">← Pick a different event</Link>} title={selected.name} />
+        <Card>
+          <EmptyState
+            title="This is a day-pass event"
+            hint="Passes are sold per day. Use the Point of sale screen to choose the days and take payment."
+          />
+          <div style={{ padding: "0 16px 16px" }}>
+            <Link className="tbook-btn tbook-btn-primary" href={`/admin/sales?eventId=${selected.id}`}>
+              Open point of sale
+            </Link>
+          </div>
+        </Card>
+      </>
+    );
+  }
+
   // The event's own schema drives the form, so a team event asks for a
   // roster and a person event doesn't — one code path, no client branching.
   const preview = await previewAdminRegistration(organizationId, {

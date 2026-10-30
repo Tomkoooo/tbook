@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Ticket } from "lucide-react";
 import { ActionError } from "@tbook/actions";
-import { listRegistrableEvents, previewAdminRegistration } from "@tbook/services";
+import { getDayPassSaleOptions, listRegistrableEvents, previewAdminRegistration } from "@tbook/services";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,8 +77,23 @@ export default async function SalesPage({
   // sees why, instead of being offered a form that can only fail.
   let preview;
   let blocked: string | null = null;
+  let dayOptions: Awaited<ReturnType<typeof getDayPassSaleOptions>> = null;
   try {
-    preview = await previewAdminRegistration(organizationId, { eventId: selected.id, guests: tickets, overrides: {} });
+    if (selected.kind === "day_pass") {
+      dayOptions = await getDayPassSaleOptions(organizationId, selected.id);
+      const firstDay = dayOptions?.days.find((day) => day.bookable);
+      if (!firstDay) throw ActionError.validation("There are no days left to sell passes for.");
+      // One pass on the first sellable day, just to read the attendee form
+      // the event asks for; the real price is computed server-side on submit.
+      preview = await previewAdminRegistration(organizationId, {
+        eventId: selected.id,
+        guests: 1,
+        selections: { dayPasses: { [firstDay.date]: 1 } },
+        overrides: {},
+      });
+    } else {
+      preview = await previewAdminRegistration(organizationId, { eventId: selected.id, guests: tickets, overrides: {} });
+    }
   } catch (error) {
     if (!(error instanceof ActionError)) throw error;
     blocked = error.message;
@@ -108,6 +123,7 @@ export default async function SalesPage({
             playersPerTicket: selected.playersPerTicket,
           }}
           tickets={tickets}
+          dayOptions={dayOptions?.days ?? null}
           currency={preview.event.currency}
           total={preview.quote.totalHuf}
           attendeeFields={preview.registrationFieldSchema}

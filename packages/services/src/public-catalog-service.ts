@@ -9,6 +9,7 @@ import {
   type IHotel,
 } from "@tbook/db";
 import {
+  dayAvailability,
   filterAvailablePackages,
   isHotelPubliclyAvailable,
   normalizeHotelPricing,
@@ -16,6 +17,8 @@ import {
   remainingHotelBookingCapacity,
   remainingHotelRoomInventory,
   resolveAccommodationMode,
+  toGrossAmount,
+  todayDayKey,
   totalPackageUnits,
   withPackageRemainingUnits,
 } from "@tbook/domain";
@@ -104,6 +107,34 @@ function publicEventFieldSchemas(event: IEvent, group?: Pick<IEventGroup, "defau
   };
 }
 
+/**
+ * Day-pass storefront data: one row per day with the price the buyer will
+ * actually pay and whether that day can be bought right now. Sold counts are
+ * deliberately not exposed — only what is left.
+ */
+function publicDayPass(event: IEvent) {
+  if (event.kind !== "day_pass" || !event.dayPass) return null;
+  const config = event.dayPass;
+  const today = todayDayKey(new Date());
+  const days = dayAvailability({
+    config,
+    startDate: event.startDate,
+    endDate: event.endDate,
+    daySold: event.daySold as Record<string, number> | undefined,
+  }).map((day) => {
+    const unitPriceGrossHuf = Math.round(toGrossAmount(day.priceHuf, event.ticketPriceBasis ?? "net", event.ticketVatPercent ?? 27));
+    return {
+      date: day.date,
+      weekend: day.weekend,
+      unitPriceGrossHuf,
+      remaining: day.remaining,
+      closed: day.closed,
+      bookable: !day.closed && day.date >= today && (day.remaining === null || day.remaining > 0),
+    };
+  });
+  return { weekendDays: config.weekendDays, days };
+}
+
 function serializePublicEvent(event: IEvent, group: IEventGroup | null, embedConfig: TDartsEmbedConfig | null) {
   const fields = publicEventFieldSchemas(event, group);
   return {
@@ -123,6 +154,8 @@ function serializePublicEvent(event: IEvent, group: IEventGroup | null, embedCon
     salesOpensAt: event.salesOpensAt ?? null,
     salesClosesAt: event.salesClosesAt ?? null,
     nights: eventNights(event),
+    kind: event.kind ?? "standard",
+    dayPass: publicDayPass(event),
     ticketFeeHuf: event.ticketFeeHuf,
     ticketFeeMode: event.ticketFeeMode,
     registrationUnit: event.registrationUnit ?? "person",

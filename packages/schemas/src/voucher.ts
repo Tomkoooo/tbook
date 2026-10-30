@@ -24,6 +24,8 @@ export const voucherSchema = z.object({
   bookingId: objectIdSchema,
   /** 0-based guest index within the booking. */
   attendeeIndex: z.number().min(0),
+  /** `yyyy-mm-dd` the pass is valid on (day-pass events); null = valid for the whole event. */
+  validDate: z.string().nullable().default(null),
   /** Opaque QR token — unique, no PII. */
   token: z.string().min(1),
   status: voucherStatusSchema.default("active"),

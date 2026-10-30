@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
 import {
+  bookingRepository,
   eventGroupRepository,
   eventRepository,
   hotelRepository,
@@ -8,6 +9,7 @@ import {
   type IEventGroup,
   type IHotel,
 } from "@tbook/db";
+import { dayAvailability } from "@tbook/domain";
 import type { AdminEventGroupInput, AdminEventInput, AdminHotelInput } from "@tbook/schemas";
 import { apiKeyHint, generateApiKey, hashApiKey } from "./api-key";
 import { assertEventInOrg } from "./voucher-admin-service";
@@ -92,9 +94,11 @@ export async function getEventForOrg(organizationId: string, eventId: string): P
 }
 
 function eventDocumentFromInput(input: AdminEventInput) {
-  const { address, tdartsEnabled, tdartsTournamentCode, groupId, ...rest } = input;
+  const { address, tdartsEnabled, tdartsTournamentCode, groupId, dayPass, ...rest } = input;
   return {
     ...rest,
+    // A standard event carries no pass config, so switching kinds can't leave stale pricing behind.
+    dayPass: input.kind === "day_pass" ? dayPass : null,
     groupId: new Types.ObjectId(groupId),
     "location.address": address,
     tdarts: { enabled: tdartsEnabled, tournamentCode: tdartsEnabled ? tdartsTournamentCode : null },
@@ -121,6 +125,8 @@ export async function updateEvent(organizationId: string, eventId: string, input
     throw ActionError.validation(`Capacity can't be lower than the ${existing.soldGuestCount} entries already sold.`);
   }
 
+  await assertDayPassEditAllowed(existing, input);
+
   const { "location.address": address, ...doc } = eventDocumentFromInput(input);
   const updated = await eventRepository.updateById(eventId, {
     ...doc,
@@ -128,6 +134,48 @@ export async function updateEvent(organizationId: string, eventId: string, input
   });
   if (!updated) throw ActionError.notFound("Event not found");
   return updated;
+}
+
+/**
+ * Guards the edits that would silently corrupt day-pass sales that already
+ * exist: switching an event between kinds once anything is sold, dropping a
+ * day that has passes sold from the date range, or capping a day below what
+ * it has already sold.
+ */
+async function assertDayPassEditAllowed(existing: IEvent, input: AdminEventInput): Promise<void> {
+  const existingKind = existing.kind ?? "standard";
+  const daySold = (existing.daySold ?? {}) as Record<string, number>;
+
+  if (existingKind !== input.kind) {
+    const sold = await bookingRepository.aggregateGuestCountForEvent(String(existing._id), ["pending", "checkout_started", "paid", "confirmed"]);
+    if (sold > 0) throw ActionError.validation("This event already has bookings, so its type can't be changed.");
+    return;
+  }
+  if (input.kind !== "day_pass" || !input.dayPass) return;
+
+  const rows = dayAvailability({ config: input.dayPass, startDate: input.startDate, endDate: input.endDate, daySold });
+  const inRange = new Set(rows.map((row) => row.date));
+  for (const [date, count] of Object.entries(daySold)) {
+    if (count > 0 && !inRange.has(date)) {
+      throw ActionError.validation(`${date} has ${count} pass(es) sold, so it must stay inside the event dates.`);
+    }
+  }
+  for (const row of rows) {
+    if (row.capacity !== null && row.sold > row.capacity) {
+      throw ActionError.validation(`${row.date} has ${row.sold} passes sold — its capacity can't be lower than that.`);
+    }
+  }
+}
+
+/** Per-day availability for the admin event page. */
+export function describeDayPassAvailability(event: IEvent) {
+  if (event.kind !== "day_pass" || !event.dayPass) return [];
+  return dayAvailability({
+    config: event.dayPass,
+    startDate: event.startDate,
+    endDate: event.endDate,
+    daySold: event.daySold as Record<string, number> | undefined,
+  });
 }
 
 /* ---- Hotels ---------------------------------------------------------- */

@@ -10,7 +10,7 @@ import {
   dbDisconnectAll,
 } from "@tbook/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPosSale } from "./pos-service";
+import { createPosSale, getDayPassSaleOptions } from "./pos-service";
 
 const ACTOR = { userId: new Types.ObjectId().toHexString() };
 const customer = { name: "Kovács Béla", email: "bela@example.com", phone: "+36301112233", note: "" };
@@ -81,5 +81,52 @@ describe("pos-service", () => {
   it("refuses another org's event", async () => {
     const other = await OrganizationModel.create({ name: "Other", slug: "other", status: "active" });
     await expect(createPosSale(String(other._id), { eventId, tickets: 1, customer, billing, paymentMethod: "cash" }, ACTOR)).rejects.toThrow(/not found/i);
+  });
+
+  describe("day-pass events", () => {
+    const dayKey = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+    async function dayPassEvent() {
+      const group = await EventGroupModel.findOne({});
+      const event = await EventModel.create({
+        groupId: group!._id,
+        organizationId: group!.organizationId,
+        name: "Month",
+        status: "active",
+        kind: "day_pass",
+        startDate: new Date(`${dayKey(0)}T00:00:00Z`),
+        endDate: new Date(`${dayKey(5)}T00:00:00Z`),
+        ticketFeeHuf: 0,
+        ticketPriceBasis: "gross",
+        ticketVatPercent: 27,
+        dayPass: { weekdayPriceHuf: 3000, weekendPriceHuf: 3000, weekendDays: [6, 0], dailyCapacity: 2, capacityOverrides: {}, closedDays: [dayKey(1)] },
+      });
+      return String(event._id);
+    }
+
+    it("sells a basket across days, one dated pass per ticket", async () => {
+      const id = await dayPassEvent();
+      const result = await createPosSale(
+        orgId,
+        { eventId: id, tickets: 3, customer, billing, paymentMethod: "cash", selections: { dayPasses: { [dayKey(2)]: 2, [dayKey(3)]: 1 } } },
+        ACTOR,
+      );
+      expect(result.vouchersIssued).toBe(3);
+      expect(result.totalHuf).toBe(9000);
+      const vouchers = await VoucherModel.find({ bookingId: result.bookingId }).sort({ attendeeIndex: 1 });
+      expect(vouchers.map((v) => v.validDate)).toEqual([dayKey(2), dayKey(2), dayKey(3)]);
+    });
+
+    it("lists only the days that can actually be sold", async () => {
+      const id = await dayPassEvent();
+      await createPosSale(orgId, { eventId: id, tickets: 2, customer, billing, paymentMethod: "card", selections: { dayPasses: { [dayKey(2)]: 2 } } }, ACTOR);
+
+      const options = await getDayPassSaleOptions(orgId, id);
+      const byDate = Object.fromEntries(options!.days.map((d) => [d.date, d]));
+      expect(byDate[dayKey(1)]!.bookable).toBe(false); // closed
+      expect(byDate[dayKey(2)]).toMatchObject({ bookable: false, remaining: 0 }); // sold out
+      expect(byDate[dayKey(3)]).toMatchObject({ bookable: true, unitPriceGrossHuf: 3000 });
+      expect(await getDayPassSaleOptions(orgId, eventId)).toBeNull(); // a standard event
+    });
   });
 });

@@ -20,16 +20,27 @@ const METHODS = [
   { value: "card", label: "Card", icon: CreditCard },
 ] as const;
 
+export interface DayOption {
+  date: string;
+  weekend: boolean;
+  unitPriceGrossHuf: number;
+  remaining: number | null;
+  bookable: boolean;
+}
+
 export function SaleForm({
   event,
-  tickets,
+  tickets: ticketsFromUrl,
+  dayOptions,
   currency,
-  total,
+  total: totalFromServer,
   attendeeFields,
   teamMemberFields,
 }: {
   event: { id: string; teamMemberLimit: number | null; playersPerTicket: number };
   tickets: number;
+  /** Present for day-pass events: the days a seller can put in the basket. */
+  dayOptions: DayOption[] | null;
   currency: string;
   total: number;
   attendeeFields: AttendeeFieldDef[];
@@ -41,6 +52,25 @@ export function SaleForm({
   // The action's result outlives the success panel, so "New sale" dismisses
   // that specific sale instead of trying to reset the action state.
   const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const [basket, setBasket] = useState<Record<string, number>>({});
+
+  // A day-pass sale is sized by its basket; any other sale by the stepper.
+  const tickets = dayOptions ? Object.values(basket).reduce((sum, qty) => sum + qty, 0) : ticketsFromUrl;
+  // Display only — the server recomputes the price from the basket.
+  const total = dayOptions
+    ? dayOptions.reduce((sum, day) => sum + (basket[day.date] ?? 0) * day.unitPriceGrossHuf, 0)
+    : totalFromServer;
+
+  function setDayQty(day: DayOption, qty: number) {
+    const max = day.remaining ?? 50;
+    setBasket((current) => {
+      const next = { ...current };
+      const clamped = Math.min(Math.max(qty, 0), max);
+      if (clamped === 0) delete next[day.date];
+      else next[day.date] = clamped;
+      return next;
+    });
+  }
   const [state, action, pending] = useActionState(
     async (_prev: PosSaleActionResult | null, formData: FormData) => createPosSaleAction(formData),
     null,
@@ -94,8 +124,65 @@ export function SaleForm({
     <form action={action} className="grid max-w-3xl gap-6">
       <input type="hidden" name="eventId" value={event.id} />
       <input type="hidden" name="paymentMethod" value={method} />
-      <input type="hidden" name="tickets" value={tickets} />
+      <input type="hidden" name="tickets" value={Math.max(tickets, 1)} />
+      {dayOptions ? <input type="hidden" name="dayPasses" value={JSON.stringify(basket)} /> : null}
 
+      {dayOptions ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Days</CardTitle>
+            <CardDescription>Choose how many passes for each day.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2">
+            {dayOptions.map((day) => {
+              const qty = basket[day.date] ?? 0;
+              return (
+                <div
+                  key={day.date}
+                  className={cn("flex items-center justify-between gap-3 rounded-lg border px-3 py-2", !day.bookable && "opacity-50", qty > 0 && "border-primary bg-accent")}
+                >
+                  <div>
+                    <p className="text-sm font-medium tabular-nums">
+                      {day.date}{" "}
+                      <span className="text-muted-foreground font-normal">
+                        {new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" })}
+                        {day.weekend ? " · weekend" : ""}
+                      </span>
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {money(day.unitPriceGrossHuf)} ·{" "}
+                      {!day.bookable ? "not available" : day.remaining === null ? "no limit" : `${day.remaining} left`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" size="icon" aria-label={`Fewer passes for ${day.date}`} disabled={qty === 0} onClick={() => setDayQty(day, qty - 1)}>
+                      <Minus />
+                    </Button>
+                    <span className="w-6 text-center tabular-nums">{qty}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      aria-label={`More passes for ${day.date}`}
+                      disabled={!day.bookable || (day.remaining !== null && qty >= day.remaining)}
+                      onClick={() => setDayQty(day, qty + 1)}
+                    >
+                      <Plus />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="mt-2 flex items-end justify-between">
+              <p className="text-muted-foreground text-sm">{tickets} pass{tickets === 1 ? "" : "es"}</p>
+              <div className="text-right">
+                <p className="text-muted-foreground text-xs">Total to collect</p>
+                <p className="text-3xl font-semibold tabular-nums">{money(total)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <Card>
         <CardHeader>
           <CardTitle>{isTeam ? "Teams" : "Tickets"}</CardTitle>
@@ -130,6 +217,7 @@ export function SaleForm({
           </div>
         </CardContent>
       </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -241,7 +329,7 @@ export function SaleForm({
 
       <ResultNotice result={state && !state.ok ? state : null} />
       <div>
-        <Button type="submit" size="lg" disabled={pending}>
+        <Button type="submit" size="lg" disabled={pending || (dayOptions !== null && tickets === 0)}>
           {pending ? "Processing…" : `Record ${method} payment of ${money(total)} & send`}
         </Button>
       </div>

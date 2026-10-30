@@ -16,6 +16,15 @@ import { verifyApiKey } from "./api-key";
 
 const eventInput = (groupId: string) => ({
   groupId,
+  kind: "standard" as "standard" | "day_pass",
+  dayPass: null as null | {
+    weekdayPriceHuf: number;
+    weekendPriceHuf: number;
+    weekendDays: number[];
+    dailyCapacity: number | null;
+    capacityOverrides: Record<string, number>;
+    closedDays: string[];
+  },
   name: "Open",
   description: "",
   address: "Budapest",
@@ -106,6 +115,28 @@ describe("catalog-admin-service", () => {
     const ok = await updateEvent(orgId, String(event._id), { ...eventInput(String(group._id)), capacity: 6, name: "Renamed" });
     expect(ok.name).toBe("Renamed");
     expect(ok.location.address).toBe("Budapest");
+  });
+
+  it("creates a day-pass event and protects days that already have sales", async () => {
+    const { group } = await newGroup(orgId);
+    const dayPass = { weekdayPriceHuf: 4000, weekendPriceHuf: 7000, weekendDays: [6, 0], dailyCapacity: 20, capacityOverrides: {}, closedDays: [] };
+    const input = { ...eventInput(String(group._id)), kind: "day_pass" as const, dayPass, startDate: new Date("2026-07-01"), endDate: new Date("2026-07-31") };
+    const event = await createEvent(orgId, input);
+    expect(event.kind).toBe("day_pass");
+    expect(event.dayPass?.weekendPriceHuf).toBe(7000);
+
+    await EventModel.updateOne({ _id: event._id }, { daySold: { "2026-07-30": 3 } });
+    // Shortening the month would orphan the 30th's sold passes.
+    await expect(updateEvent(orgId, String(event._id), { ...input, endDate: new Date("2026-07-20") })).rejects.toThrow(/2026-07-30/);
+    // Capping the 30th below its sales is refused too.
+    await expect(
+      updateEvent(orgId, String(event._id), { ...input, dayPass: { ...dayPass, capacityOverrides: { "2026-07-30": 2 } } }),
+    ).rejects.toThrow(/capacity can't be lower/);
+    const ok = await updateEvent(orgId, String(event._id), { ...input, dayPass: { ...dayPass, weekdayPriceHuf: 4500 } });
+    expect(ok.dayPass?.weekdayPriceHuf).toBe(4500);
+    // Standard events never keep stale pass pricing.
+    const standard = await createEvent(orgId, { ...eventInput(String(group._id)), dayPass });
+    expect(standard.dayPass).toBeNull();
   });
 
   it("keeps unedited pricing fields when a hotel is saved", async () => {

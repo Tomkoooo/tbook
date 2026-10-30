@@ -99,7 +99,7 @@ export async function resendEntriesAction(bookingId: string, formData: FormData)
 }
 
 export interface ScanActionResult extends ActionResult {
-  result?: "valid" | "duplicate" | "invalid" | "wrong_event";
+  result?: "valid" | "duplicate" | "invalid" | "wrong_event" | "wrong_day";
   attendeeName?: string | null;
 }
 

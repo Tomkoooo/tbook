@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import { ActionError } from "@tbook/actions";
-import { getEventForOrg, listGroupsForOrg } from "@tbook/services";
+import { describeDayPassAvailability, getEventForOrg, listGroupsForOrg } from "@tbook/services";
 import { PageTitle } from "@/components/page-title";
 import { requireAdminPage, toDateInput, toDateTimeInput } from "@/lib/admin-page";
-import { EventForm, type EventFormValues } from "./event-form";
+import { EMPTY_DAY_PASS, EventForm, type EventFormValues } from "./event-form";
+import { DayAvailabilityTable } from "./day-availability-table";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,8 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   if (isNew) {
     const today = toDateInput(new Date());
     const initial: EventFormValues = {
+      kind: "standard",
+      dayPass: EMPTY_DAY_PASS,
       groupId: groups[0]?.id ?? "",
       name: "",
       description: "",
@@ -67,6 +70,17 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
         groups={groups}
         soldGuestCount={event.soldGuestCount}
         initial={{
+          kind: event.kind ?? "standard",
+          dayPass: event.dayPass
+            ? {
+                weekdayPriceHuf: event.dayPass.weekdayPriceHuf,
+                weekendPriceHuf: event.dayPass.weekendPriceHuf,
+                weekendDays: [...event.dayPass.weekendDays],
+                dailyCapacity: event.dayPass.dailyCapacity ?? null,
+                capacityOverrides: Object.entries((event.dayPass.capacityOverrides ?? {}) as Record<string, number>).map(([date, capacity]) => ({ date, capacity })),
+                closedDays: [...event.dayPass.closedDays].join(", "),
+              }
+            : EMPTY_DAY_PASS,
           groupId: event.groupId ? String(event.groupId) : "",
           name: event.name,
           description: event.description ?? "",
@@ -92,6 +106,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
           tdartsTournamentCode: event.tdarts?.tournamentCode ?? "",
         }}
       />
+      <DayAvailabilityTable days={describeDayPassAvailability(event)} currency={event.currency} />
     </>
   );
 }

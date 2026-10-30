@@ -26,6 +26,7 @@ const VoucherSchema = new Schema<IVoucher>(
     eventId: { type: Schema.Types.ObjectId, ref: "TBookEvent", required: true, index: true },
     bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", required: true, index: true },
     attendeeIndex: { type: Number, required: true, min: 0 },
+    validDate: { type: String, default: null },
     token: { type: String, required: true, unique: true, index: true },
     status: { type: String, enum: voucherStatuses, default: "active", index: true },
     displayName: { type: String, required: true },

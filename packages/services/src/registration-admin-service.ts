@@ -483,6 +483,7 @@ export async function listRegistrableEvents(organizationId: string): Promise<
     capacity: number | null;
     soldGuestCount: number;
     startDate: Date | null;
+    kind: string;
   }>
 > {
   const { eventGroupRepository } = await import("@tbook/db");
@@ -499,5 +500,6 @@ export async function listRegistrableEvents(organizationId: string): Promise<
     capacity: event.capacity ?? null,
     soldGuestCount: event.soldGuestCount ?? 0,
     startDate: event.startDate ?? null,
+    kind: event.kind ?? "standard",
   }));
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ActionError } from "@tbook/actions";
 import { bookingRepository, eventRepository, voucherRepository, type IVoucher } from "@tbook/db";
+import { expandDayTickets, parseDayTickets, todayDayKey } from "@tbook/domain";
 import type { AttendeeFieldDef, AttendeeFieldValue } from "@tbook/schemas";
 
 /**
@@ -113,8 +114,15 @@ export async function issueVoucherRowsForBooking(bookingId: string): Promise<IVo
     locationAddress: event.location?.address ?? "",
   };
 
+  // A day pass is valid on one date: ticket N of the booking takes the Nth
+  // date of the (sorted) basket, and its printed event dates narrow to it.
+  const passDates = event.kind === "day_pass" ? expandDayTickets(parseDayTickets(booking.selections as Record<string, unknown>).tickets) : [];
+
   const schema = booking.attendeeFieldSchema ?? [];
-  const rows = Array.from({ length: booking.guests }, (_, attendeeIndex) => ({
+  const rows = Array.from({ length: booking.guests }, (_, attendeeIndex) => {
+    const validDate = passDates[attendeeIndex] ?? null;
+    return {
+    validDate,
     organizationId: booking.organizationId ?? null,
     eventId: booking.eventId,
     bookingId: booking._id,
@@ -130,9 +138,12 @@ export async function issueVoucherRowsForBooking(bookingId: string): Promise<IVo
       booking.teamMemberFieldSchema ?? [],
     ),
     attendeeFields: booking.attendees?.[attendeeIndex]?.fields ?? {},
-    eventSnapshot,
+    eventSnapshot: validDate
+      ? { ...eventSnapshot, startDate: new Date(`${validDate}T00:00:00Z`), endDate: new Date(`${validDate}T00:00:00Z`) }
+      : eventSnapshot,
     pdfFileName: null,
-  }));
+    };
+  });
 
   return voucherRepository.createMany(rows);
 }
@@ -142,7 +153,7 @@ export async function voidVouchersForBooking(bookingId: string): Promise<void> {
   await voucherRepository.voidAllForBooking(bookingId);
 }
 
-export type VoucherScanResult = "valid" | "duplicate" | "invalid" | "wrong_event";
+export type VoucherScanResult = "valid" | "duplicate" | "invalid" | "wrong_event" | "wrong_day";
 
 export interface VoucherScanResponse {
   result: VoucherScanResult;
@@ -155,6 +166,8 @@ export interface ScanVoucherOptions {
   eventId?: string;
   organizationId?: string;
   userId?: string | null;
+  /** Clock override for tests. */
+  now?: Date;
   /** "lookup" reports voucher status without checking it in. */
   mode?: "check_in" | "lookup";
 }
@@ -184,6 +197,11 @@ export async function scanVoucher(rawToken: string, opts: ScanVoucherOptions = {
   }
   if (voucher.status === "checked_in") {
     return { result: "duplicate", message: "Already checked in.", voucher };
+  }
+  // A day pass only opens the door on its own date. Checked after the
+  // duplicate test so an already-used pass still reads "already checked in".
+  if (voucher.validDate && voucher.validDate !== todayDayKey(opts.now ?? new Date())) {
+    return { result: "wrong_day", message: `This pass is valid on ${voucher.validDate}, not today.`, voucher };
   }
   if (opts.mode === "lookup") {
     return { result: "valid", message: "Valid voucher (not yet checked in).", voucher };

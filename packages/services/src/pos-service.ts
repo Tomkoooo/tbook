@@ -1,7 +1,9 @@
 import { ActionError } from "@tbook/actions";
-import type { BillingInfo, BookingAttendee, Customer, PosPaymentMethod } from "@tbook/schemas";
+import { dayAvailability, toGrossAmount, todayDayKey } from "@tbook/domain";
+import type { BillingInfo, BookingAttendee, Customer, PosPaymentMethod, Selections } from "@tbook/schemas";
 import { createAdminRegistration, type AdminRegistrationInput } from "./registration-admin-service";
 import { bookingRepository } from "@tbook/db";
+import { assertEventInOrg } from "./voucher-admin-service";
 
 /**
  * On-site sales ("point of sale"). A seller picks an event, takes cash or a
@@ -26,6 +28,8 @@ export interface PosSaleInput {
   /** Card terminal slip / transaction number, or a cash receipt number. */
   reference?: string;
   attendees?: BookingAttendee[];
+  /** Day-pass events: `{ dayPasses: { "yyyy-mm-dd": count } }`. `tickets` is then derived from it. */
+  selections?: Selections;
   note?: string;
 }
 
@@ -53,6 +57,7 @@ export async function createPosSale(
     customer: input.customer,
     billing: input.billing,
     attendees: input.attendees,
+    selections: input.selections,
     adminNote: input.note,
     source: "pos",
     // No overrides: a seller must not be able to sell past capacity or
@@ -76,4 +81,39 @@ export async function createPosSale(
     invoiceError: fresh.invoiceError ?? null,
     invoiceEmailed: Boolean(fresh.invoiceEmailSentAt),
   };
+}
+
+export interface DaySaleOption {
+  date: string;
+  weekend: boolean;
+  /** What one pass costs the buyer, VAT included. */
+  unitPriceGrossHuf: number;
+  remaining: number | null;
+  /** False for closed days, days already past and sold-out days. */
+  bookable: boolean;
+}
+
+/**
+ * The days a seller can put in a day-pass basket, with the price the buyer
+ * pays and what is left. Mirrors the public storefront's view, but a seller
+ * works from the counter, so it is org-scoped rather than API-key scoped.
+ */
+export async function getDayPassSaleOptions(organizationId: string, eventId: string): Promise<{ currency: string; days: DaySaleOption[] } | null> {
+  const event = await assertEventInOrg(organizationId, eventId);
+  if (event.kind !== "day_pass" || !event.dayPass) return null;
+
+  const today = todayDayKey(new Date());
+  const days = dayAvailability({
+    config: event.dayPass,
+    startDate: event.startDate,
+    endDate: event.endDate,
+    daySold: event.daySold as Record<string, number> | undefined,
+  }).map((day) => ({
+    date: day.date,
+    weekend: day.weekend,
+    unitPriceGrossHuf: Math.round(toGrossAmount(day.priceHuf, event.ticketPriceBasis ?? "net", event.ticketVatPercent ?? 27)),
+    remaining: day.remaining,
+    bookable: !day.closed && day.date >= today && (day.remaining === null || day.remaining > 0),
+  }));
+  return { currency: event.currency, days };
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { entityStatusSchema, objectIdSchema, priceBasisSchema, vatPercentSchema } from "./common";
-import { publicListingSchema, registrationUnitSchema, ticketFeeModeSchema } from "./event";
+import { dayPassConfigSchema, eventKindSchema, publicListingSchema, registrationUnitSchema, ticketFeeModeSchema } from "./event";
 import { packageDealSchema, roomTypeSchema } from "./hotel";
 
 /**
@@ -38,6 +38,9 @@ export const adminEventInputSchema = z
     salesOpensAt: nullableDate.default(null),
     salesClosesAt: nullableDate.default(null),
     currency: z.string().length(3).default("HUF"),
+    kind: eventKindSchema.default("standard"),
+    /** Required when kind is "day_pass"; ignored (and cleared) otherwise. */
+    dayPass: dayPassConfigSchema.nullable().default(null),
     ticketFeeHuf: z.number().min(0),
     ticketFeeMode: ticketFeeModeSchema.default("per_person"),
     registrationUnit: registrationUnitSchema.default("person"),
@@ -54,6 +57,10 @@ export const adminEventInputSchema = z
   .refine((event) => event.endDate >= event.startDate, {
     message: "The end date can't be before the start date.",
     path: ["endDate"],
+  })
+  .refine((event) => event.kind !== "day_pass" || event.dayPass !== null, {
+    message: "A day-pass event needs its weekday and weekend prices.",
+    path: ["dayPass"],
   })
   .refine((event) => !event.salesOpensAt || !event.salesClosesAt || event.salesClosesAt >= event.salesOpensAt, {
     message: "Sales can't close before they open.",

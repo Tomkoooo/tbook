@@ -212,4 +212,39 @@ describe("public-catalog-service", () => {
       expect(detail?.hotels).toHaveLength(0);
     });
   });
+
+  describe("day-pass events", () => {
+    it("exposes per-day gross prices and what is left, never the sold counts", async () => {
+      const group = await createGroup();
+      const day = 24 * 60 * 60 * 1000;
+      const start = new Date(Date.now() + day);
+      const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+      await createEvent(String(group._id), {
+        kind: "day_pass",
+        ticketPriceBasis: "net",
+        startDate: start,
+        endDate: new Date(start.getTime() + 2 * day),
+        dayPass: { weekdayPriceHuf: 1000, weekendPriceHuf: 2000, weekendDays: [6, 0], dailyCapacity: 4, capacityOverrides: {}, closedDays: [dayKey(new Date(start.getTime() + day))] },
+        daySold: { [dayKey(start)]: 4 },
+      });
+
+      const [event] = await listPublicEventsForGroup(String(group._id));
+      expect(event!.kind).toBe("day_pass");
+      const days = event!.dayPass!.days;
+      expect(days).toHaveLength(3);
+      expect(days[0]).toMatchObject({ remaining: 0, bookable: false });
+      expect(days[1]).toMatchObject({ closed: true, bookable: false });
+      expect(days[2]).toMatchObject({ remaining: 4, bookable: true });
+      expect([1270, 2540]).toContain(days[2]!.unitPriceGrossHuf); // 1000/2000 net + 27% VAT, by weekday
+      expect(JSON.stringify(event)).not.toContain("daySold");
+    });
+
+    it("leaves standard events with dayPass: null", async () => {
+      const group = await createGroup();
+      await createEvent(String(group._id));
+      const [event] = await listPublicEventsForGroup(String(group._id));
+      expect(event!.kind).toBe("standard");
+      expect(event!.dayPass).toBeNull();
+    });
+  });
 });

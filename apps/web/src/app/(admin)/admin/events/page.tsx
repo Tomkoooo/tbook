@@ -56,16 +56,23 @@ export default async function EventsPage() {
                     <Link className="font-medium hover:underline" href={`/admin/events/${event._id}`}>
                       {event.name}
                     </Link>
+                    {event.kind === "day_pass" ? <Badge variant="outline" className="ml-2">day passes</Badge> : null}
                   </TableCell>
                   <TableCell>{(event.groupId && groupName.get(String(event.groupId))) || "—"}</TableCell>
                   <TableCell>
                     {formatDate(event.startDate)}
                     {String(event.startDate) !== String(event.endDate) ? ` – ${formatDate(event.endDate)}` : ""}
                   </TableCell>
-                  <TableCell>{formatMoney(event.ticketFeeHuf, event.currency)}</TableCell>
                   <TableCell>
-                    {event.soldGuestCount}
-                    {event.capacity != null ? ` / ${event.capacity}` : ""}
+                    {event.kind === "day_pass" && event.dayPass
+                      ? `${formatMoney(event.dayPass.weekdayPriceHuf, event.currency)} / ${formatMoney(event.dayPass.weekendPriceHuf, event.currency)}`
+                      : formatMoney(event.ticketFeeHuf, event.currency)}
+                  </TableCell>
+                  <TableCell>
+                    {event.kind === "day_pass"
+                      ? `${Object.values((event.daySold ?? {}) as Record<string, number>).reduce((sum, n) => sum + n, 0)} passes`
+                      : event.soldGuestCount}
+                    {event.kind !== "day_pass" && event.capacity != null ? ` / ${event.capacity}` : ""}
                   </TableCell>
                   <TableCell>
                     <Badge variant={event.status === "active" ? "default" : "secondary"}>{event.status}</Badge>

@@ -1,6 +1,7 @@
 import mongoose, { Schema, type Document, type Model, Types } from "mongoose";
 import {
   attendeeFieldSchemaModes,
+  eventKinds,
   eligibilityPresets,
   entityStatusSchema,
   priceBasisSchema,
@@ -71,6 +72,25 @@ const EventSchema = new Schema<IEvent>(
     teamMemberFieldSchema: { type: [attendeeFieldDefSchema], default: [] },
     ticketPriceBasis: { type: String, enum: priceBasisSchema.options, default: "net" },
     ticketVatPercent: { type: Number, default: 27, min: 0, max: 100 },
+    kind: { type: String, enum: eventKinds, default: "standard" },
+    dayPass: {
+      type: new Schema(
+        {
+          weekdayPriceHuf: { type: Number, required: true, min: 0 },
+          weekendPriceHuf: { type: Number, required: true, min: 0 },
+          weekendDays: { type: [Number], default: [6, 0] },
+          dailyCapacity: { type: Number, default: null, min: 0 },
+          capacityOverrides: { type: Schema.Types.Mixed, default: {} },
+          closedDays: { type: [String], default: [] },
+        },
+        { _id: false, minimize: false },
+      ),
+      default: null,
+    },
+    // Plain object (not a Map) so a single findOneAndUpdate can $inc several
+    // `daySold.<date>` paths atomically — that is what makes reserving a
+    // multi-day basket all-or-nothing without a transaction.
+    daySold: { type: Schema.Types.Mixed, default: {} },
     capacity: { type: Number, default: null },
     soldGuestCount: { type: Number, default: 0, min: 0 },
     heroImage: { type: String, default: "" },
@@ -110,7 +130,7 @@ const EventSchema = new Schema<IEvent>(
     status: { type: String, enum: entityStatusSchema.options, default: "draft", index: true },
     sortOrder: { type: Number, default: 0 },
   },
-  { timestamps: true },
+  { timestamps: true, minimize: false },
 );
 
 /** Nights between the event start/end dates (min 1). */
