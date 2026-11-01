@@ -6,10 +6,10 @@
  *
  * Ported module by module from the legacy plugin's
  * packages/plugins/t-book/services/*.ts. Done: org-service (org/RBAC),
- * booking-service (quote + single-event booking lifecycle, atomic capacity
+ * booking-service (quote + booking lifecycle, atomic capacity
  * reservation), voucher-service (issuance/check-in lifecycle), checkout-
  * service (Stripe checkout session creation + idempotent webhook
- * finalization, single-event path only), invoice-service (Számlázz.hu,
+ * finalization, single- and multi-event), invoice-service (Számlázz.hu,
  * org-scoped credentials only) and tdarts-sync-service (partner enroll,
  * solo/pair/skip-team-roster strategies) — both registered into checkout-
  * service's `AFTER_BOOKING_PAID_HOOKS` extension point.
@@ -36,10 +36,11 @@
  * Google OAuth config, and session callbacks live in apps/web (framework-
  * specific), but this package stays framework-agnostic.
  *
- * Still to come: multi-event booking (quoteMulti/
- * createPendingMultiBookings/createMultiBookingWithCheckout) and its v1
- * routes (currently 501); the public entry-list read model
- * (getPublicEntryList) and its route; the OpenAPI spec route; the org/system
+ * Multi-event booking (multi-booking-service.ts: quoteMulti/
+ * createPendingMultiBookings, plus checkout-service's
+ * createMultiBookingWithCheckout) serves the v1 `entries` body.
+ *
+ * Still to come: the OpenAPI spec route; the org/system
  * ADMIN API ROUTES (separate pass — org-service/org-auth are fully built,
  * just no apps/web routes yet, now that real session auth exists to gate
  * them); admin listing/export methods; tDarts resyncEvent/backfill; header
@@ -55,6 +56,7 @@ export * from "./org-service";
 export * from "./org-settings-service";
 export * from "./booking-validation";
 export * from "./booking-service";
+export * from "./multi-booking-service";
 export * from "./voucher-service";
 export * from "./checkout-service";
 export * from "./invoice-service";

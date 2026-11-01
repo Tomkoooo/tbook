@@ -29,7 +29,7 @@ proxies browser calls through its own `/api/plugins/t-book/*` (env
 
 Errors: `{ "error": "message" }` with an HTTP status. 401 means a missing or
 bad key, 404 an unknown or inactive event, 429 a rate limit (quote: 120/min,
-bookings: 20/min per client), 501 a multi-event body.
+bookings: 20/min per client).
 
 ## Endpoints
 
@@ -38,9 +38,9 @@ bookings: 20/min per client), 501 a multi-event body.
 | GET | `/events` | group | Active, listed events of the group: `{ events: [...] }` |
 | GET | `/events/{eventId}` | group | One event with everything the booking form needs: pricing, attendee field schema, team rules, hotels/room types, day-pass days and availability |
 | GET | `/events/{eventId}/entry-list` | group | Paid teams of a team event with "public entry list" on: `{ eventName, teams: [{ label, members[] }] }`; 404 when the event doesn't publish it |
-| POST | `/quote` | group | Price a selection without booking: `{ quote }` |
-| POST | `/bookings` | group | Create a pending booking and its Stripe Checkout session: `{ bookingId, totalHuf, checkoutUrl, stripeSessionId, expiresAt }` |
-| GET | `/checkout/status?bookingId=&session_id=` | — (the pair is the credential) | Poll after returning from Stripe: `{ status, totalHuf, guests, eventName, vouchersReady, returnBaseUrl }` |
+| POST | `/quote` | group | Price a selection without booking: `{ quote }`. With an `entries` array (several events): `{ lodgingMode, entries: [{ eventId, eventName, quote }], quote }` |
+| POST | `/bookings` | group | Create a pending booking and its Stripe Checkout session: `{ bookingId, totalHuf, checkoutUrl, stripeSessionId, expiresAt }`. With an `entries` array: one booking per event, one Stripe session, plus `bookingIds` and `checkoutBundleId` |
+| GET | `/checkout/status?bookingId=&session_id=` | — (the pair is the credential) | Poll after returning from Stripe: `{ status, totalHuf, guests, eventName, vouchersReady, returnBaseUrl }`. For a multi-event booking, `totalHuf`, `guests` and `eventName` cover the whole bundle |
 | GET | `/bookings/status?bookingId=&session_id=` | group | Legacy alias of the above |
 | GET | `/checkout/return?bookingId=&session_id=[&cancelled=1]` | — | Stripe success/cancel URL; nudges finalization, redirects to tBook's `/book/success` |
 | GET | `/checkout/vouchers?bookingId=&session_id=` | — | The guest's ticket PDF (rendered on demand) |
@@ -82,7 +82,7 @@ attendees (`CreateBookingInput` in `booking-service.ts`, and
 - **Attendee fields:** the attendee `fields` keys come from the event's `attendeeFieldSchema` (`GET /events/{id}`). For team events, each attendee has `members: [{ fields }]` per `teamMemberFieldSchema`.
 - **Validation:** eligibility rules (age, gender, form rules) and capacity are checked on the server. A failed rule is a 400 with a readable message.
 - **Seats are held** until `expiresAt`. An unpaid booking expires and frees its seats.
-- **`returnBaseUrl`:** where Stripe sends the guest back (your shop's own success page). The `checkout/status` response echoes it.
+- **`returnBaseUrl`:** your storefront's origin. Stripe sends the guest back to `<returnBaseUrl>/foglalas/siker?bookingId=…&session_id=…` (or `&cancelled=1`), the success page `@sironic/plugin-tbook` serves. The `checkout/status` response echoes it.
 
 ### After payment
 
@@ -92,7 +92,30 @@ sends **one email** with both attached. Your success page only needs to poll
 `/checkout/status` until `status` is `paid`/`confirmed` and `vouchersReady`
 is true, then offer the two download links.
 
+### Several events in one booking
+
+`@sironic/plugin-tbook` uses this for `/foglalas/<id>?events=a,b`
+(`TBookMultiBookingWizard`). Send an `entries` array instead of a single
+`eventId` (`MultiQuoteRequest` / `CreateMultiBookingInput` in
+`multi-booking-service.ts`):
+
+```json
+{
+  "lodgingMode": "combined",
+  "entries": [
+    { "eventId": "…", "guests": 2, "teamMemberCount": null, "attendees": [ … ] },
+    { "eventId": "…", "guests": 1 }
+  ],
+  "hotelId": "…", "nights": 2, "selections": { … }, "accommodationGuests": 2,
+  "customer": { … }, "billing": { … }, "returnBaseUrl": "https://shop.example.com"
+}
+```
+
+- **Lodging:** `combined` (default) books one stay from the top-level `hotelId`/`nights`/`selections`/`accommodationGuests`, priced on the first entry; the other entries are entry-only. `separate` takes those fields from each entry.
+- **Rules:** 1–20 entries, each event once, all in the key's group and in the same currency. Each entry is checked exactly like a single booking.
+- **All or nothing:** if any entry fails (sold out, eligibility, …) or Stripe can't open the session, no seats stay reserved.
+- **One payment, separate bookings:** each event gets its own booking (own tickets, invoice and email), linked by `checkoutBundleId`. The return URL and `bookingId` point at the first booking; `checkout/status` reports the bundle's total.
+
 ## Not supported (yet)
 
-- **Several events in one quote/booking (`entries` array):** answers 501. `@sironic/plugin-tbook` uses this for `/foglalas/<id>?events=a,b` (`TBookMultiBookingWizard`), so that mode doesn't work against this backend yet. Single-event booking does. The booking schema already has `checkoutBundleId` for linking sibling bookings when this is built.
 - **Products:** not part of v1; use the inventory API.

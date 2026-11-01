@@ -1,15 +1,16 @@
+import { Types } from "mongoose";
 import Stripe from "stripe";
 import { ActionError } from "@tbook/actions";
 import { bookingRepository, organizationRepository, voucherRepository, type IBooking } from "@tbook/db";
 import { assertValidBookingStatusTransition, createPendingBooking, expireBooking, type CreateBookingInput } from "./booking-service";
+import { createPendingMultiBookings, releaseMultiBookings, type CreateMultiBookingInput } from "./multi-booking-service";
 import { decryptOrgSecret } from "./org-secrets";
 import { issueVoucherRowsForBooking } from "./voucher-service";
 
 /**
- * Ported from the legacy plugin's services/checkout-service.ts. Only the
- * single-event path (createBookingWithCheckout) is ported this pass —
- * createMultiBookingWithCheckout depends on createPendingMultiBookings,
- * which isn't built yet (out of scope, see booking-service.ts's header).
+ * Ported from the legacy plugin's services/checkout-service.ts: single-event
+ * checkout (createBookingWithCheckout) and multi-event checkout
+ * (createMultiBookingWithCheckout: several bookings, one Stripe session).
  *
  * Deliberate architectural fix per the approved plan: the legacy webhook
  * lives in an unrelated `shop` plugin and dispatches to tbook via a string
@@ -20,9 +21,9 @@ import { issueVoucherRowsForBooking } from "./voucher-service";
  * `apps/web/src/app/api/webhooks/stripe/route.ts` to call them directly
  * after verifying the signature. No metadata-tag dispatch needed.
  *
- * downloadInvoiceForGuestCheckout / downloadVouchersForGuestCheckout (guest
- * PDF download) and the multi-booking path are deferred along with
- * invoice-service/voucher PDF rendering.
+ * Stripe returns the buyer to `<returnBase>/foglalas/siker`, the success page
+ * every storefront plugin serves (tBook's own storefront redirects it to
+ * /book/success).
  */
 
 const STRIPE_API_VERSION: Stripe.LatestApiVersion = "2026-08-26.dahlia";
@@ -104,6 +105,78 @@ export interface CheckoutResult {
   expiresAt: string;
 }
 
+export interface MultiCheckoutResult extends CheckoutResult {
+  bookingIds: string[];
+  checkoutBundleId: string;
+}
+
+/** The path, under the storefront's base URL, Stripe sends the buyer back to. */
+export const CHECKOUT_SUCCESS_PATH = "/foglalas/siker";
+
+function lineItemDescription(booking: IBooking): string {
+  return [`${booking.guests} guests`, booking.hotelName ? `${booking.hotelName}, ${booking.nights} nights` : "entry only"].join(" · ");
+}
+
+/**
+ * Opens one Stripe Checkout Session for one or more pending bookings (a line
+ * item each) and moves them all to checkout_started. The first booking is
+ * the primary: its id is in the return URL and the session's
+ * client_reference_id.
+ */
+async function openStripeCheckout(
+  bookings: IBooking[],
+  extra: { returnBaseUrl?: string | null; checkoutBundleId?: string },
+): Promise<{ sessionId: string; url: string | null; expiresAt: Date }> {
+  const primary = bookings[0]!;
+  const organizationId = primary.organizationId ? String(primary.organizationId) : null;
+  await assertOrgStripeReady(organizationId);
+
+  const expiresAt = new Date(Date.now() + clampReservationTtlMs());
+  const stripe = await getOrgStripeClient(organizationId);
+  const storefrontBase = (primary.checkoutReturnBaseUrl?.trim() || extra.returnBaseUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+  const primaryId = String(primary._id);
+  const returnTo = encodeURIComponent(storefrontBase);
+
+  const metadata: Record<string, string> = { tBookBookingId: primaryId, tBookOrganizationId: organizationId ?? "" };
+  if (extra.checkoutBundleId) {
+    metadata.tBookBookingIds = bookings.map((b) => String(b._id)).join(",");
+    metadata.tBookCheckoutBundleId = extra.checkoutBundleId;
+  }
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    success_url: `${storefrontBase}${CHECKOUT_SUCCESS_PATH}?bookingId=${primaryId}&session_id={CHECKOUT_SESSION_ID}&return_to=${returnTo}`,
+    cancel_url: `${storefrontBase}${CHECKOUT_SUCCESS_PATH}?bookingId=${primaryId}&cancelled=1&return_to=${returnTo}`,
+    client_reference_id: primaryId,
+    metadata,
+    payment_intent_data: { metadata },
+    line_items: bookings.map((booking) => ({
+      quantity: 1,
+      price_data: {
+        currency: stripeCurrencyCode(booking.currency),
+        unit_amount: toStripeUnitAmount(booking.totalHuf, booking.currency),
+        product_data: { name: booking.eventName, description: lineItemDescription(booking) },
+      },
+    })),
+    payment_method_types: ["card"],
+    expires_at: stripeCheckoutExpiresAtUnix(expiresAt),
+    customer_email: primary.customer.email,
+  });
+
+  const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+  for (const booking of bookings) {
+    assertValidBookingStatusTransition(booking.status, "checkout_started");
+    await bookingRepository.updateById(String(booking._id), {
+      status: "checkout_started",
+      stripeSessionId: session.id,
+      stripePaymentIntentId: paymentIntentId ?? null,
+      expiresAt,
+    });
+  }
+
+  return { sessionId: session.id, url: session.url, expiresAt };
+}
+
 /**
  * Full public booking flow: validate + price server-side (createPendingBooking,
  * already atomic against capacity), then open a Stripe Checkout Session.
@@ -112,57 +185,49 @@ export interface CheckoutResult {
 export async function createBookingWithCheckout(input: CreateBookingWithCheckoutInput, opts?: { groupId?: string; returnBaseUrl?: string }): Promise<CheckoutResult> {
   const booking = await createPendingBooking(input, { groupId: opts?.groupId });
 
-  const organizationId = booking.organizationId ? String(booking.organizationId) : null;
-  await assertOrgStripeReady(organizationId);
-
-  const now = new Date();
-  const ttlMs = clampReservationTtlMs();
-  const expiresAt = new Date(now.getTime() + ttlMs);
-
-  const stripe = await getOrgStripeClient(organizationId);
-  const storefrontBase = booking.checkoutReturnBaseUrl?.trim() || input.returnBaseUrl?.trim() || opts?.returnBaseUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const bookingId = String(booking._id);
-  const returnTo = encodeURIComponent(storefrontBase);
-
-  const description = [`${booking.guests} guests`, booking.hotelName ? `${booking.hotelName}, ${booking.nights} nights` : "entry only"].join(" · ");
-
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    success_url: `${storefrontBase}/book/success?bookingId=${bookingId}&session_id={CHECKOUT_SESSION_ID}&return_to=${returnTo}`,
-    cancel_url: `${storefrontBase}/book/success?bookingId=${bookingId}&cancelled=1&return_to=${returnTo}`,
-    client_reference_id: bookingId,
-    metadata: { tBookBookingId: bookingId, tBookOrganizationId: organizationId ?? "" },
-    payment_intent_data: { metadata: { tBookBookingId: bookingId, tBookOrganizationId: organizationId ?? "" } },
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: stripeCurrencyCode(booking.currency),
-          unit_amount: toStripeUnitAmount(booking.totalHuf, booking.currency),
-          product_data: { name: booking.eventName, description },
-        },
-      },
-    ],
-    payment_method_types: ["card"],
-    expires_at: stripeCheckoutExpiresAtUnix(expiresAt),
-    customer_email: booking.customer.email,
-  });
-
-  assertValidBookingStatusTransition(booking.status, "checkout_started");
-  const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
-  await bookingRepository.updateById(bookingId, {
-    status: "checkout_started",
-    stripeSessionId: session.id,
-    stripePaymentIntentId: paymentIntentId ?? null,
-    expiresAt,
-  });
+  let session: Awaited<ReturnType<typeof openStripeCheckout>>;
+  try {
+    session = await openStripeCheckout([booking], { returnBaseUrl: input.returnBaseUrl || opts?.returnBaseUrl });
+  } catch (error) {
+    // No session means nobody can pay for it: give the seats back now.
+    await expireBooking(String(booking._id));
+    throw error;
+  }
 
   return {
-    bookingId,
+    bookingId: String(booking._id),
     totalHuf: booking.totalHuf,
     checkoutUrl: session.url,
-    stripeSessionId: session.id,
-    expiresAt: expiresAt.toISOString(),
+    stripeSessionId: session.sessionId,
+    expiresAt: session.expiresAt.toISOString(),
+  };
+}
+
+/**
+ * Multi-event booking: one pending booking per event (sharing a
+ * checkoutBundleId) and one Stripe session with a line item per booking.
+ * If the session can't be opened, the bookings are expired so their
+ * capacity is released.
+ */
+export async function createMultiBookingWithCheckout(input: CreateMultiBookingInput, opts?: { groupId?: string; returnBaseUrl?: string }): Promise<MultiCheckoutResult> {
+  const { bookings, checkoutBundleId } = await createPendingMultiBookings(input, { groupId: opts?.groupId });
+
+  let session: Awaited<ReturnType<typeof openStripeCheckout>>;
+  try {
+    session = await openStripeCheckout(bookings, { returnBaseUrl: input.returnBaseUrl || opts?.returnBaseUrl, checkoutBundleId });
+  } catch (error) {
+    await releaseMultiBookings(bookings);
+    throw error;
+  }
+
+  return {
+    bookingId: String(bookings[0]!._id),
+    bookingIds: bookings.map((b) => String(b._id)),
+    checkoutBundleId,
+    totalHuf: bookings.reduce((sum, b) => sum + b.totalHuf, 0),
+    checkoutUrl: session.url,
+    stripeSessionId: session.sessionId,
+    expiresAt: session.expiresAt.toISOString(),
   };
 }
 
@@ -201,31 +266,59 @@ export async function afterBookingPaid(booking: IBooking): Promise<void> {
   }
 }
 
+type SessionRef = Pick<Stripe.Checkout.Session, "id" | "metadata" | "client_reference_id">;
+
+/**
+ * Every booking a Stripe session pays for: the primary from the metadata,
+ * the rest of a multi-event bundle from `tBookBookingIds`, plus anything
+ * stored with this session id. Callers still match on the session id when
+ * writing, so a forged id in the list can't touch another booking.
+ */
+async function bookingIdsForSession(session: SessionRef): Promise<{ primaryId: string | null; ids: string[] }> {
+  const primaryId = session.metadata?.tBookBookingId || session.client_reference_id || null;
+  const fromMetadata = (session.metadata?.tBookBookingIds ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => Types.ObjectId.isValid(id));
+  const stored = session.id ? (await bookingRepository.findAllByStripeSessionId(session.id)).map((b) => String(b._id)) : [];
+  const ids = [...new Set([primaryId, ...fromMetadata, ...stored].filter((id): id is string => Boolean(id) && Types.ObjectId.isValid(id!)))];
+  return { primaryId, ids };
+}
+
 /**
  * Idempotent webhook finalization: mark paid, issue vouchers, run
- * afterBookingPaid hooks. Safe to call more than once for the same Stripe
+ * afterBookingPaid hooks — for every booking in the session (several for a
+ * multi-event bundle). Safe to call more than once for the same Stripe
  * session (webhook retries, or the guest-polling fallback in
  * getCheckoutStatus racing the webhook) — bookingRepository.markPaidIfPending's
- * CAS filter makes every call after the first a no-op that returns null.
+ * CAS filter makes every call after the first a no-op. Returns the primary
+ * booking id when this call finalized anything, else null.
  */
 export async function finalizeBookingFromStripeSession(session: Pick<Stripe.Checkout.Session, "id" | "payment_status" | "metadata" | "client_reference_id">): Promise<string | null> {
   if (session.payment_status !== "paid") return null;
 
-  const bookingId = session.metadata?.tBookBookingId || session.client_reference_id;
-  if (!bookingId) return null;
+  const { primaryId, ids } = await bookingIdsForSession(session);
+  if (!primaryId) return null;
 
-  const booking = await bookingRepository.markPaidIfPending(bookingId, session.id, new Date());
-  if (!booking) return null; // already finalized (or session id mismatch) — safe no-op
-
-  await afterBookingPaid(booking);
-  return bookingId;
+  let finalizedAny = false;
+  for (const bookingId of ids) {
+    const booking = await bookingRepository.markPaidIfPending(bookingId, session.id, new Date());
+    if (!booking) continue; // already finalized (or session id mismatch) — safe no-op
+    finalizedAny = true;
+    await afterBookingPaid(booking);
+  }
+  return finalizedAny ? primaryId : null;
 }
 
-/** Releases the reservation when Stripe reports the checkout session expired. */
-export async function expireBookingFromStripeSession(session: Pick<Stripe.Checkout.Session, "id" | "metadata" | "client_reference_id">): Promise<void> {
-  const bookingId = session.metadata?.tBookBookingId || session.client_reference_id;
-  if (!bookingId) return;
-  await expireBooking(bookingId);
+/** Releases the reservations when Stripe reports the checkout session expired. */
+export async function expireBookingFromStripeSession(session: SessionRef): Promise<void> {
+  const { ids } = await bookingIdsForSession(session);
+  for (const bookingId of ids) {
+    const booking = await bookingRepository.findById(bookingId);
+    // Only bookings that were actually opened with this session.
+    if (booking && booking.stripeSessionId && booking.stripeSessionId !== session.id) continue;
+    await expireBooking(bookingId);
+  }
 }
 
 export interface CheckoutStatus {
@@ -263,11 +356,15 @@ export async function getCheckoutStatus(bookingId: string, stripeSessionId?: str
   const paid = resolved.status === "paid" || resolved.status === "confirmed";
   const vouchersReady = paid ? (await voucherRepository.findByBookingId(bookingId)).length > 0 : false;
 
+  // A multi-event bundle is paid as one: report its total, not the primary's share.
+  const bundle = resolved.checkoutBundleId ? await bookingRepository.findByCheckoutBundleId(resolved.checkoutBundleId) : [];
+  const parts = bundle.length > 1 ? bundle : [resolved];
+
   return {
     status: resolved.status,
-    totalHuf: resolved.totalHuf,
-    guests: resolved.guests,
-    eventName: resolved.eventName,
+    totalHuf: parts.reduce((sum, b) => sum + b.totalHuf, 0),
+    guests: parts.reduce((sum, b) => sum + b.guests, 0),
+    eventName: parts.map((b) => b.eventName).join(", "),
     vouchersReady,
     returnBaseUrl: resolved.checkoutReturnBaseUrl ?? null,
   };

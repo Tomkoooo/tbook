@@ -1,5 +1,5 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { EventGroupModel, EventModel, dbConnect, dbDisconnectAll } from "@tbook/db";
+import { BookingModel, EventGroupModel, EventModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { generateApiKey, hashApiKey } from "@tbook/services";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,17 +12,17 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * true end-to-end happy path per route.
  */
 
+const { createSession } = vi.hoisted(() => ({
+  createSession: vi.fn(async (_params: Record<string, unknown>) => ({
+    id: "cs_test_fake_session",
+    url: "https://checkout.stripe.com/pay/cs_test_fake_session",
+    payment_intent: "pi_test_fake",
+  })),
+}));
+
 vi.mock("stripe", () => {
   class FakeStripe {
-    checkout = {
-      sessions: {
-        create: vi.fn(async () => ({
-          id: "cs_test_fake_session",
-          url: "https://checkout.stripe.com/pay/cs_test_fake_session",
-          payment_intent: "pi_test_fake",
-        })),
-      },
-    };
+    checkout = { sessions: { create: createSession } };
   }
   return { default: FakeStripe };
 });
@@ -78,7 +78,7 @@ describe("v1 public API routes", () => {
   });
 
   beforeEach(async () => {
-    await Promise.all([EventGroupModel.deleteMany({}), EventModel.deleteMany({})]);
+    await Promise.all([EventGroupModel.deleteMany({}), EventModel.deleteMany({}), BookingModel.deleteMany({})]);
   });
 
   afterEach(() => {
@@ -131,18 +131,53 @@ describe("v1 public API routes", () => {
       expect(body.quote.totalHuf).toBe(10_000);
     });
 
-    it("501s for the legacy multi-event entries shape", async () => {
+    it("quotes several events together for the multi-event entries shape", async () => {
       const { POST } = await import("./quote/route");
-      const { plaintextKey } = await createGroup();
+      const { group, plaintextKey } = await createGroup();
+      const first = await createEvent(String(group._id));
+      const second = await createEvent(String(group._id), { name: "Második verseny", ticketFeeHuf: 3000 });
 
       const response = await POST(
         new Request("https://tbook.example.com/api/v1/quote", {
           method: "POST",
           headers: { "X-TBook-Api-Key": plaintextKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ entries: [{ eventId: "x", guests: 1 }] }),
+          body: JSON.stringify({
+            lodgingMode: "separate",
+            entries: [
+              { eventId: String(first._id), guests: 2 },
+              { eventId: String(second._id), guests: 1 },
+            ],
+          }),
         }),
       );
-      expect(response.status).toBe(501);
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.ok).toBe(true);
+      expect(body.lodgingMode).toBe("separate");
+      expect(body.entries.map((e: { eventName: string; quote: { totalHuf: number } }) => [e.eventName, e.quote.totalHuf])).toEqual([
+        ["Első WDF verseny", 10_000],
+        ["Második verseny", 3000],
+      ]);
+      expect(body.quote.totalHuf).toBe(13_000);
+      expect(body.quote.guests).toBe(3);
+      expect(body.quote.lines[0].label).toMatch(/^Első WDF verseny: /);
+    });
+
+    it("refuses a multi-event quote for an event outside the key's group", async () => {
+      const { POST } = await import("./quote/route");
+      const { group, plaintextKey } = await createGroup();
+      const { group: other } = await createGroup({ name: "Other", apiKeyHash: "other-hash" });
+      const mine = await createEvent(String(group._id));
+      const foreign = await createEvent(String(other._id));
+
+      const response = await POST(
+        new Request("https://tbook.example.com/api/v1/quote", {
+          method: "POST",
+          headers: { "X-TBook-Api-Key": plaintextKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ entries: [{ eventId: String(mine._id), guests: 1 }, { eventId: String(foreign._id), guests: 1 }] }),
+        }),
+      );
+      expect(response.status).toBe(404);
     });
   });
 
@@ -170,18 +205,101 @@ describe("v1 public API routes", () => {
       expect(body.stripeSessionId).toBe("cs_test_fake_session");
     });
 
-    it("501s for the legacy multi-event entries shape", async () => {
+    it("books several events in one Stripe checkout for the multi-event entries shape", async () => {
       const { POST } = await import("./bookings/route");
-      const { plaintextKey } = await createGroup();
+      const { group, plaintextKey } = await createGroup();
+      const first = await createEvent(String(group._id));
+      const second = await createEvent(String(group._id), { name: "Második verseny", ticketFeeHuf: 3000 });
 
       const response = await POST(
         new Request("https://tbook.example.com/api/v1/bookings", {
           method: "POST",
           headers: { "X-TBook-Api-Key": plaintextKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ entries: [{ eventId: "x", guests: 1 }] }),
+          body: JSON.stringify({
+            lodgingMode: "combined",
+            entries: [
+              { eventId: String(first._id), guests: 2 },
+              { eventId: String(second._id), guests: 1 },
+            ],
+            customer: { name: "Kovács Anna", email: "anna@example.com", phone: "+36301234567" },
+            returnBaseUrl: "https://site.example.com",
+          }),
         }),
       );
-      expect(response.status).toBe(501);
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.ok).toBe(true);
+      expect(body.bookingIds).toHaveLength(2);
+      expect(body.bookingId).toBe(body.bookingIds[0]);
+      expect(body.totalHuf).toBe(13_000);
+      expect(body.checkoutBundleId).toBeTruthy();
+
+      const bookings = await BookingModel.find({ checkoutBundleId: body.checkoutBundleId }).sort({ _id: 1 }).exec();
+      expect(bookings.map((b) => [b.eventName, b.status, b.stripeSessionId])).toEqual([
+        ["Első WDF verseny", "checkout_started", "cs_test_fake_session"],
+        ["Második verseny", "checkout_started", "cs_test_fake_session"],
+      ]);
+
+      expect(createSession).toHaveBeenCalledTimes(1);
+      const params = createSession.mock.calls[0]![0] as { line_items: unknown[]; success_url: string; metadata: Record<string, string> };
+      expect(params.line_items).toHaveLength(2);
+      expect(params.success_url).toMatch(/^https:\/\/site\.example\.com\/foglalas\/siker\?bookingId=/);
+      expect(params.metadata.tBookBookingIds).toBe(body.bookingIds.join(","));
+      expect(params.metadata.tBookCheckoutBundleId).toBe(body.checkoutBundleId);
+    });
+
+    it("gives the seats back when the Stripe session can't be opened", async () => {
+      const { POST } = await import("./bookings/route");
+      const { group, plaintextKey } = await createGroup();
+      const first = await createEvent(String(group._id));
+      const second = await createEvent(String(group._id), { name: "Második verseny" });
+      createSession.mockRejectedValueOnce(new Error("Stripe is down"));
+
+      const response = await POST(
+        new Request("https://tbook.example.com/api/v1/bookings", {
+          method: "POST",
+          headers: { "X-TBook-Api-Key": plaintextKey, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entries: [
+              { eventId: String(first._id), guests: 2 },
+              { eventId: String(second._id), guests: 1 },
+            ],
+            customer: { name: "Kovács Anna", email: "anna@example.com", phone: "+36301234567" },
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+      const events = await EventModel.find({}).exec();
+      expect(events.map((e) => e.soldGuestCount ?? 0)).toEqual([0, 0]);
+      const bookings = await BookingModel.find({}).exec();
+      expect(bookings.map((b) => b.status)).toEqual(["expired", "expired"]);
+    });
+
+    it("rolls back the whole bundle when one event has no room left", async () => {
+      const { POST } = await import("./bookings/route");
+      const { group, plaintextKey } = await createGroup();
+      const first = await createEvent(String(group._id));
+      const full = await createEvent(String(group._id), { name: "Telt ház", capacity: 1 });
+
+      const response = await POST(
+        new Request("https://tbook.example.com/api/v1/bookings", {
+          method: "POST",
+          headers: { "X-TBook-Api-Key": plaintextKey, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entries: [
+              { eventId: String(first._id), guests: 2 },
+              { eventId: String(full._id), guests: 2 },
+            ],
+            customer: { name: "Kovács Anna", email: "anna@example.com", phone: "+36301234567" },
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect(createSession).not.toHaveBeenCalled();
+      const reloaded = await EventModel.findById(first._id).exec();
+      expect(reloaded?.soldGuestCount ?? 0).toBe(0);
+      const left = await BookingModel.find({}).exec();
+      expect(left.every((b) => b.status === "expired")).toBe(true);
     });
 
     it("401s with no API key", async () => {

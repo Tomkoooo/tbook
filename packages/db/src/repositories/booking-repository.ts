@@ -82,6 +82,10 @@ export const bookingRepository = {
   findByStripeSessionId(stripeSessionId: string): Promise<IBooking | null> {
     return BookingModel.findOne({ stripeSessionId }).exec();
   },
+  /** Every booking paid through one Stripe session (a multi-event bundle has several). */
+  findAllByStripeSessionId(stripeSessionId: string): Promise<IBooking[]> {
+    return BookingModel.find({ stripeSessionId }).exec();
+  },
   /** SumUp webhook lookup: the random token we put in that checkout's return URL. */
   findByCardCheckoutToken(token: string): Promise<IBooking | null> {
     return BookingModel.findOne({ "cardCheckout.webhookToken": token }).exec();
@@ -111,7 +115,7 @@ export const bookingRepository = {
     ).exec();
   },
   findByCheckoutBundleId(checkoutBundleId: string): Promise<IBooking[]> {
-    return BookingModel.find({ checkoutBundleId }).exec();
+    return BookingModel.find({ checkoutBundleId }).sort({ _id: 1 }).exec();
   },
   /**
    * Read-then-write guest count for capacity checks. The legacy plugin used

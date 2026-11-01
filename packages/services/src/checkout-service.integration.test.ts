@@ -1,7 +1,7 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { BookingModel, EventModel, VoucherModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { AFTER_BOOKING_PAID_HOOKS, expireBookingFromStripeSession, finalizeBookingFromStripeSession, loadBookingForGuestCheckout, stripeCurrencyCode, toStripeUnitAmount } from "./checkout-service";
+import { AFTER_BOOKING_PAID_HOOKS, expireBookingFromStripeSession, finalizeBookingFromStripeSession, getCheckoutStatus, loadBookingForGuestCheckout, stripeCurrencyCode, toStripeUnitAmount } from "./checkout-service";
 
 async function createEvent(overrides: Partial<Record<string, unknown>> = {}) {
   return EventModel.create({
@@ -224,5 +224,87 @@ describe("expireBookingFromStripeSession", () => {
       const booking = await createCheckoutStartedBooking(String(event._id), "cs_real_session");
       await expect(loadBookingForGuestCheckout(String(booking._id), "cs_wrong_session")).rejects.toMatchObject({ status: 403 });
     });
+  });
+});
+
+describe("multi-event bundles (one Stripe session, several bookings)", () => {
+  let mongod: MongoMemoryServer;
+
+  beforeAll(async () => {
+    mongod = await MongoMemoryServer.create();
+    await dbConnect(mongod.getUri());
+  });
+
+  afterAll(async () => {
+    await dbDisconnectAll();
+    await mongod?.stop();
+  });
+
+  beforeEach(async () => {
+    await Promise.all([EventModel.deleteMany({}), BookingModel.deleteMany({}), VoucherModel.deleteMany({})]);
+  });
+
+  async function bundle(sessionId: string) {
+    const first = await createEvent({ capacity: 5 });
+    const second = await createEvent({ name: "Második verseny", capacity: 5 });
+    await EventModel.updateMany({}, { soldGuestCount: 2 }).exec();
+    const a = await createCheckoutStartedBooking(String(first._id), sessionId, { checkoutBundleId: "bundle-1" });
+    const b = await createCheckoutStartedBooking(String(second._id), sessionId, { checkoutBundleId: "bundle-1", eventName: "Második verseny", totalHuf: 6000 });
+    const metadata = { tBookBookingId: String(a._id), tBookBookingIds: `${a._id},${b._id}`, tBookCheckoutBundleId: "bundle-1" };
+    return { first, second, a, b, metadata };
+  }
+
+  it("marks every booking in the session paid and issues each one's vouchers", async () => {
+    const { a, b, metadata } = await bundle("cs_bundle_1");
+
+    const result = await finalizeBookingFromStripeSession({ id: "cs_bundle_1", payment_status: "paid", metadata, client_reference_id: String(a._id) });
+    expect(result).toBe(String(a._id));
+
+    const statuses = (await BookingModel.find({}).sort({ _id: 1 }).exec()).map((x) => x.status);
+    expect(statuses).toEqual(["paid", "paid"]);
+    expect(await VoucherModel.countDocuments({ bookingId: b._id })).toBe(2);
+
+    // Retried webhook: nothing left to do.
+    expect(await finalizeBookingFromStripeSession({ id: "cs_bundle_1", payment_status: "paid", metadata, client_reference_id: String(a._id) })).toBeNull();
+    expect(await VoucherModel.countDocuments({})).toBe(4);
+  });
+
+  it("finds the rest of the bundle by session id when the metadata only names the primary", async () => {
+    const { a } = await bundle("cs_bundle_2");
+    await finalizeBookingFromStripeSession({ id: "cs_bundle_2", payment_status: "paid", metadata: { tBookBookingId: String(a._id) }, client_reference_id: null });
+    expect((await BookingModel.find({ status: "paid" }).exec()).length).toBe(2);
+  });
+
+  it("does not pay a booking listed in the metadata that belongs to another session", async () => {
+    const { a, metadata } = await bundle("cs_bundle_3");
+    const event = await createEvent();
+    const stranger = await createCheckoutStartedBooking(String(event._id), "cs_someone_else");
+
+    await finalizeBookingFromStripeSession({
+      id: "cs_bundle_3",
+      payment_status: "paid",
+      metadata: { ...metadata, tBookBookingIds: `${metadata.tBookBookingIds},${stranger._id}` },
+      client_reference_id: String(a._id),
+    });
+    expect((await BookingModel.findById(stranger._id).exec())?.status).toBe("checkout_started");
+  });
+
+  it("expires every booking in the session and releases each event's capacity", async () => {
+    const { first, second, a, metadata } = await bundle("cs_bundle_4");
+
+    await expireBookingFromStripeSession({ id: "cs_bundle_4", metadata, client_reference_id: String(a._id) });
+
+    const statuses = (await BookingModel.find({}).exec()).map((x) => x.status);
+    expect(statuses).toEqual(["expired", "expired"]);
+    expect((await EventModel.findById(first._id).exec())?.soldGuestCount).toBe(0);
+    expect((await EventModel.findById(second._id).exec())?.soldGuestCount).toBe(0);
+  });
+
+  it("reports the bundle's total on the success page status", async () => {
+    const { a } = await bundle("cs_bundle_5");
+    const status = await getCheckoutStatus(String(a._id));
+    expect(status.totalHuf).toBe(16_000);
+    expect(status.guests).toBe(4);
+    expect(status.eventName).toBe("Első WDF verseny, Második verseny");
   });
 });

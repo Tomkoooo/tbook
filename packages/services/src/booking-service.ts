@@ -57,10 +57,9 @@ import {
  * boundaries vs. the legacy version, both deliberate (per the approved
  * plan and the fork directive for this pass):
  *
- * 1. Only the single-event quote/createPendingBooking path is ported here
- *    — quoteMulti/createPendingMultiBookings and the admin listing methods
- *    (listBookingsAdmin/listBookingsForExport/listSelectionFacets) are
- *    deferred to a later pass.
+ * 1. Only the single-event quote/createPendingBooking path lives here.
+ *    Multi-event booking (quoteMulti/createPendingMultiBookings) is in
+ *    multi-booking-service.ts and builds on these two functions.
  * 2. Stripe checkout session creation, invoice issuance, tDarts sync,
  *    voucher PDF issuance, and email sending are NOT called from here —
  *    that orchestration belongs to a not-yet-built checkout-service.ts.
