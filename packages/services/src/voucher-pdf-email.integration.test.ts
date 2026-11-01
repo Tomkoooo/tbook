@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { MongoMemoryServer } from "mongodb-memory-server";
@@ -7,7 +7,9 @@ import { BookingModel, EventModel, OrganizationModel, VoucherModel, dbConnect, d
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MailTransporter } from "./mailer";
 import { loadDefaultVoucherFont } from "./voucher-pdf";
-import { issueVoucherPdfAndEmail } from "./voucher-pdf-email";
+import { sendBookingEmail } from "./booking-email";
+import { encryptOrgSecret } from "./org-secrets";
+import { renderVoucherPdfForBooking } from "./voucher-pdf-email";
 import { issueVoucherRowsForBooking } from "./voucher-service";
 
 async function createEvent(overrides: Partial<Record<string, unknown>> = {}) {
@@ -46,7 +48,7 @@ async function createPaidBooking(eventId: string, overrides: Partial<Record<stri
   });
 }
 
-describe("issueVoucherPdfAndEmail", () => {
+describe("ticket PDF + booking email", () => {
   let mongod: MongoMemoryServer;
   let uploadsDir: string;
   let previousUploadsDir: string | undefined;
@@ -75,7 +77,7 @@ describe("issueVoucherPdfAndEmail", () => {
     await rm(uploadsDir, { recursive: true, force: true });
   }
 
-  it("renders, stores, stamps pdfFileName, and emails the voucher PDF", async () => {
+  it("renders the ticket on demand, stores nothing, and emails it in the booking email", async () => {
     const event = await createEvent();
     const booking = await createPaidBooking(String(event._id));
     await issueVoucherRowsForBooking(String(booking._id));
@@ -87,16 +89,15 @@ describe("issueVoucherPdfAndEmail", () => {
     process.env.EMAIL_PASS = "secret";
     process.env.EMAIL_FROM = "noreply@example.com";
 
-    const url = await issueVoucherPdfAndEmail(String(booking._id), { loadFont: async () => fontBytes, transporter });
-    expect(url).toBe(`/uploads/vouchers/${booking._id}.pdf`);
+    const result = await sendBookingEmail(String(booking._id), { loadFont: async () => fontBytes, transporter });
+    expect(result?.ticketCount).toBe(2);
 
-    const filePath = path.join(uploadsDir, "vouchers", `${booking._id}.pdf`);
-    const fileBytes = await readFile(filePath);
-    const reparsed = await PDFDocument.load(fileBytes);
-    expect(reparsed.getPageCount()).toBe(2); // one page per guest
+    const attached = sendMailMock.mock.calls[0]![0].attachments[0].content as Buffer;
+    expect((await PDFDocument.load(attached)).getPageCount()).toBe(2); // one page per guest
+    expect(await readdir(uploadsDir)).toEqual([]); // nothing written to disk
 
     const vouchers = await VoucherModel.find({ bookingId: booking._id }).exec();
-    expect(vouchers.every((v) => v.pdfFileName === url)).toBe(true);
+    expect(vouchers.every((v) => v.pdfFileName == null)).toBe(true);
     expect(vouchers.every((v) => v.emailedAt != null)).toBe(true);
     expect(vouchers.every((v) => v.lastSentToEmail === "anna@example.com")).toBe(true);
 
@@ -105,7 +106,103 @@ describe("issueVoucherPdfAndEmail", () => {
     expect(mailCall.to).toBe("anna@example.com");
     expect(mailCall.attachments).toHaveLength(1);
     expect(mailCall.attachments[0].contentType).toBe("application/pdf");
+    // Default template, filled in.
+    expect(mailCall.subject).toBe("Your booking for Első WDF verseny");
+    expect(mailCall.html).toContain("Kovács Anna");
+    expect(mailCall.html).toContain("your 2 tickets");
+    expect(mailCall.html).not.toMatch(/\{\{/);
 
+    await cleanupUploads();
+  });
+
+  it("attaches a legacy invoice file to the same single email and fills the org's template", async () => {
+    const event = await createEvent();
+    const org = await OrganizationModel.create({
+      name: "MDSZ",
+      slug: "mdsz",
+      settings: {
+        currency: "HUF",
+        emailTemplates: {
+          bookingConfirmation: { subject: "{{eventName}} – visszaigazolás", body: "<p>Kedves {{customerName}}! Csatolva: {{attachments}}.</p>" },
+          voucherDelivery: { subject: "Legacy", body: "<p>Legacy</p>" },
+        },
+      },
+    });
+    const invoiceUrl = `/uploads/invoices/SZ-1.pdf`;
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(path.join(uploadsDir, "invoices"), { recursive: true });
+    await writeFile(path.join(uploadsDir, "invoices", "SZ-1.pdf"), "%PDF-1.4 fake");
+    const booking = await createPaidBooking(String(event._id), {
+      organizationId: org._id,
+      customer: { name: "<Anna>", email: "anna@example.com", phone: "+36301234567", note: "" },
+      invoiceStatus: "issued",
+      invoiceId: "SZ-1",
+      invoicePdfFileName: invoiceUrl,
+    });
+    await issueVoucherRowsForBooking(String(booking._id));
+
+    const sendMailMock = vi.fn().mockResolvedValue({ messageId: "1" });
+    process.env.EMAIL_HOST = "smtp.example.com";
+    process.env.EMAIL_USER = "noreply@example.com";
+    process.env.EMAIL_PASS = "secret";
+
+    const result = await sendBookingEmail(String(booking._id), { loadFont: async () => fontBytes, transporter: { sendMail: sendMailMock } });
+
+    expect(result?.invoiceAttached).toBe(true);
+    expect(sendMailMock).toHaveBeenCalledOnce();
+    const mail = sendMailMock.mock.calls[0]![0];
+    expect(mail.subject).toBe("Első WDF verseny – visszaigazolás");
+    expect(mail.html).toBe("<p>Kedves &lt;Anna&gt;! Csatolva: your 2 tickets and your invoice.</p>");
+    expect(mail.attachments.map((a: { filename: string }) => a.filename)).toEqual(["Els_WDF_verseny.pdf", "invoice-SZ-1.pdf"]);
+    const reloaded = await BookingModel.findById(booking._id).exec();
+    expect(reloaded?.invoiceEmailSentAt).toBeTruthy();
+
+    await cleanupUploads();
+  });
+
+  it("downloads an issued Számlázz.hu invoice for the email when it isn't stored", async () => {
+    const event = await createEvent();
+    const org = await OrganizationModel.create({
+      name: "MDSZ",
+      slug: "mdsz-dl",
+      settings: { currency: "HUF", szamlazz: { enabled: true, agentKeyEnc: encryptOrgSecret("agent-key") } },
+    });
+    const booking = await createPaidBooking(String(event._id), { organizationId: org._id, invoiceStatus: "issued", invoiceId: "SZ-77" });
+    const invoiceProvider = { issueInvoice: vi.fn(), downloadInvoicePdf: vi.fn().mockResolvedValue(Buffer.from("%PDF-1.4 from szamlazz")) };
+    const sendMailMock = vi.fn().mockResolvedValue({ messageId: "1" });
+    process.env.EMAIL_HOST = "smtp.example.com";
+    process.env.EMAIL_USER = "noreply@example.com";
+    process.env.EMAIL_PASS = "secret";
+
+    const result = await sendBookingEmail(String(booking._id), { loadFont: async () => fontBytes, transporter: { sendMail: sendMailMock }, invoiceProvider });
+
+    expect(result?.invoiceAttached).toBe(true);
+    expect(invoiceProvider.downloadInvoicePdf).toHaveBeenCalledWith({ agentKey: "agent-key", invoiceNumber: "SZ-77" });
+    const files = sendMailMock.mock.calls[0]![0].attachments.map((a: { filename: string; content: Buffer }) => [a.filename, a.content.toString()]);
+    expect(files).toEqual([["invoice-SZ-77.pdf", "%PDF-1.4 from szamlazz"]]);
+    await cleanupUploads();
+  });
+
+  it("falls back to the legacy ticket template when no booking template is set", async () => {
+    const event = await createEvent();
+    const org = await OrganizationModel.create({
+      name: "Old Org",
+      slug: "old-org",
+      settings: { currency: "HUF", emailTemplates: { voucherDelivery: { subject: "Your ticket", body: "<p>Old text</p>" } } },
+    });
+    const booking = await createPaidBooking(String(event._id), { organizationId: org._id });
+    const sendMailMock = vi.fn().mockResolvedValue({ messageId: "1" });
+    process.env.EMAIL_HOST = "smtp.example.com";
+    process.env.EMAIL_USER = "noreply@example.com";
+    process.env.EMAIL_PASS = "secret";
+
+    // No vouchers issued: the confirmation still goes out, with nothing attached.
+    await sendBookingEmail(String(booking._id), { loadFont: async () => fontBytes, transporter: { sendMail: sendMailMock } });
+
+    const mail = sendMailMock.mock.calls[0]![0];
+    expect(mail.subject).toBe("Your ticket");
+    expect(mail.html).toBe("<p>Old text</p>");
+    expect(mail.attachments).toEqual([]);
     await cleanupUploads();
   });
 
@@ -140,22 +237,19 @@ describe("issueVoucherPdfAndEmail", () => {
     process.env.EMAIL_PASS = "secret";
     process.env.EMAIL_FROM = "noreply@example.com";
 
-    const url = await issueVoucherPdfAndEmail(String(booking._id), { loadFont: async () => fontBytes, transporter: { sendMail: sendMailMock } });
-    expect(url).not.toBeNull();
-
-    const filePath = path.join(uploadsDir, "vouchers", `${booking._id}.pdf`);
-    const fileBytes = await readFile(filePath);
-    const reparsed = await PDFDocument.load(fileBytes);
-    expect(reparsed.getPageCount()).toBe(1);
+    const result = await sendBookingEmail(String(booking._id), { loadFont: async () => fontBytes, transporter: { sendMail: sendMailMock } });
+    expect(result?.ticketCount).toBe(1);
+    const attached = sendMailMock.mock.calls[0]![0].attachments[0].content as Buffer;
+    expect((await PDFDocument.load(attached)).getPageCount()).toBe(1);
 
     await cleanupUploads();
   });
 
-  it("returns null and does nothing when the booking has no vouchers", async () => {
+  it("renders no ticket PDF when the booking has no vouchers", async () => {
     const event = await createEvent();
     const booking = await createPaidBooking(String(event._id));
     // Deliberately skip issueVoucherRowsForBooking.
-    expect(await issueVoucherPdfAndEmail(String(booking._id), { loadFont: async () => fontBytes })).toBeNull();
+    expect(await renderVoucherPdfForBooking(String(booking._id), { loadFont: async () => fontBytes })).toBeNull();
     await cleanupUploads();
   });
 });

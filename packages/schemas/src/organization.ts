@@ -37,6 +37,10 @@ export const orgSzamlazzSettingsSchema = z.object({
   sellerBank: z.string().default(""),
   sellerBankAccount: z.string().default(""),
   vatPercent: z.number().default(27),
+  /** Receipt (nyugta) number prefix — required by Számlázz.hu, e.g. "NYGTA". */
+  receiptPrefix: z.string().default("NYGTA"),
+  /** Receipt PDF layout: "A" = A4 (default), "N" = 80 mm receipt printer. */
+  receiptTemplate: z.enum(["A", "N"]).default("A"),
 });
 
 export const orgTDartsSettingsSchema = z.object({
@@ -129,6 +133,10 @@ export const organizationSettingsSchema = z.object({
   voucherPdfLayout: voucherPdfLayoutSchema.nullable().default(null),
   tdarts: orgTDartsSettingsSchema.optional(),
   sumup: orgSumUpSettingsSchema.optional(),
+  /** Org-level key the webshop uses for the inventory API; only its hash is stored. */
+  inventoryApi: z
+    .object({ keyHash: z.string().nullable().default(null), keyHint: z.string().default(""), createdAt: z.date().nullable().default(null) })
+    .optional(),
   /** Outbound webhook endpoints. Absent/empty means this org has none. */
   webhooks: z.array(orgWebhookSchema).default([]),
 });

@@ -1,13 +1,24 @@
 import { z } from "zod";
 import { entityStatusSchema, objectIdSchema, priceBasisSchema, vatPercentSchema } from "./common";
-import { dayPassConfigSchema, eventKindSchema, publicListingSchema, registrationUnitSchema, ticketFeeModeSchema } from "./event";
+import {
+  attendeeFieldSchemaModeSchema,
+  dayPassConfigSchema,
+  eligibilityFormRulesConfigSchema,
+  eligibilityPresetSchema,
+  eventKindSchema,
+  pricingRuleSchema,
+  publicListingSchema,
+  registrationUnitSchema,
+  ticketFeeModeSchema,
+} from "./event";
 import { packageDealSchema, roomTypeSchema } from "./hotel";
+import { attendeeFieldDefSchema } from "./value-objects";
 
 /**
  * Input shapes for the catalog console (event groups, events, hotels).
- * Updates are partial: the console edits the fields it exposes and leaves
- * everything else — attendee field schemas, eligibility rules, pricing
- * rules — exactly as the legacy data has it.
+ * The registration form, eligibility and pricing-rule fields are optional:
+ * leaving one out (an API caller, an older client) keeps what the event
+ * already has, while the console always sends all of them.
  */
 
 const nullableCount = z.number().int().min(0).nullable();
@@ -53,6 +64,17 @@ export const adminEventInputSchema = z
     status: entityStatusSchema.default("draft"),
     tdartsEnabled: z.boolean().default(false),
     tdartsTournamentCode: z.string().trim().max(100).nullable().default(null),
+    /** Extra registration questions asked per attendee. */
+    attendeeFieldSchema: z.array(attendeeFieldDefSchema).max(40).optional(),
+    attendeeFieldSchemaMode: attendeeFieldSchemaModeSchema.optional(),
+    eligibilityPreset: eligibilityPresetSchema.optional(),
+    eligibilityMinAge: z.number().int().min(0).max(120).nullable().optional(),
+    eligibilityMaxAge: z.number().int().min(0).max(120).nullable().optional(),
+    eligibilityAllowedGenders: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+    eligibilityBirthDateFieldKey: z.string().trim().max(100).nullable().optional(),
+    eligibilityGenderFieldKey: z.string().trim().max(100).nullable().optional(),
+    eligibilityFormRules: eligibilityFormRulesConfigSchema.nullable().optional(),
+    pricingRules: z.array(pricingRuleSchema).max(40).optional(),
   })
   .refine((event) => event.endDate >= event.startDate, {
     message: "The end date can't be before the start date.",
@@ -62,6 +84,12 @@ export const adminEventInputSchema = z
     message: "A day-pass event needs its weekday and weekend prices.",
     path: ["dayPass"],
   })
+  .refine(
+    (event) =>
+      !event.attendeeFieldSchema ||
+      new Set(event.attendeeFieldSchema.map((field) => field.key)).size === event.attendeeFieldSchema.length,
+    { message: "Each registration question needs its own key.", path: ["attendeeFieldSchema"] },
+  )
   .refine((event) => !event.salesOpensAt || !event.salesClosesAt || event.salesClosesAt >= event.salesOpensAt, {
     message: "Sales can't close before they open.",
     path: ["salesClosesAt"],

@@ -1,10 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readStoredFile, storeFile } from "./media-storage";
+import { readStoredFile } from "./media-storage";
 
-describe("media-storage", () => {
+describe("media-storage (read-only legacy uploads)", () => {
   let tempDir: string;
   let previousUploadsDir: string | undefined;
 
@@ -19,18 +19,10 @@ describe("media-storage", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("writes a file and returns a stable /uploads/ URL", async () => {
-    const result = await storeFile(Buffer.from("hello pdf bytes"), { subdir: "vouchers", fileName: "booking-1.pdf" });
-    expect(result.url).toBe("/uploads/vouchers/booking-1.pdf");
-
-    const readBack = await readStoredFile(result.url);
-    expect(readBack?.toString()).toBe("hello pdf bytes");
-  });
-
-  it("creates nested subdirectories as needed", async () => {
-    const result = await storeFile(Buffer.from("x"), { subdir: "invoices/2026", fileName: "inv-1.pdf" });
-    const readBack = await readStoredFile(result.url);
-    expect(readBack?.toString()).toBe("x");
+  it("reads a legacy file by its /uploads/ URL", async () => {
+    await mkdir(path.join(tempDir, "invoices", "2026"), { recursive: true });
+    await writeFile(path.join(tempDir, "invoices", "2026", "inv-1.pdf"), "hello pdf bytes");
+    expect((await readStoredFile("/uploads/invoices/2026/inv-1.pdf"))?.toString()).toBe("hello pdf bytes");
   });
 
   it("returns null for a URL outside the /uploads/ namespace", async () => {

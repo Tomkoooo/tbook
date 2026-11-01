@@ -117,6 +117,38 @@ describe("catalog-admin-service", () => {
     expect(ok.location.address).toBe("Budapest");
   });
 
+  it("saves the registration form, eligibility and price rules, and leaves them alone when an update omits them", async () => {
+    const { group } = await newGroup(orgId);
+    const rules = {
+      attendeeFieldSchema: [{ key: "birth", label: "Date of birth", type: "date" as const, required: true, helpText: "", sortOrder: 0 }],
+      eligibilityPreset: "custom" as const,
+      eligibilityMinAge: 18,
+      eligibilityAllowedGenders: ["female"],
+      pricingRules: [
+        { id: "r1", enabled: true, label: "Hotel guest discount", when: "with_hotel" as const, action: "adjust_ticket" as const, amount: -1000, amountMode: "fixed" as const },
+      ],
+    };
+    const event = await createEvent(orgId, { ...eventInput(String(group._id)), ...rules });
+    const stored = await getEventForOrg(orgId, String(event._id));
+    expect(stored.attendeeFieldSchema.map((f) => f.key)).toEqual(["birth"]);
+    expect(stored.eligibilityPreset).toBe("custom");
+    expect(stored.eligibilityMinAge).toBe(18);
+    expect(stored.pricingRules[0]?.amount).toBe(-1000);
+
+    // An update that doesn't mention them (an API client) must not wipe them.
+    await updateEvent(orgId, String(event._id), { ...eventInput(String(group._id)), name: "Renamed" });
+    const after = await getEventForOrg(orgId, String(event._id));
+    expect(after.name).toBe("Renamed");
+    expect(after.attendeeFieldSchema).toHaveLength(1);
+    expect(after.pricingRules).toHaveLength(1);
+
+    // Sending them empty does clear them.
+    await updateEvent(orgId, String(event._id), { ...eventInput(String(group._id)), attendeeFieldSchema: [], pricingRules: [], eligibilityPreset: "none" });
+    const cleared = await getEventForOrg(orgId, String(event._id));
+    expect(cleared.attendeeFieldSchema).toHaveLength(0);
+    expect(cleared.pricingRules).toHaveLength(0);
+  });
+
   it("creates a day-pass event and protects days that already have sales", async () => {
     const { group } = await newGroup(orgId);
     const dayPass = { weekdayPriceHuf: 4000, weekendPriceHuf: 7000, weekendDays: [6, 0], dailyCapacity: 20, capacityOverrides: {}, closedDays: [] };

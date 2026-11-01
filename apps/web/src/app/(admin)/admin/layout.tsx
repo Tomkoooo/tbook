@@ -24,11 +24,13 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   if (!user.isSystemAdmin && user.organizationIds.length === 0) {
     return (
-      <main className="tbook-centered">
-        <h1>No organization access</h1>
-        <p className="tbook-muted">
-          Your account isn&apos;t a member of any organization yet. Ask an org admin to invite you.
-        </p>
+      <main className="flex min-h-svh items-center justify-center p-4">
+        <div className="bg-card grid max-w-sm gap-2 rounded-xl border p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold">No organization access</h1>
+          <p className="text-muted-foreground text-sm">
+            Your account isn&apos;t a member of any organization yet. Ask an org admin to invite you.
+          </p>
+        </div>
       </main>
     );
   }
@@ -56,7 +58,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         />
         <SidebarInset>
           <AdminHeader />
-          <main className="tbook-admin-main w-full">{children}</main>
+          <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 pb-16 md:p-6">{children}</main>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

@@ -3,7 +3,12 @@
 import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AttendeeFieldDef } from "@tbook/schemas";
-import { Button, Card, Field, Input, Notice, Select } from "@tbook/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { CheckboxField, FormField, NativeSelect } from "@/components/form-bits";
+import { Notice } from "@/components/notice";
+import { SectionCard } from "@/components/section-card";
+import { StickyFormFooter } from "@/components/sticky-form-footer";
 import { createRegistrationAction, type CreateRegistrationResult } from "../../actions";
 import { AttendeeFields } from "./attendee-fields";
 
@@ -57,15 +62,15 @@ export function RegistrationForm({
   }
 
   return (
-    <form action={action} className="tbook-stack">
+    <form action={action} className="grid gap-4">
       {state && !state.ok ? <Notice tone="danger">{state.message}</Notice> : null}
       {state?.ok ? <Notice tone="success">{state.message}</Notice> : null}
 
       <input type="hidden" name="eventId" value={event.id} />
 
-      <Card title="Entries">
-        <div className="tbook-filter-form">
-          <Field
+      <SectionCard title="Entries">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField
             label={isTeam ? "Number of teams" : "Number of entries"}
             htmlFor="guests"
             hint={rosterSize ? `Each entry covers ${rosterSize} players` : undefined}
@@ -84,35 +89,39 @@ export function RegistrationForm({
                 router.replace(`/admin/bookings/new?eventId=${event.id}&guests=${value}`);
               }}
             />
-          </Field>
-          <Field label="Total" htmlFor="total" hint="Calculated server-side from the event's pricing">
-            <Input id="total" value={`${totalHuf.toLocaleString("hu-HU")} ${currency}`} readOnly disabled />
-          </Field>
+          </FormField>
+          <FormField label="Total" htmlFor="total" hint="Calculated server-side from the event's pricing">
+            <Input
+              id="total"
+              className="tabular-nums"
+              value={`${totalHuf.toLocaleString("hu-HU")} ${currency}`}
+              readOnly
+              disabled
+            />
+          </FormField>
         </div>
-      </Card>
+      </SectionCard>
 
-      <Card title="Who is paying / the contact">
-        <div className="tbook-filter-form">
-          <Field label="Name" htmlFor="customer.name">
+      <SectionCard title="Who is paying / the contact">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormField label="Name" htmlFor="customer.name">
             <Input id="customer.name" name="customer.name" required autoComplete="off" />
-          </Field>
-          <Field label="Email" htmlFor="customer.email">
+          </FormField>
+          <FormField label="Email" htmlFor="customer.email">
             <Input id="customer.email" name="customer.email" type="email" required autoComplete="off" />
-          </Field>
-          <Field label="Phone" htmlFor="customer.phone">
+          </FormField>
+          <FormField label="Phone" htmlFor="customer.phone">
             <Input id="customer.phone" name="customer.phone" required autoComplete="off" />
-          </Field>
-        </div>
-        <div style={{ marginTop: 12 }}>
-          <Field label="Note from the guest" htmlFor="customer.note">
+          </FormField>
+          <FormField label="Note from the guest" htmlFor="customer.note" className="sm:col-span-3">
             <Input id="customer.note" name="customer.note" placeholder="Dietary needs, arrival time…" />
-          </Field>
+          </FormField>
         </div>
-      </Card>
+      </SectionCard>
 
       {attendeeFields.length > 0 || isTeam ? (
-        <Card title={isTeam ? "Teams" : "Attendees"}>
-          <div className="tbook-stack">
+        <SectionCard title={isTeam ? "Teams" : "Attendees"}>
+          <div className="grid gap-4">
             {Array.from({ length: guests }, (_, index) => (
               <AttendeeFields
                 key={index}
@@ -125,86 +134,75 @@ export function RegistrationForm({
               />
             ))}
           </div>
-        </Card>
+        </SectionCard>
       ) : null}
 
-      <Card title="Payment">
-        <label className="tbook-row" style={{ gap: 6 }}>
-          <input
-            type="checkbox"
+      <SectionCard title="Payment">
+        <div className="grid gap-4">
+          <CheckboxField
             name="markPaid"
+            label="Already paid — issue entries and the invoice now"
             checked={markPaid}
-            onChange={(e) => setMarkPaid(e.target.checked)}
+            onCheckedChange={setMarkPaid}
           />
-          <span>Already paid — issue entries and the invoice now</span>
-        </label>
 
-        {markPaid ? (
-          <div className="tbook-filter-form" style={{ marginTop: 12 }}>
-            <Field label="Method" htmlFor="paymentMethod">
-              <Select
-                id="paymentMethod"
-                name="paymentMethod"
-                defaultValue="transfer"
-                options={[
-                  { value: "transfer", label: "Bank transfer" },
-                  { value: "cash", label: "Cash" },
-                  { value: "comp", label: "Comped / free" },
-                  { value: "other", label: "Other" },
-                ]}
-              />
-            </Field>
-            <Field label="Reference" htmlFor="paymentReference" hint="Transfer reference, receipt no.">
-              <Input id="paymentReference" name="paymentReference" placeholder="NAV-2026-0001" />
-            </Field>
-            <Field label="Payment note" htmlFor="paymentNote">
-              <Input id="paymentNote" name="paymentNote" placeholder="Arrived 2026-10-01" />
-            </Field>
-          </div>
-        ) : (
-          <p className="tbook-faint" style={{ marginTop: 8 }}>
-            The registration will be created as <strong>pending</strong>. It reserves capacity, but no entries or invoice
-            are issued until you mark it paid.
-          </p>
-        )}
-      </Card>
-
-      <Card title="Internal note and overrides">
-        <Field label="Admin note" htmlFor="adminNote" hint="Only visible in this console, never to the guest.">
-          <Input id="adminNote" name="adminNote" placeholder="Registered on behalf of the federation" />
-        </Field>
-
-        <div className="tbook-stack" style={{ marginTop: 12 }}>
-          <p className="tbook-faint" style={{ margin: 0 }}>
-            Tick only what you mean to override — each one bypasses a rule the public booking flow enforces.
-          </p>
-          <label className="tbook-row" style={{ gap: 6 }}>
-            <input type="checkbox" name="allowClosedSales" defaultChecked />
-            <span>Allow a closed or not-yet-open sales window</span>
-          </label>
-          <label className="tbook-row" style={{ gap: 6 }}>
-            <input type="checkbox" name="allowInactiveEvent" defaultChecked={event.status !== "active"} />
-            <span>Allow a draft or archived event</span>
-          </label>
-          <label className="tbook-row" style={{ gap: 6 }}>
-            <input type="checkbox" name="allowOverCapacity" />
-            <span>
-              Allow exceeding capacity
-              {event.capacity != null ? ` (${event.soldGuestCount}/${event.capacity} taken)` : ""}
-            </span>
-          </label>
-          <label className="tbook-row" style={{ gap: 6 }}>
-            <input type="checkbox" name="skipEligibility" />
-            <span>Skip the event&apos;s eligibility rules</span>
-          </label>
+          {markPaid ? (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField label="Method" htmlFor="paymentMethod">
+                <NativeSelect id="paymentMethod" name="paymentMethod" defaultValue="transfer">
+                  <option value="transfer">Bank transfer</option>
+                  <option value="cash">Cash</option>
+                  <option value="comp">Comped / free</option>
+                  <option value="other">Other</option>
+                </NativeSelect>
+              </FormField>
+              <FormField label="Reference" htmlFor="paymentReference" hint="Transfer reference, receipt no.">
+                <Input id="paymentReference" name="paymentReference" placeholder="NAV-2026-0001" />
+              </FormField>
+              <FormField label="Payment note" htmlFor="paymentNote">
+                <Input id="paymentNote" name="paymentNote" placeholder="Arrived 2026-10-01" />
+              </FormField>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              The registration will be created as <strong className="text-foreground">pending</strong>. It reserves
+              capacity, but no entries or invoice are issued until you mark it paid.
+            </p>
+          )}
         </div>
-      </Card>
+      </SectionCard>
 
-      <div className="tbook-row">
-        <Button type="submit" disabled={pending}>
+      <SectionCard
+        title="Internal note and overrides"
+        description="Tick only what you mean to override — each one bypasses a rule the public booking flow enforces."
+      >
+        <div className="grid gap-4">
+          <FormField label="Admin note" htmlFor="adminNote" hint="Only visible in this console, never to the guest.">
+            <Input id="adminNote" name="adminNote" placeholder="Registered on behalf of the federation" />
+          </FormField>
+          <div className="grid gap-3">
+            <CheckboxField name="allowClosedSales" defaultChecked label="Allow a closed or not-yet-open sales window" />
+            <CheckboxField
+              name="allowInactiveEvent"
+              defaultChecked={event.status !== "active"}
+              label="Allow a draft or archived event"
+            />
+            <CheckboxField
+              name="allowOverCapacity"
+              label={`Allow exceeding capacity${
+                event.capacity != null ? ` (${event.soldGuestCount}/${event.capacity} taken)` : ""
+              }`}
+            />
+            <CheckboxField name="skipEligibility" label="Skip the event's eligibility rules" />
+          </div>
+        </div>
+      </SectionCard>
+
+      <StickyFormFooter>
+        <Button type="submit" size="lg" disabled={pending}>
           {pending ? "Creating…" : markPaid ? "Create and mark paid" : "Create pending registration"}
         </Button>
-      </div>
+      </StickyFormFooter>
     </form>
   );
 }

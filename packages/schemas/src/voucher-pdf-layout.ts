@@ -22,6 +22,9 @@ export const voucherPdfBlockTypes = [
   "attendeeFields",
   "qrCode",
   "customText",
+  "image",
+  "divider",
+  "spacer",
   "footer",
 ] as const;
 export const voucherPdfBlockTypeSchema = z.enum(voucherPdfBlockTypes);
@@ -39,10 +42,33 @@ export const voucherPdfBlockSchema = z.object({
   /** Hex color, e.g. #111827. */
   color: z.string().optional(),
   align: voucherPdfBlockAlignSchema.optional(),
+  bold: z.boolean().optional(),
+  /** `image`: an uploaded or absolute-URL picture; `headerImage`: overrides the event's header image when set. */
+  src: z.string().max(1000).optional(),
+  /** `image`: width in points (empty = as wide as fits); `qrCode`: side length. */
+  width: z.number().min(0).max(600).optional(),
+  /** `image`: maximum height; `spacer`: the gap; `divider`: line thickness. */
+  height: z.number().min(0).max(600).optional(),
+  /** Empty space under the block, in points. */
+  spaceAfter: z.number().min(0).max(200).optional(),
+  /** `subtitle`: the small caption above the guest's name; empty hides it. */
+  label: z.string().max(100).optional(),
 });
 export type VoucherPdfBlock = z.infer<typeof voucherPdfBlockSchema>;
 
+export const voucherPdfPageSizes = ["a4", "a5", "a6"] as const;
+export const voucherPdfPageSizeSchema = z.enum(voucherPdfPageSizes);
+export type VoucherPdfPageSize = z.infer<typeof voucherPdfPageSizeSchema>;
+
 export const voucherPdfLayoutSchema = z.object({
+  pageSize: voucherPdfPageSizeSchema.default("a4"),
+  /** Hex page colour; empty = white. */
+  backgroundColor: z.string().default(""),
+  /** Full-page picture behind everything (uploaded or absolute URL); empty = none. */
+  backgroundImage: z.string().max(1000).default(""),
+  /** Hex colour of a frame around the page; empty or width 0 = no frame. */
+  borderColor: z.string().default(""),
+  borderWidth: z.number().min(0).max(20).default(0),
   margin: z.number().default(48),
   headerHeight: z.number().default(120),
   titleFontSize: z.number().default(20),
@@ -54,6 +80,11 @@ export const voucherPdfLayoutSchema = z.object({
 export type VoucherPdfLayout = z.infer<typeof voucherPdfLayoutSchema>;
 
 export const DEFAULT_VOUCHER_PDF_LAYOUT: VoucherPdfLayout = {
+  pageSize: "a4",
+  backgroundColor: "",
+  backgroundImage: "",
+  borderColor: "",
+  borderWidth: 0,
   margin: 48,
   headerHeight: 120,
   titleFontSize: 20,
@@ -63,14 +94,26 @@ export const DEFAULT_VOUCHER_PDF_LAYOUT: VoucherPdfLayout = {
   blocks: [
     { id: "header", type: "headerImage", enabled: true },
     { id: "title", type: "title", enabled: true, fontSize: 20, align: "left" },
-    { id: "subtitle", type: "subtitle", enabled: true, fontSize: 16 },
     { id: "schedule", type: "eventSchedule", enabled: true, fontSize: 11 },
     { id: "location", type: "location", enabled: true, fontSize: 11 },
+    { id: "divider", type: "divider", enabled: true, spaceAfter: 14 },
+    { id: "subtitle", type: "subtitle", enabled: true, fontSize: 16 },
     { id: "attendee", type: "attendeeFields", enabled: true, fontSize: 11 },
     { id: "qr", type: "qrCode", enabled: true, align: "center" },
     { id: "footer", type: "footer", enabled: true, fontSize: 9, color: "#6b7280" },
   ],
 };
+
+/** Merge fields an admin can put in any text block, e.g. `Welcome {{attendeeName}}!`. */
+export const VOUCHER_PDF_MERGE_FIELDS = [
+  { key: "attendeeName", label: "Guest name" },
+  { key: "eventName", label: "Event name" },
+  { key: "date", label: "Event date and time" },
+  { key: "validDate", label: "Date of the pass (day passes)" },
+  { key: "venue", label: "Venue address" },
+  { key: "bookingRef", label: "Booking reference" },
+  { key: "entryCode", label: "Short entry code" },
+] as const;
 
 /**
  * Safe-parses a possibly partial/malformed/legacy layout, falling back to
@@ -93,6 +136,11 @@ export function normalizeVoucherPdfLayout(raw: unknown): VoucherPdfLayout {
     : [];
 
   return {
+    pageSize: voucherPdfPageSizeSchema.safeParse(input.pageSize).success ? (input.pageSize as VoucherPdfPageSize) : base.pageSize,
+    backgroundColor: typeof input.backgroundColor === "string" ? input.backgroundColor : base.backgroundColor,
+    backgroundImage: typeof input.backgroundImage === "string" ? input.backgroundImage : base.backgroundImage,
+    borderColor: typeof input.borderColor === "string" ? input.borderColor : base.borderColor,
+    borderWidth: typeof input.borderWidth === "number" ? input.borderWidth : base.borderWidth,
     margin: typeof input.margin === "number" ? input.margin : base.margin,
     headerHeight: typeof input.headerHeight === "number" ? input.headerHeight : base.headerHeight,
     titleFontSize: typeof input.titleFontSize === "number" ? input.titleFontSize : base.titleFontSize,
@@ -112,5 +160,8 @@ export const VOUCHER_PDF_BLOCK_LABELS: Record<VoucherPdfBlockType, string> = {
   attendeeFields: "Résztvevői adatok",
   qrCode: "QR kód",
   customText: "Egyedi szöveg",
+  image: "Kép",
+  divider: "Elválasztó vonal",
+  spacer: "Térköz",
   footer: "Lábléc / oldalszám",
 };

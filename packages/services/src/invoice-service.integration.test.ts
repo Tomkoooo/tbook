@@ -1,8 +1,8 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { BookingModel, EventModel, OrganizationModel, dbConnect, dbDisconnectAll } from "@tbook/db";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptOrgSecret } from "./org-secrets";
-import { issueInvoiceForBooking, type SzamlazzInvoiceProvider } from "./invoice-service";
+import { getInvoicePdfForBooking, issueInvoiceForBooking, type SzamlazzInvoiceProvider } from "./invoice-service";
 
 async function createOrg(overrides: Partial<Record<string, unknown>> = {}) {
   return OrganizationModel.create({
@@ -153,7 +153,7 @@ describe("issueInvoiceForBooking", () => {
     const booking = await createBooking(String(org._id), String(event._id));
     const provider = fakeProvider({ issueInvoice: vi.fn().mockRejectedValue(new Error("Számlázz.hu is down")) } as never);
 
-    await expect(issueInvoiceForBooking(String(booking._id), { provider })).resolves.toBeUndefined();
+    await expect(issueInvoiceForBooking(String(booking._id), { provider })).resolves.toBeNull();
 
     const reloaded = await BookingModel.findById(booking._id).exec();
     expect(reloaded?.invoiceStatus).toBe("failed");
@@ -175,58 +175,38 @@ describe("issueInvoiceForBooking", () => {
     expect(call.items.find((i: { label: string }) => i.label === "Room").vatPercent).toBe(27); // no hotel linked -> falls back to ticket VAT
   });
 
-  describe("invoice email", () => {
-    const pdf = Buffer.from("%PDF-1.4 fake");
-    const withPdf = () => fakeProvider({ issueInvoice: vi.fn().mockResolvedValue({ invoiceId: "SZ-2026-002", pdfBuffer: pdf }) } as never);
+  it("returns the PDF it was issued with, stores none, and downloads it from Számlázz.hu later", async () => {
+    const org = await createOrg();
+    const event = await createEvent();
+    const booking = await createBooking(String(org._id), String(event._id));
+    const pdf = Buffer.from("%PDF-1.4 issued");
+    const provider = fakeProvider({
+      issueInvoice: vi.fn().mockResolvedValue({ invoiceId: "SZ-2026-9", pdfBuffer: pdf }),
+      downloadInvoicePdf: vi.fn().mockResolvedValue(Buffer.from("%PDF-1.4 downloaded")),
+    } as never);
 
-    beforeEach(() => {
-      vi.stubEnv("EMAIL_HOST", "smtp.test");
-      vi.stubEnv("EMAIL_USER", "tbook@test");
-      vi.stubEnv("EMAIL_PASS", "secret");
-    });
-    afterEach(() => vi.unstubAllEnvs());
+    expect(await issueInvoiceForBooking(String(booking._id), { provider })).toBe(pdf);
+    const reloaded = await BookingModel.findById(booking._id).exec();
+    expect(reloaded?.invoicePdfFileName ?? null).toBeNull();
 
-    it("emails the PDF for a counter sale and stamps invoiceEmailSentAt", async () => {
-      const org = await createOrg();
-      const event = await createEvent();
-      const booking = await createBooking(String(org._id), String(event._id), { source: "pos", paymentMethod: "cash" });
-      const provider = withPdf();
-      const transporter = { sendMail: vi.fn().mockResolvedValue({}) };
+    const downloaded = await getInvoicePdfForBooking(reloaded!, { provider });
+    expect(downloaded?.toString()).toBe("%PDF-1.4 downloaded");
+    expect(provider.downloadInvoicePdf).toHaveBeenCalledWith({ agentKey: expect.any(String), invoiceNumber: "SZ-2026-9" });
+  });
 
-      await issueInvoiceForBooking(String(booking._id), { provider, transporter });
+  it("does not send its own email — the PDF travels in the booking email", async () => {
+    const org = await createOrg();
+    const event = await createEvent();
+    const booking = await createBooking(String(org._id), String(event._id), { source: "pos", paymentMethod: "cash" });
+    const provider = fakeProvider({
+      issueInvoice: vi.fn().mockResolvedValue({ invoiceId: "SZ-2026-002", pdfBuffer: null }),
+    } as never);
 
-      expect(provider.issueInvoice.mock.calls[0]?.[0].paymentMethod).toBe("cash");
-      expect(transporter.sendMail).toHaveBeenCalledOnce();
-      const mail = transporter.sendMail.mock.calls[0]?.[0];
-      expect(mail.to).toBe("anna@example.com");
-      expect(mail.attachments[0].filename).toMatch(/^invoice-/);
-      const reloaded = await BookingModel.findById(booking._id).exec();
-      expect(reloaded?.invoiceEmailSentAt).toBeTruthy();
-    });
+    await issueInvoiceForBooking(String(booking._id), { provider });
 
-    it("leaves storefront bookings alone", async () => {
-      const org = await createOrg();
-      const event = await createEvent();
-      const booking = await createBooking(String(org._id), String(event._id), { source: "storefront" });
-      const transporter = { sendMail: vi.fn() };
-
-      await issueInvoiceForBooking(String(booking._id), { provider: withPdf(), transporter });
-
-      expect(transporter.sendMail).not.toHaveBeenCalled();
-    });
-
-    it("keeps the invoice issued when the mail fails", async () => {
-      const org = await createOrg();
-      const event = await createEvent();
-      const booking = await createBooking(String(org._id), String(event._id), { source: "pos" });
-      const transporter = { sendMail: vi.fn().mockRejectedValue(new Error("smtp down")) };
-      vi.spyOn(console, "error").mockImplementation(() => {});
-
-      await issueInvoiceForBooking(String(booking._id), { provider: withPdf(), transporter });
-
-      const reloaded = await BookingModel.findById(booking._id).exec();
-      expect(reloaded?.invoiceStatus).toBe("issued");
-      expect(reloaded?.invoiceEmailSentAt).toBeNull();
-    });
+    expect(provider.issueInvoice.mock.calls[0]?.[0].paymentMethod).toBe("cash");
+    const reloaded = await BookingModel.findById(booking._id).exec();
+    expect(reloaded?.invoiceStatus).toBe("issued");
+    expect(reloaded?.invoiceEmailSentAt).toBeNull();
   });
 });

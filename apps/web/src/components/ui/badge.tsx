@@ -17,6 +17,13 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
+        // Semantic status tones (see lib/status-tones.ts) — tinted, not solid,
+        // so a table full of statuses stays calm.
+        neutral: "bg-neutral-muted text-neutral",
+        info: "bg-info-muted text-info",
+        success: "bg-success-muted text-success",
+        warning: "bg-warning-muted text-warning",
+        danger: "bg-danger-muted text-danger",
       },
     },
     defaultVariants: {

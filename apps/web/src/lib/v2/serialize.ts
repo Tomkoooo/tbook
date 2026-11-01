@@ -96,7 +96,8 @@ export function toVoucherDto(voucher: IVoucher): VoucherDto {
     // The token itself is deliberately never returned: it is the bearer
     // credential that admits someone at the door, and the admin table has
     // no use for it. Only the PDF (already behind its own auth) carries it.
-    hasPdf: Boolean(voucher.pdfFileName),
+    // PDFs are rendered on demand, so any voucher that isn't void has one.
+    hasPdf: voucher.status !== "void",
   };
 }
 

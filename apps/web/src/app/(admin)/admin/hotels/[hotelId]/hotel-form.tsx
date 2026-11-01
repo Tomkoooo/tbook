@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField, NativeSelect, ResultNotice, StatusSelect } from "@/components/form-bits";
+import { StickyFormFooter, UnsavedBadge } from "@/components/sticky-form-footer";
 import { saveHotelAction, type CatalogActionResult } from "../../catalog-actions";
 
 export interface RoomTypeRow {
@@ -69,21 +70,25 @@ export function HotelForm({
   const [roomTypes, setRoomTypes] = useState<RoomTypeRow[]>(initial.roomTypes);
   const [packages, setPackages] = useState<PackageRow[]>(initial.packages);
 
+  const [dirty, setDirty] = useState(false);
   const [state, action, pending] = useActionState(async (_prev: CatalogActionResult | null, formData: FormData) => {
     const result = await saveHotelAction(hotelId, formData);
+    if (result.ok) setDirty(false);
     if (result.ok && !hotelId && result.id) router.replace(`/admin/hotels/${result.id}`);
     return result;
   }, null);
 
   function patchRoom(index: number, patch: Partial<RoomTypeRow>) {
+    setDirty(true);
     setRoomTypes((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
   function patchPackage(index: number, patch: Partial<PackageRow>) {
+    setDirty(true);
     setPackages((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
 
   return (
-    <form action={action} className="grid max-w-4xl gap-6">
+    <form action={action} onChange={() => setDirty(true)} className="grid gap-6">
       <input type="hidden" name="roomTypes" value={JSON.stringify(roomTypes)} />
       <input type="hidden" name="packages" value={JSON.stringify(packages)} />
 
@@ -243,12 +248,12 @@ export function HotelForm({
         </CardContent>
       </Card>
 
-      <ResultNotice result={state} />
-      <div>
-        <Button type="submit" disabled={pending}>
+      <StickyFormFooter status={<UnsavedBadge dirty={dirty} />}>
+        <Button type="submit" size="lg" disabled={pending}>
           {pending ? "Saving…" : hotelId ? "Save hotel" : "Create hotel"}
         </Button>
-      </div>
+        <ResultNotice result={state} />
+      </StickyFormFooter>
     </form>
   );
 }

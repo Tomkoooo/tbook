@@ -1,14 +1,18 @@
 import { ActionError } from "@tbook/actions";
 import { dayAvailability, toGrossAmount, todayDayKey } from "@tbook/domain";
-import type { BillingInfo, BookingAttendee, Customer, PosPaymentMethod, Selections } from "@tbook/schemas";
+import { WALK_IN_CUSTOMER_EMAIL, type BillingInfo, type BookingAttendee, type BookingDelivery, type Customer, type PosPaymentMethod, type Selections } from "@tbook/schemas";
 import { createAdminRegistration, type AdminRegistrationInput } from "./registration-admin-service";
 import { bookingRepository } from "@tbook/db";
 import { assertEventInOrg } from "./voucher-admin-service";
 
 /**
  * On-site sales ("point of sale"). A seller picks an event, takes cash or a
- * card payment, enters the customer, and the platform issues the paid
- * ticket and the invoice and emails both.
+ * card payment, and either
+ *   - "email": enters the customer, and the platform issues the ticket and
+ *     the invoice and emails both, or
+ *   - "receipt": a walk-in — no contact details, nothing emailed; a
+ *     Számlázz.hu receipt is issued for printing and the entries are
+ *     checked in on the spot (receipt-service.ts).
  *
  * Built on createAdminRegistration + markPaid on purpose: that path is the
  * one that already runs the full after-payment pipeline (vouchers, PDF and
@@ -22,8 +26,12 @@ import { assertEventInOrg } from "./voucher-admin-service";
 export interface PosSaleInput {
   eventId: string;
   tickets: number;
-  customer: Customer;
-  billing: BillingInfo;
+  /** Defaults to "email". */
+  delivery?: BookingDelivery;
+  /** Required for "email"; for a walk-in only the name is used, and it may be blank. */
+  customer: Partial<Customer>;
+  /** Required for "email" (the invoice); ignored for a walk-in. */
+  billing?: BillingInfo | null;
   paymentMethod: PosPaymentMethod;
   /** Card terminal slip / transaction number, or a cash receipt number. */
   reference?: string;
@@ -42,16 +50,35 @@ export interface PosSaleResult {
   invoiceStatus: string;
   invoiceError: string | null;
   invoiceEmailed: boolean;
+  delivery: BookingDelivery;
+  /** Walk-in sales only. */
+  receipt: { status: string; number: string | null; error: string | null; hasPdf: boolean } | null;
 }
 
 export function posRegistration(input: PosSaleInput): AdminRegistrationInput {
-  if (!input.billing) throw ActionError.validation("Billing details are required so an invoice can be issued.");
+  const walkIn = input.delivery === "receipt";
+  let customer: Customer;
+  if (walkIn) {
+    customer = {
+      name: input.customer.name?.trim() || "Walk-in customer",
+      email: WALK_IN_CUSTOMER_EMAIL,
+      phone: "-",
+      note: "",
+    };
+  } else {
+    if (!input.billing) throw ActionError.validation("Billing details are required so an invoice can be issued.");
+    if (!input.customer.name?.trim() || !input.customer.email?.trim() || !input.customer.phone?.trim()) {
+      throw ActionError.validation("Enter the customer's name, email and phone — the ticket and invoice are emailed to them.");
+    }
+    customer = { name: input.customer.name, email: input.customer.email, phone: input.customer.phone, note: input.customer.note ?? "" };
+  }
 
   return {
     eventId: input.eventId,
     guests: input.tickets,
-    customer: input.customer,
-    billing: input.billing,
+    delivery: walkIn ? "receipt" : "email",
+    customer,
+    billing: walkIn ? null : input.billing,
     attendees: input.attendees,
     selections: input.selections,
     adminNote: input.note,
@@ -92,6 +119,15 @@ export async function buildPosSaleResult(bookingId: string): Promise<PosSaleResu
     invoiceStatus: booking.invoiceStatus,
     invoiceError: booking.invoiceError ?? null,
     invoiceEmailed: Boolean(booking.invoiceEmailSentAt),
+    delivery: booking.delivery ?? "email",
+    receipt: booking.receipt
+      ? {
+          status: booking.receipt.status,
+          number: booking.receipt.number ?? null,
+          error: booking.receipt.error ?? null,
+          hasPdf: booking.receipt.status === "issued",
+        }
+      : null,
   };
 }
 

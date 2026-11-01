@@ -101,6 +101,8 @@ export async function resendEntriesAction(bookingId: string, formData: FormData)
 export interface ScanActionResult extends ActionResult {
   result?: "valid" | "duplicate" | "invalid" | "wrong_event" | "wrong_day";
   attendeeName?: string | null;
+  /** The pass's date, for a day-pass entry. */
+  validDate?: string | null;
 }
 
 /**
@@ -115,7 +117,10 @@ export async function scanAction(eventId: string, formData: FormData): Promise<S
     if (!code) return { ok: false, message: "Scan or type a code first." };
 
     const user = await getSessionUser();
-    const outcome = await scanVoucherAsAdmin(organizationId, code, { eventId, userId: user?.id ?? null });
+    // Dated passes are checked against today unless the operator picked another day (or "any").
+    const dayRaw = String(formData.get("day") ?? "").trim();
+    const day = dayRaw === "any" || /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : undefined;
+    const outcome = await scanVoucherAsAdmin(organizationId, code, { eventId, userId: user?.id ?? null, day });
 
     revalidatePath(`/admin/check-in/${eventId}`);
     return {
@@ -123,6 +128,7 @@ export async function scanAction(eventId: string, formData: FormData): Promise<S
       result: outcome.result,
       message: outcome.message,
       attendeeName: outcome.voucher?.displayName ?? null,
+      validDate: outcome.voucher?.validDate ?? null,
     };
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };

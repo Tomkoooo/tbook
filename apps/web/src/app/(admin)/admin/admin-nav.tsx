@@ -10,8 +10,11 @@ import {
   LayoutDashboard,
   ScanLine,
   ShoppingCart,
+  Building2,
+  Package,
+  Settings,
   Ticket,
-  Webhook,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -40,6 +43,8 @@ interface NavItem {
   icon: LucideIcon;
   /** Permission(s) the page requires, any one of which suffices; null = visible to every member. */
   permission: string | readonly string[] | null;
+  /** Extra path prefixes that should also mark this link active. */
+  alsoActiveOn?: string[];
 }
 
 /**
@@ -69,12 +74,21 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { href: "/admin/groups", label: "Event groups", icon: FolderKanban, permission: "group:read" },
       { href: "/admin/events", label: "Events", icon: CalendarDays, permission: "event:read" },
       { href: "/admin/hotels", label: "Hotels", icon: BedDouble, permission: "hotel:read" },
+      { href: "/admin/products", label: "Products", icon: Package, permission: ["product:read", "product:write", "event:read"] },
     ],
   },
   {
-    label: "Settings",
-    items: [{ href: "/admin/integrations", label: "Integrations", icon: Webhook, permission: "org:update" }],
+    label: "Organization",
+    items: [
+      { href: "/admin/members", label: "Team", icon: Users, permission: "member:read" },
+      { href: "/admin/settings", label: "Settings", icon: Settings, permission: "org:update", alsoActiveOn: ["/admin/integrations"] },
+    ],
   },
+];
+
+/** Only shown to platform system admins. */
+const PLATFORM_ITEMS: NavItem[] = [
+  { href: "/admin/organizations", label: "Organizations", icon: Building2, permission: null },
 ];
 
 /**
@@ -118,6 +132,11 @@ export function AdminNav({
                 <DropdownMenuItem asChild>
                   <Link href="/admin/select-org">Switch organization</Link>
                 </DropdownMenuItem>
+                {isSystemAdmin ? (
+                  <DropdownMenuItem asChild>
+                    <Link href="/admin/organizations">Manage all organizations</Link>
+                  </DropdownMenuItem>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
@@ -129,30 +148,9 @@ export function AdminNav({
           const items = group.items.filter(
             (item) => !item.permission || [item.permission].flat().some((permission) => granted.has(permission)),
           );
-          if (items.length === 0) return null;
-          return (
-            <SidebarGroup key={group.label}>
-              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {items.map((item) => {
-                    const active = item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
-                    return (
-                      <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
-                          <Link href={item.href} aria-current={active ? "page" : undefined}>
-                            <item.icon />
-                            <span>{item.label}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          );
+          return items.length === 0 ? null : <NavGroup key={group.label} label={group.label} items={items} pathname={pathname} />;
         })}
+        {isSystemAdmin ? <NavGroup label="Platform" items={PLATFORM_ITEMS} pathname={pathname} /> : null}
       </SidebarContent>
 
       <SidebarFooter>
@@ -162,5 +160,33 @@ export function AdminNav({
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  );
+}
+
+function NavGroup({ label, items, pathname }: { label: string; items: NavItem[]; pathname: string }) {
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>{label}</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {items.map((item) => {
+            const active =
+              item.href === "/admin"
+                ? pathname === "/admin"
+                : [item.href, ...(item.alsoActiveOn ?? [])].some((prefix) => pathname.startsWith(prefix));
+            return (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
+                  <Link href={item.href} aria-current={active ? "page" : undefined}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }

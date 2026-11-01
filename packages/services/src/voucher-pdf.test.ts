@@ -94,4 +94,16 @@ describe("buildVoucherPdf", () => {
     });
     expect(Buffer.from(bytes.slice(0, 5)).toString("ascii")).toBe("%PDF-");
   });
+
+  it("renders a layout with aligned, coloured and custom text blocks", async () => {
+    const layout = {
+      ...DEFAULT_VOUCHER_PDF_LAYOUT,
+      blocks: [
+        ...DEFAULT_VOUCHER_PDF_LAYOUT.blocks.map((b) => (b.type === "title" ? { ...b, align: "center" as const, color: "#b91c1c" } : b.type === "qrCode" ? { ...b, align: "right" as const } : b)),
+        { id: "note", type: "customText" as const, enabled: true, text: "Doors open at 9.", align: "right" as const, color: "#2563eb" },
+      ],
+    };
+    const bytes = await buildVoucherPdf({ pages: [pageInput()], layout });
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  });
 });

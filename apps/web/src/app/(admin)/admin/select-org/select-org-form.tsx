@@ -1,7 +1,9 @@
 "use client";
 
 import { useActionState } from "react";
-import { Button, Notice } from "@tbook/ui";
+import { Building2, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/notice";
 import { selectOrganizationAction, type ActionResult } from "../actions";
 
 /**
@@ -16,20 +18,29 @@ export function SelectOrgForm({ organizations }: { organizations: Array<{ id: st
   );
 
   return (
-    <form action={action} className="tbook-stack">
-      {state && !state.ok ? <Notice tone="danger">{state.message}</Notice> : null}
-
-      {organizations.map((org) => (
-        <div key={org.id} className="tbook-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <strong>{org.name}</strong>
-            <div className="tbook-faint">{org.slug}</div>
-          </div>
-          <Button type="submit" name="organizationId" value={org.id} disabled={pending}>
-            {pending ? "Opening…" : "Open"}
-          </Button>
+    <form action={action}>
+      {state && !state.ok ? (
+        <div className="p-4">
+          <Notice tone="danger">{state.message}</Notice>
         </div>
-      ))}
+      ) : null}
+
+      <ul className="divide-y">
+        {organizations.map((org) => (
+          <li key={org.id} className="flex items-center gap-3 px-5 py-3">
+            <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
+              <Building2 className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{org.name}</p>
+              <p className="text-muted-foreground truncate font-mono text-xs">{org.slug}</p>
+            </div>
+            <Button type="submit" size="sm" name="organizationId" value={org.id} disabled={pending}>
+              {pending ? "Opening…" : "Open"} <ChevronRight />
+            </Button>
+          </li>
+        ))}
+      </ul>
     </form>
   );
 }

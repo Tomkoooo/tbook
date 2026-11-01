@@ -7,7 +7,7 @@ import {
   voucherRepository,
   type IBooking,
 } from "@tbook/db";
-import type { BillingInfo, BookingAttendee, Customer, PaymentMethod, Selections } from "@tbook/schemas";
+import type { BillingInfo, BookingAttendee, BookingDelivery, Customer, PaymentMethod, Selections } from "@tbook/schemas";
 import {
   createPendingBooking,
   quote,
@@ -16,7 +16,7 @@ import {
 import { resolveBookingScope } from "./booking-admin-service";
 import { afterBookingPaid } from "./checkout-service";
 import { issueVoucherRowsForBooking } from "./voucher-service";
-import { storeFile } from "./media-storage";
+import { putBlob } from "./blob-store";
 import { dispatchWebhookEvent, bookingWebhookData } from "./webhook-service";
 
 /**
@@ -53,6 +53,8 @@ export interface AdminRegistrationInput {
   adminNote?: string;
   /** Where the registration was made. Defaults to the admin console. */
   source?: "admin" | "pos";
+  /** "receipt" = walk-in counter sale: no email, a printed Számlázz.hu receipt instead. */
+  delivery?: BookingDelivery;
   /** Rules an org manager may knowingly override. All default to off. */
   overrides?: BookingPolicyOverrides;
   /** Record the registration as already paid, skipping checkout entirely. */
@@ -148,6 +150,7 @@ export async function createAdminRegistration(
   // createPendingBooking, so the public path's signature stays untouched.
   await bookingRepository.updateById(bookingId, {
     source: input.source ?? "admin",
+    delivery: input.delivery ?? "email",
     createdByUserId: actor.userId ? new Types.ObjectId(actor.userId) : null,
     adminNote: input.adminNote?.trim() ?? "",
   } as Partial<IBooking>);
@@ -440,13 +443,10 @@ export async function attachInvoiceToBooking(
     if (bytes.subarray(0, 4).toString("latin1") !== "%PDF") {
       throw ActionError.validation("That file is not a PDF.");
     }
-    const { url } = await storeFile(bytes, {
-      subdir: "invoices",
-      // Named after the booking, not the upload, so the guest-facing
-      // download route can find it by booking id alone.
-      fileName: `${bookingId}-manual.pdf`,
-    });
-    set.invoicePdfFileName = url;
+    // An invoice from another system can't be fetched again, so it is kept
+    // (in the database blob store, owned by this organization).
+    set.invoicePdfBlobId = await putBlob({ bytes, contentType: "application/pdf", owner: organizationId, kind: "invoice" });
+    set.invoicePdfFileName = null;
   }
 
   const updated = await BookingModel.findByIdAndUpdate(bookingId, { $set: set }, { returnDocument: "after" }).exec();

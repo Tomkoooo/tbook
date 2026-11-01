@@ -24,9 +24,7 @@
       "@tbook/services": ["packages/services/src/index.ts"],
       "@tbook/services/*": ["packages/services/src/*"],
       "@tbook/actions": ["packages/actions/src/index.ts"],
-      "@tbook/actions/*": ["packages/actions/src/*"],
-      "@tbook/ui": ["packages/ui/src/index.ts"],
-      "@tbook/ui/*": ["packages/ui/src/*"]
+      "@tbook/actions/*": ["packages/actions/src/*"]
     }
   }
 }

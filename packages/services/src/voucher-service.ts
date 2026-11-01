@@ -170,6 +170,11 @@ export interface ScanVoucherOptions {
   now?: Date;
   /** "lookup" reports voucher status without checking it in. */
   mode?: "check_in" | "lookup";
+  /**
+   * Which day a dated (day-pass) voucher must be valid for. Defaults to today;
+   * pass a `yyyy-mm-dd` to check a specific day, or "any" to accept every day.
+   */
+  day?: string | "any";
 }
 
 /**
@@ -200,8 +205,14 @@ export async function scanVoucher(rawToken: string, opts: ScanVoucherOptions = {
   }
   // A day pass only opens the door on its own date. Checked after the
   // duplicate test so an already-used pass still reads "already checked in".
-  if (voucher.validDate && voucher.validDate !== todayDayKey(opts.now ?? new Date())) {
-    return { result: "wrong_day", message: `This pass is valid on ${voucher.validDate}, not today.`, voucher };
+  const wantedDay = opts.day === "any" ? null : (opts.day ?? todayDayKey(opts.now ?? new Date()));
+  if (voucher.validDate && wantedDay && voucher.validDate !== wantedDay) {
+    const isToday = !opts.day || opts.day === todayDayKey(opts.now ?? new Date());
+    return {
+      result: "wrong_day",
+      message: `This pass is valid on ${voucher.validDate}, not ${isToday ? "today" : wantedDay}.`,
+      voucher,
+    };
   }
   if (opts.mode === "lookup") {
     return { result: "valid", message: "Valid voucher (not yet checked in).", voucher };

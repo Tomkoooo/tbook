@@ -14,3 +14,4 @@ export * from "./org-invite";
 export * from "./user";
 export * from "./admin-api";
 export * from "./catalog-admin";
+export * from "./product";

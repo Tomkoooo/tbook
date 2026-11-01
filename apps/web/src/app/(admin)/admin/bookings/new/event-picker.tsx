@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Badge, Table } from "@tbook/ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 /**
  * Step one. Deliberately lists closed-sales, archived and sold-out events
@@ -22,58 +24,57 @@ export function EventPicker({
   }>;
 }) {
   return (
-    <div className="tbook-card-body-flush">
-      <Table>
-        <thead>
-          <tr>
-            <th>Event</th>
-            <th>Registration</th>
-            <th>Capacity</th>
-            <th>State</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {events.map((event) => {
-            const team = event.registrationUnit === "team" || event.playersPerTicket > 1;
-            const full = event.capacity != null && event.soldGuestCount >= event.capacity;
-            return (
-              <tr key={event.id}>
-                <td className="tbook-wrap">{event.name}</td>
-                <td>
-                  {team ? (
-                    <Badge tone="info">
-                      team
-                      {event.playersPerTicket > 1
-                        ? ` · ${event.playersPerTicket} players`
-                        : event.teamMemberLimit
-                          ? ` · up to ${event.teamMemberLimit}`
-                          : ""}
-                    </Badge>
-                  ) : (
-                    <Badge tone="neutral">individual</Badge>
-                  )}
-                </td>
-                <td className="tbook-num">
-                  {event.capacity == null ? "—" : `${event.soldGuestCount}/${event.capacity}`}
-                </td>
-                <td>
-                  <Badge tone={event.status === "active" ? "success" : "neutral"}>{event.status}</Badge>
-                  {full ? <Badge tone="warning">full</Badge> : null}
-                </td>
-                <td>
-                  <Link
-                    className="tbook-btn tbook-btn-secondary tbook-btn-sm"
-                    href={`/admin/bookings/new?eventId=${event.id}`}
-                  >
-                    Select
-                  </Link>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Event</TableHead>
+          <TableHead>Registration</TableHead>
+          <TableHead className="text-right">Capacity</TableHead>
+          <TableHead>State</TableHead>
+          <TableHead>
+            <span className="sr-only">Select</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {events.map((event) => {
+          const team = event.registrationUnit === "team" || event.playersPerTicket > 1;
+          const full = event.capacity != null && event.soldGuestCount >= event.capacity;
+          return (
+            <TableRow key={event.id}>
+              <TableCell className="font-medium whitespace-normal">{event.name}</TableCell>
+              <TableCell>
+                {team ? (
+                  <Badge variant="info">
+                    team
+                    {event.playersPerTicket > 1
+                      ? ` · ${event.playersPerTicket} players`
+                      : event.teamMemberLimit
+                        ? ` · up to ${event.teamMemberLimit}`
+                        : ""}
+                  </Badge>
+                ) : (
+                  <Badge variant="neutral">individual</Badge>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {event.capacity == null ? "—" : `${event.soldGuestCount}/${event.capacity}`}
+              </TableCell>
+              <TableCell>
+                <div className="flex gap-1">
+                  <Badge variant={event.status === "active" ? "success" : "neutral"}>{event.status}</Badge>
+                  {full ? <Badge variant="warning">full</Badge> : null}
+                </div>
+              </TableCell>
+              <TableCell className="text-right">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/admin/bookings/new?eventId=${event.id}`}>Select</Link>
+                </Button>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }

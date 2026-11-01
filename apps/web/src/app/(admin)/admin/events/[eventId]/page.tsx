@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import { ActionError } from "@tbook/actions";
-import { describeDayPassAvailability, getEventForOrg, listGroupsForOrg } from "@tbook/services";
+import { expandLegacyEligibilityForEdit } from "@tbook/domain";
+import { describeDayPassAvailability, getEventForOrg, getOrganizationSettings, listGroupsForOrg } from "@tbook/services";
 import { PageTitle } from "@/components/page-title";
 import { requireAdminPage, toDateInput, toDateTimeInput } from "@/lib/admin-page";
-import { EMPTY_DAY_PASS, EventForm, type EventFormValues } from "./event-form";
+import { EMPTY_DAY_PASS, EMPTY_ELIGIBILITY, EventForm, type EventFormValues } from "./event-form";
 import { DayAvailabilityTable } from "./day-availability-table";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
 
   if (isNew) {
     const today = toDateInput(new Date());
+    const { currency: orgCurrency } = await getOrganizationSettings(organizationId);
     const initial: EventFormValues = {
       kind: "standard",
       dayPass: EMPTY_DAY_PASS,
@@ -30,7 +32,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
       endTime: "",
       salesOpensAt: "",
       salesClosesAt: "",
-      currency: "HUF",
+      currency: orgCurrency,
       ticketFeeHuf: 0,
       ticketFeeMode: "per_person",
       registrationUnit: "person",
@@ -43,6 +45,10 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
       status: "draft",
       tdartsEnabled: false,
       tdartsTournamentCode: "",
+      attendeeFieldSchema: [],
+      attendeeFieldSchemaMode: "extend",
+      eligibility: EMPTY_ELIGIBILITY,
+      pricingRules: [],
     };
     return (
       <>
@@ -61,6 +67,9 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   if (!permissions.has("event:write")) {
     return <PageTitle title={event.name} description="You have read-only access to this event." />;
   }
+
+  const eligibility = expandLegacyEligibilityForEdit(event);
+  const formRules = event.eligibilityFormRules;
 
   return (
     <>
@@ -104,6 +113,42 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
           status: event.status,
           tdartsEnabled: event.tdarts?.enabled ?? false,
           tdartsTournamentCode: event.tdarts?.tournamentCode ?? "",
+          attendeeFieldSchema: [...(event.attendeeFieldSchema ?? [])]
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((field) => ({
+              key: field.key,
+              label: field.label,
+              type: field.type,
+              required: field.required ?? false,
+              helpText: field.helpText ?? "",
+              choices: field.choices?.map((choice) => ({ value: choice.value, label: choice.label })),
+            })),
+          attendeeFieldSchemaMode: event.attendeeFieldSchemaMode ?? "extend",
+          eligibility: {
+            preset: eligibility.eligibilityPreset,
+            minAge: eligibility.eligibilityMinAge ?? "",
+            maxAge: eligibility.eligibilityMaxAge ?? "",
+            genders: eligibility.eligibilityAllowedGenders ?? [],
+            birthDateFieldKey: event.eligibilityBirthDateFieldKey ?? "",
+            genderFieldKey: event.eligibilityGenderFieldKey ?? "",
+            logic: formRules?.logic ?? "and",
+            rules: (formRules?.rules ?? []).map((rule) => ({
+              id: rule.id,
+              fieldKey: rule.fieldKey,
+              op: rule.op,
+              value: rule.value ?? "",
+              message: rule.message ?? "",
+            })),
+          },
+          pricingRules: (event.pricingRules ?? []).map((rule) => ({
+            id: rule.id,
+            enabled: rule.enabled ?? true,
+            label: rule.label,
+            when: rule.when,
+            action: rule.action,
+            amount: rule.amount ?? 0,
+            amountMode: rule.amountMode ?? "fixed",
+          })),
         }}
       />
       <DayAvailabilityTable days={describeDayPassAvailability(event)} currency={event.currency} />

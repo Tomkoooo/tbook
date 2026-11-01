@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageTitle } from "@/components/page-title";
+import { SalesTabs } from "./sales-tabs";
 import { formatDate, requireAdminPage } from "@/lib/admin-page";
 import { SaleForm } from "./sale-form";
 
@@ -37,6 +38,7 @@ export default async function SalesPage({
     return (
       <>
         <PageTitle title="Point of sale" description="Pick the event you're selling tickets for." />
+        <SalesTabs active="tickets" />
         {events.length === 0 ? (
           <Alert>
             <AlertTitle>Nothing on sale</AlertTitle>
@@ -104,7 +106,7 @@ export default async function SalesPage({
     <>
       <PageTitle
         title={selected.name}
-        description="Take payment, enter the customer, and the ticket and invoice are emailed straight away."
+        description="Take payment, then either email the ticket and invoice, or print a receipt for a walk-in."
         actions={
           <Link className="text-muted-foreground inline-flex items-center gap-1 text-sm hover:underline" href="/admin/sales">
             <ArrowLeft className="size-4" /> Other event

@@ -146,6 +146,34 @@ export const cardCheckoutSchema = z.object({
 });
 export type CardCheckout = z.infer<typeof cardCheckoutSchema>;
 
+/**
+ * How the customer receives their documents. "email" (every legacy and
+ * online booking): one email with ticket + invoice. "receipt": a walk-in
+ * counter sale — nothing is emailed; a Számlázz.hu receipt (nyugta) is
+ * issued and printed at the counter instead, and the entries are checked
+ * in on the spot.
+ */
+export const bookingDeliveries = ["email", "receipt"] as const;
+export const bookingDeliverySchema = z.enum(bookingDeliveries);
+export type BookingDelivery = z.infer<typeof bookingDeliverySchema>;
+
+/** Placeholder contact for walk-in sales; `.invalid` is a reserved domain that can never receive mail. */
+export const WALK_IN_CUSTOMER_EMAIL = "walk-in@pos.invalid";
+
+export const receiptStatuses = ["none", "pending", "issued", "failed"] as const;
+export const receiptStatusSchema = z.enum(receiptStatuses);
+export type ReceiptStatus = z.infer<typeof receiptStatusSchema>;
+
+export const bookingReceiptSchema = z.object({
+  status: receiptStatusSchema.default("none"),
+  /** Számlázz.hu receipt number, e.g. NYGTA-2026-123. */
+  number: z.string().nullable().default(null),
+  pdfFileName: z.string().nullable().default(null),
+  error: z.string().nullable().default(null),
+  issuedAt: z.date().nullable().default(null),
+});
+export type BookingReceipt = z.infer<typeof bookingReceiptSchema>;
+
 export const bookingSchema = z.object({
   id: objectIdSchema,
   organizationId: objectIdSchema.nullable().default(null),
@@ -178,7 +206,10 @@ export const bookingSchema = z.object({
   paidAt: z.date().nullable().default(null),
   invoiceStatus: invoiceStatusSchema.default("none"),
   invoiceId: z.string().nullable().default(null),
+  /** Legacy: a PDF file on disk. New invoices aren't stored — Számlázz.hu ones are fetched on demand. */
   invoicePdfFileName: z.string().nullable().default(null),
+  /** A manually attached invoice PDF (not from Számlázz.hu), in the blob store. */
+  invoicePdfBlobId: z.string().nullable().default(null),
   invoiceError: z.string().nullable().default(null),
   invoiceEmailSentAt: z.date().nullable().default(null),
   /** Storefront origin for the post-payment redirect (e.g. the WDF site). */
@@ -198,6 +229,9 @@ export const bookingSchema = z.object({
   invoiceNumber: z.string().nullable().default(null),
   /** Present when a seller charged the card on a SumUp reader from the point of sale. */
   cardCheckout: cardCheckoutSchema.nullable().default(null),
+  delivery: bookingDeliverySchema.default("email"),
+  /** Present only for walk-in ("receipt") sales. */
+  receipt: bookingReceiptSchema.nullable().default(null),
   /** Free-form admin note, separate from the guest's own checkout note. */
   adminNote: z.string().default(""),
   createdAt: z.date(),

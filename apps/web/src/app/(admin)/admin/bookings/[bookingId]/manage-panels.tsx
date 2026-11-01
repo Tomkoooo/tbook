@@ -2,7 +2,11 @@
 
 import { useActionState, useState } from "react";
 import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
-import { Button, Card, Field, Input, Notice, Select } from "@tbook/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { CheckboxField, FormField, NativeSelect } from "@/components/form-bits";
+import { Notice } from "@/components/notice";
+import { SectionCard } from "@/components/section-card";
 import {
   attachInvoiceAction,
   markPaidAction,
@@ -23,41 +27,32 @@ export function MarkPaidPanel({ bookingId }: { bookingId: string }) {
   );
 
   return (
-    <Card title="Record a payment">
-      {state?.message ? <Notice tone={state.ok ? "success" : "danger"}>{state.message}</Notice> : null}
-
-      <form action={action} className="tbook-stack" style={{ marginTop: state?.message ? 12 : 0 }}>
-        <div className="tbook-filter-form">
-          <Field label="Method" htmlFor="method">
-            <Select
-              id="method"
-              name="method"
-              defaultValue="transfer"
-              options={[
-                { value: "transfer", label: "Bank transfer" },
-                { value: "cash", label: "Cash" },
-                { value: "comp", label: "Comped / free" },
-                { value: "other", label: "Other" },
-              ]}
-            />
-          </Field>
-          <Field label="Reference" htmlFor="reference" hint="Transfer reference, receipt no.">
+    <SectionCard title="Record a payment" description="Issues the entries, invoice and any integrations, exactly as a card payment would.">
+      <form action={action} className="grid gap-4">
+        {state?.message ? <Notice tone={state.ok ? "success" : "danger"}>{state.message}</Notice> : null}
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormField label="Method" htmlFor="method">
+            <NativeSelect id="method" name="method" defaultValue="transfer">
+              <option value="transfer">Bank transfer</option>
+              <option value="cash">Cash</option>
+              <option value="comp">Comped / free</option>
+              <option value="other">Other</option>
+            </NativeSelect>
+          </FormField>
+          <FormField label="Reference" htmlFor="reference" hint="Transfer reference, receipt no.">
             <Input id="reference" name="reference" placeholder="NAV-2026-0001" />
-          </Field>
-          <Field label="Note" htmlFor="note">
+          </FormField>
+          <FormField label="Note" htmlFor="note">
             <Input id="note" name="note" placeholder="Arrived 2026-10-01" />
-          </Field>
+          </FormField>
         </div>
         <div>
           <Button type="submit" disabled={pending}>
             {pending ? "Recording…" : "Mark paid"}
           </Button>
-          <span className="tbook-faint" style={{ marginLeft: 8 }}>
-            Issues the entries, invoice and any integrations, exactly as a card payment would.
-          </span>
         </div>
       </form>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -95,50 +90,46 @@ export function EditBookingPanel({
   const canEditAttendees = attendeeFields.length > 0 || isTeam;
 
   return (
-    <Card title="Edit details">
-      {state?.message ? <Notice tone={state.ok ? "success" : "danger"}>{state.message}</Notice> : null}
+    <SectionCard title="Edit details">
+      <form action={action} className="grid gap-4">
+        {state?.message ? <Notice tone={state.ok ? "success" : "danger"}>{state.message}</Notice> : null}
+        {state?.tdartsResyncRequired ? (
+          <Notice tone="warning">
+            This booking is already enrolled in tDarts. The tDarts partner API has no update endpoint yet, so the
+            tournament roster still holds the previous details — correct them in tDarts directly for now.
+          </Notice>
+        ) : null}
 
-      {state?.tdartsResyncRequired ? (
-        <Notice tone="warning">
-          This booking is already enrolled in tDarts. The tDarts partner API has no update endpoint yet, so the
-          tournament roster still holds the previous details — correct them in tDarts directly for now.
-        </Notice>
-      ) : null}
-
-      <form action={action} className="tbook-stack" style={{ marginTop: 12 }}>
         <input type="hidden" name="guests" value={guests} />
 
-        <div className="tbook-filter-form">
-          <Field label="Contact name" htmlFor="customer.name">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormField label="Contact name" htmlFor="customer.name">
             <Input id="customer.name" name="customer.name" defaultValue={customer.name} required />
-          </Field>
-          <Field label="Email" htmlFor="customer.email">
+          </FormField>
+          <FormField label="Email" htmlFor="customer.email">
             <Input id="customer.email" name="customer.email" type="email" defaultValue={customer.email} required />
-          </Field>
-          <Field label="Phone" htmlFor="customer.phone">
+          </FormField>
+          <FormField label="Phone" htmlFor="customer.phone">
             <Input id="customer.phone" name="customer.phone" defaultValue={customer.phone} required />
-          </Field>
+          </FormField>
         </div>
 
-        <Field label="Admin note" htmlFor="adminNote" hint="Internal only — never shown to the guest.">
+        <FormField label="Admin note" htmlFor="adminNote" hint="Internal only — never shown to the guest.">
           <Input id="adminNote" name="adminNote" defaultValue={adminNote} />
-        </Field>
+        </FormField>
 
         {canEditAttendees ? (
           <>
-            <label className="tbook-row" style={{ gap: 6 }}>
-              <input
-                type="checkbox"
-                name="editsAttendees"
-                checked={editsAttendees}
-                onChange={(e) => setEditsAttendees(e.target.checked)}
-              />
-              <span>Also edit {isTeam ? "team rosters" : "attendee details"}</span>
-            </label>
+            <CheckboxField
+              name="editsAttendees"
+              label={`Also edit ${isTeam ? "team rosters" : "attendee details"}`}
+              checked={editsAttendees}
+              onCheckedChange={setEditsAttendees}
+            />
 
             {editsAttendees ? (
-              <div className="tbook-stack">
-                <p className="tbook-faint" style={{ margin: 0 }}>
+              <div className="grid gap-4">
+                <p className="text-muted-foreground text-sm">
                   Renaming an attendee updates their entry ticket. Entries already checked in are left as they are —
                   they record who was admitted.
                 </p>
@@ -146,21 +137,13 @@ export function EditBookingPanel({
                   const attendee = attendees[index];
                   const members = attendee?.members ?? [];
                   return (
-                    <fieldset
-                      key={index}
-                      style={{
-                        border: "1px solid var(--tbook-border)",
-                        borderRadius: "var(--tbook-radius-sm)",
-                        padding: 12,
-                        margin: 0,
-                      }}
-                    >
-                      <legend className="tbook-field-label">
+                    <fieldset key={index} className="grid gap-3 rounded-lg border p-4">
+                      <legend className="px-1 text-sm font-medium">
                         {isTeam ? `Team ${index + 1}` : `Attendee ${index + 1}`}
                       </legend>
 
                       {attendeeFields.length > 0 ? (
-                        <div className="tbook-filter-form">
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                           {attendeeFields.map((field) => (
                             <AttendeeField
                               key={field.key}
@@ -176,14 +159,9 @@ export function EditBookingPanel({
 
                       {isTeam
                         ? members.map((member, memberIndex) => (
-                            <div
-                              key={memberIndex}
-                              style={{ borderLeft: "3px solid var(--tbook-border-strong)", paddingLeft: 12, marginTop: 10 }}
-                            >
-                              <p className="tbook-field-label" style={{ margin: "0 0 6px" }}>
-                                Player {memberIndex + 1}
-                              </p>
-                              <div className="tbook-filter-form">
+                            <div key={memberIndex} className="grid gap-2 border-l-2 pl-4">
+                              <p className="text-sm font-medium">Player {memberIndex + 1}</p>
+                              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {teamMemberFields.map((field) => (
                                   <AttendeeField
                                     key={field.key}
@@ -214,7 +192,7 @@ export function EditBookingPanel({
           </Button>
         </div>
       </form>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -237,33 +215,35 @@ export function AttachInvoicePanel({
   );
 
   return (
-    <Card title="Invoice">
-      {state?.message ? <Notice tone={state.ok ? "success" : "danger"}>{state.message}</Notice> : null}
-
-      {invoiceNumber ? (
-        <p className="tbook-muted" style={{ marginTop: state?.message ? 12 : 0 }}>
-          Current: <code>{invoiceNumber}</code>{" "}
-          <span className="tbook-faint">({invoiceSource === "manual" ? "entered by hand" : "Számlázz.hu"})</span>
-        </p>
-      ) : null}
-
+    <SectionCard
+      title="Invoice"
+      description={
+        invoiceNumber ? (
+          <>
+            Current: <code className="font-mono">{invoiceNumber}</code> (
+            {invoiceSource === "manual" ? "entered by hand" : "Számlázz.hu"})
+          </>
+        ) : undefined
+      }
+    >
       {/* encType is required for the PDF: without it the file arrives as a
           filename string rather than bytes. */}
-      <form action={action} encType="multipart/form-data" className="tbook-stack" style={{ marginTop: 12 }}>
-        <div className="tbook-filter-form">
-          <Field label="Invoice number" htmlFor="invoiceNumber">
+      <form action={action} encType="multipart/form-data" className="grid gap-4">
+        {state?.message ? <Notice tone={state.ok ? "success" : "danger"}>{state.message}</Notice> : null}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label="Invoice number" htmlFor="invoiceNumber">
             <Input id="invoiceNumber" name="invoiceNumber" required placeholder="SZ-2026-0042" />
-          </Field>
-          <Field label="PDF (optional)" htmlFor="pdf" hint="Max 10 MB">
+          </FormField>
+          <FormField label="PDF (optional)" htmlFor="pdf" hint="Max 10 MB">
             <Input id="pdf" name="pdf" type="file" accept="application/pdf" />
-          </Field>
+          </FormField>
         </div>
         <div>
-          <Button type="submit" variant="secondary" disabled={pending}>
+          <Button type="submit" variant="outline" disabled={pending}>
             {pending ? "Saving…" : "Attach invoice"}
           </Button>
         </div>
       </form>
-    </Card>
+    </SectionCard>
   );
 }

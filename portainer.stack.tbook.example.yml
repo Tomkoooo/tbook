@@ -30,6 +30,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    # LEGACY — tBook no longer writes files: uploads live in MongoDB (blob
+    # store), ticket PDFs are rendered on demand, invoices/receipts come from
+    # Számlázz.hu. Keep this mount only until `npm run migrate:uploads` has
+    # run against production (it reads the old files), then remove it and
+    # the volume below.
     volumes:
       - tbook-uploads:/app/uploads
     environment:

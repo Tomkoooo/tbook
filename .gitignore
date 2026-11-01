@@ -3,6 +3,7 @@ node_modules/
 
 # next.js
 .next/
+.next-verify/
 out/
 
 # production
@@ -30,3 +31,8 @@ coverage/
 *.log
 npm-debug.log*
 .turbo/
+
+# personal data exports and DB backups (contain PII) - never commit
+exports/
+backups/
+*.xlsx

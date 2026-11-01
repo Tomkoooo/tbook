@@ -80,6 +80,8 @@ export const adminVoucherScanSchema = z.object({
   code: z.string().trim().min(1).max(500),
   eventId: objectIdSchema.optional(),
   mode: z.enum(["check_in", "lookup"]).default("check_in"),
+  /** For dated day-pass entries: a `yyyy-mm-dd` day, or "any". Defaults to today. */
+  day: z.union([z.literal("any"), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional(),
 });
 export type AdminVoucherScan = z.infer<typeof adminVoucherScanSchema>;
 

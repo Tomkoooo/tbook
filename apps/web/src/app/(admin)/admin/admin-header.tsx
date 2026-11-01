@@ -1,11 +1,14 @@
 "use client";
 
+import { Fragment } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
@@ -16,6 +19,8 @@ const SEGMENT_LABELS: Record<string, string> = {
   admin: "Dashboard",
   "check-in": "Check-in",
   "select-org": "Select organization",
+  members: "Team",
+  email: "Booking email",
   new: "New",
 };
 
@@ -28,7 +33,10 @@ function labelFor(segment: string): string {
 
 export function AdminHeader() {
   const segments = usePathname().split("/").filter(Boolean);
-  const crumbs = segments.map(labelFor);
+  const crumbs = segments.map((segment, index) => ({
+    label: labelFor(segment),
+    href: `/${segments.slice(0, index + 1).join("/")}`,
+  }));
 
   return (
     <header className="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -37,16 +45,18 @@ export function AdminHeader() {
       <Breadcrumb>
         <BreadcrumbList>
           {crumbs.map((crumb, index) => (
-            <BreadcrumbItem key={`${crumb}-${index}`}>
-              {index === crumbs.length - 1 ? (
-                <BreadcrumbPage>{crumb}</BreadcrumbPage>
-              ) : (
-                <>
-                  <span className="text-muted-foreground">{crumb}</span>
-                  <BreadcrumbSeparator />
-                </>
-              )}
-            </BreadcrumbItem>
+            <Fragment key={crumb.href}>
+              {index > 0 ? <BreadcrumbSeparator /> : null}
+              <BreadcrumbItem>
+                {index === crumbs.length - 1 ? (
+                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink asChild>
+                    <Link href={crumb.href}>{crumb.label}</Link>
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
+            </Fragment>
           ))}
         </BreadcrumbList>
       </Breadcrumb>

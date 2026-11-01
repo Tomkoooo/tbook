@@ -1,9 +1,11 @@
+import { Mail } from "lucide-react";
 import { signIn } from "@/auth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-/**
- * Minimal functional sign-in page — email magic link only. Styling/UX
- * polish is a later frontend phase; this just needs to work.
- */
+/** Email magic-link sign-in. */
 export const dynamic = "force-dynamic";
 
 export default function SignInPage({ searchParams }: { searchParams: Promise<{ callbackUrl?: string }> }) {
@@ -15,15 +17,24 @@ export default function SignInPage({ searchParams }: { searchParams: Promise<{ c
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: "4rem auto", padding: "0 1rem" }}>
-      <h1>Sign in to tBook</h1>
-      <p>Enter your email and we&apos;ll send you a one-time sign-in link.</p>
-      <form action={sendMagicLink}>
-        <input type="email" name="email" placeholder="you@example.com" required autoFocus style={{ width: "100%", padding: 8, marginBottom: 12 }} />
-        <button type="submit" style={{ width: "100%", padding: 8 }}>
-          Send sign-in link
-        </button>
-      </form>
+    <main className="bg-background flex min-h-svh items-center justify-center p-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-xl">Sign in to tBook</CardTitle>
+          <CardDescription>Enter your email and we&apos;ll send you a one-time sign-in link.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={sendMagicLink} className="grid gap-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" type="email" name="email" placeholder="you@example.com" required autoFocus />
+            </div>
+            <Button type="submit" className="w-full">
+              <Mail /> Send sign-in link
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

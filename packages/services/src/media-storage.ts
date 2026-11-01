@@ -1,31 +1,19 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
- * Minimal local-filesystem media storage — no S3/cloud abstraction needed
- * yet. Writes under UPLOADS_DIR (default ./uploads), matching the
- * `/app/uploads` Docker volume already established in this repo's
- * Dockerfile/portainer.stack.tbook.example.yml (Phase 0). The legacy
- * plugin used a shared core MediaService; this rewrite doesn't have one
- * yet, so voucher/invoice PDFs get this small dedicated store instead.
+ * READ-ONLY access to files from the old uploads volume (UPLOADS_DIR,
+ * default ./uploads). Nothing writes here any more: uploads live in the
+ * database blob store (blob-store.ts), voucher PDFs are rendered on
+ * demand, and Számlázz.hu invoices/receipts are fetched from Számlázz.hu.
+ *
+ * Reads remain only as a fallback for records that still point at an
+ * `/uploads/…` path. After `npm run migrate:uploads` has moved the
+ * irreplaceable files into the database, the volume can be removed.
  */
 
 function uploadsRoot(): string {
   return process.env.UPLOADS_DIR || "./uploads";
-}
-
-export interface StoredFile {
-  /** Stable relative URL an HTTP route can later serve this file at, e.g. /uploads/vouchers/<id>.pdf. */
-  url: string;
-  filePath: string;
-}
-
-export async function storeFile(buffer: Buffer | Uint8Array, opts: { subdir: string; fileName: string }): Promise<StoredFile> {
-  const dir = path.join(uploadsRoot(), opts.subdir);
-  await mkdir(dir, { recursive: true });
-  const filePath = path.join(dir, opts.fileName);
-  await writeFile(filePath, buffer);
-  return { url: `/uploads/${opts.subdir}/${opts.fileName}`, filePath };
 }
 
 export async function readStoredFile(url: string): Promise<Buffer | null> {

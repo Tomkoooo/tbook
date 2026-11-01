@@ -1,16 +1,15 @@
 import Link from "next/link";
 import { getOrganizationStats, listBookingsForOrg } from "@tbook/services";
-import {
-  BOOKING_STATUS_TONES,
-  Badge,
-  Card,
-  EmptyState,
-  Notice,
-  PageHeader,
-  Stat,
-  StatRow,
-  Table,
-} from "@tbook/ui";
+import { ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-state";
+import { Notice } from "@/components/notice";
+import { PageTitle } from "@/components/page-title";
+import { SectionCard } from "@/components/section-card";
+import { Stat, StatGrid } from "@/components/stat";
+import { BOOKING_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
 
 /**
@@ -46,25 +45,25 @@ export default async function AdminHomePage({
 
   return (
     <>
-      <PageHeader
+      <PageTitle
         title={organizationName}
         description="Overview of this organization's events and bookings."
         actions={
           canReadBookings ? (
-            <Link className="tbook-btn tbook-btn-primary" href="/admin/bookings">
-              All bookings
-            </Link>
+            <Button asChild>
+              <Link href="/admin/bookings">All bookings</Link>
+            </Button>
           ) : null
         }
       />
 
       {error === "missing-permission" ? (
         <Notice tone="warning">
-          You don&apos;t have the <code>{permission}</code> permission needed for that page.
+          You don&apos;t have the <code className="font-mono">{permission}</code> permission needed for that page.
         </Notice>
       ) : null}
 
-      <StatRow>
+      <StatGrid>
         <Stat label="Groups" value={stats.groupCount} />
         <Stat label="Events" value={stats.eventCount} />
         <Stat label="Members" value={stats.memberCount} />
@@ -75,15 +74,18 @@ export default async function AdminHomePage({
             <Stat label="Revenue" value={formatRevenue(recent.revenueByCurrency)} hint="paid + confirmed" />
           </>
         ) : null}
-      </StatRow>
+      </StatGrid>
 
       {recent ? (
-        <Card
+        <SectionCard
           title="Latest bookings"
+          flush
           actions={
-            <Link className="tbook-btn tbook-btn-secondary tbook-btn-sm" href="/admin/bookings">
-              View all
-            </Link>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/admin/bookings">
+                View all <ArrowRight />
+              </Link>
+            </Button>
           }
         >
           {recent.bookings.length === 0 ? (
@@ -93,39 +95,43 @@ export default async function AdminHomePage({
             />
           ) : (
             <Table>
-              <thead>
-                <tr>
-                  <th>Booked</th>
-                  <th>Customer</th>
-                  <th>Event</th>
-                  <th className="tbook-num">Guests</th>
-                  <th className="tbook-num">Total</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Booked</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Event</TableHead>
+                  <TableHead className="text-right">Guests</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {recent.bookings.map((booking) => (
-                  <tr key={String(booking._id)}>
-                    <td className="tbook-faint">{formatDateTime(booking.createdAt)}</td>
-                    <td>
-                      <Link href={`/admin/bookings/${String(booking._id)}`}>{booking.customer?.name}</Link>
-                    </td>
-                    <td className="tbook-wrap">{booking.eventName}</td>
-                    <td className="tbook-num">{booking.guests}</td>
-                    <td className="tbook-num">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</td>
-                    <td>
-                      <Badge tone={BOOKING_STATUS_TONES[booking.status] ?? "neutral"}>{booking.status}</Badge>
-                    </td>
-                  </tr>
+                  <TableRow key={String(booking._id)}>
+                    <TableCell className="text-muted-foreground">{formatDateTime(booking.createdAt)}</TableCell>
+                    <TableCell>
+                      <Link className="font-medium hover:underline" href={`/admin/bookings/${String(booking._id)}`}>
+                        {booking.customer?.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="whitespace-normal">{booking.eventName}</TableCell>
+                    <TableCell className="text-right">{booking.guests}</TableCell>
+                    <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell>
+                    <TableCell>
+                      <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
+              </TableBody>
             </Table>
           )}
-        </Card>
+        </SectionCard>
       ) : (
-        <Card title="Bookings">
-          <p className="tbook-muted">You don&apos;t have permission to read this organization&apos;s bookings.</p>
-        </Card>
+        <SectionCard title="Bookings">
+          <p className="text-muted-foreground text-sm">
+            You don&apos;t have permission to read this organization&apos;s bookings.
+          </p>
+        </SectionCard>
       )}
     </>
   );

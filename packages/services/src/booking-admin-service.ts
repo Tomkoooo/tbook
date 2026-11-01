@@ -14,7 +14,7 @@ import { ActionError } from "@tbook/actions";
 import type { BookingStatus, InvoiceStatus } from "@tbook/schemas";
 import { cancelBooking, confirmBooking } from "./booking-service";
 import { voidVouchersForBooking } from "./voucher-service";
-import { issueVoucherPdfAndEmail } from "./voucher-pdf-email";
+import { sendBookingEmail } from "./booking-email";
 import { bookingWebhookData, dispatchWebhookEvent } from "./webhook-service";
 
 /**
@@ -200,9 +200,9 @@ export async function resendVoucherEmailAsAdmin(
   const toEmail = opts.toEmail?.trim() || booking.customer?.email;
   if (!toEmail) throw ActionError.validation("This booking has no email address to send to.");
 
-  // Re-renders rather than re-attaching the stored PDF, so a layout the
-  // admin has since edited is picked up on the re-send.
-  await issueVoucherPdfAndEmail(bookingId, { toEmail });
+  // Re-sends the whole booking email (tickets + invoice if issued). It
+  // re-renders the ticket PDF, so a layout edited since is picked up.
+  await sendBookingEmail(bookingId, { toEmail });
   return { sentTo: toEmail };
 }
 

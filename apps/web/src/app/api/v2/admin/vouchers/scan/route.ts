@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     const outcome = await scanVoucherAsAdmin(organizationId, input.code, {
       eventId: input.eventId,
       mode: input.mode,
+      day: input.day,
       userId: user?.id ?? null,
     });
 

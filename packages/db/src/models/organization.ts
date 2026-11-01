@@ -45,6 +45,8 @@ const SzamlazzSettingsSchema = new Schema(
     sellerBank: { type: String, default: "" },
     sellerBankAccount: { type: String, default: "" },
     vatPercent: { type: Number, default: 27 },
+    receiptPrefix: { type: String, default: "NYGTA" },
+    receiptTemplate: { type: String, enum: ["A", "N"], default: "A" },
   },
   { _id: false },
 );
@@ -123,6 +125,12 @@ const OrganizationSchema = new Schema<IOrganization>(
       voucherPdfLayout: { type: Schema.Types.Mixed, default: undefined },
       tdarts: { type: TDartsSettingsSchema, default: undefined },
       sumup: { type: SumUpSettingsSchema, default: undefined },
+      // Inventory API key for the webshop. Only the SHA-256 hash is stored.
+      inventoryApi: {
+        keyHash: { type: String, default: null, index: true },
+        keyHint: { type: String, default: "" },
+        createdAt: { type: Date, default: null },
+      },
       webhooks: { type: [WebhookSchema], default: undefined },
     },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },

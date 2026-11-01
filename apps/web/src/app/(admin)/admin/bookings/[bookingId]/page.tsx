@@ -1,18 +1,14 @@
-import Link from "next/link";
 import { getBookingDetailForOrg } from "@tbook/services";
-import {
-  BOOKING_STATUS_TONES,
-  Badge,
-  Card,
-  DescriptionList,
-  EmptyState,
-  INVOICE_STATUS_TONES,
-  PageHeader,
-  Table,
-  VOUCHER_STATUS_TONES,
-} from "@tbook/ui";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DescriptionList } from "@/components/description-list";
+import { EmptyState } from "@/components/empty-state";
+import { PageTitle } from "@/components/page-title";
+import { SectionCard } from "@/components/section-card";
+import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, VOUCHER_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDateTime, formatMoney, requireAdminPage } from "@/lib/admin-page";
 import { BookingActions } from "./booking-actions";
+import { ReceiptPanel } from "./receipt-panel";
 import { AttachInvoicePanel, EditBookingPanel, MarkPaidPanel } from "./manage-panels";
 
 export const dynamic = "force-dynamic";
@@ -33,36 +29,45 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
   const canManage = permissions.has("booking:manage");
   const isTeamBooking = (booking.teamMemberFieldSchema?.length ?? 0) > 0;
   const awaitingPayment = booking.status === "pending" || booking.status === "checkout_started";
+  const walkIn = booking.delivery === "receipt";
   const quoteLines = ((booking.quote?.lines ?? []) as QuoteLine[]).filter((line) => line.amountHuf != null);
 
   return (
     <>
-      <PageHeader
-        breadcrumb={<Link href="/admin/bookings">← Bookings</Link>}
+      <PageTitle
+        back={{ href: "/admin/bookings", label: "Bookings" }}
         title={booking.customer?.name ?? "Booking"}
         description={`${booking.eventName} · booked ${formatDateTime(booking.createdAt)}`}
         actions={
-          <>
-            <Badge tone={BOOKING_STATUS_TONES[booking.status] ?? "neutral"}>{booking.status}</Badge>
-            <Badge tone={INVOICE_STATUS_TONES[booking.invoiceStatus] ?? "neutral"}>
-              invoice: {booking.invoiceStatus}
-            </Badge>
-          </>
+          <div className="flex items-center gap-1">
+            <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
+            <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>invoice: {booking.invoiceStatus}</Badge>
+          </div>
         }
       />
 
       <BookingActions
         bookingId={bookingId}
         status={booking.status}
-        customerEmail={booking.customer?.email ?? ""}
-        voucherCount={vouchers.length}
+        customerEmail={walkIn ? "" : (booking.customer?.email ?? "")}
+        voucherCount={walkIn ? 0 : vouchers.length}
         canManageBooking={permissions.has("booking:manage")}
         canManageVouchers={permissions.has("voucher:manage")}
       />
 
+      {walkIn ? (
+        <ReceiptPanel
+          bookingId={bookingId}
+          status={booking.receipt?.status ?? "none"}
+          number={booking.receipt?.number ?? null}
+          error={booking.receipt?.error ?? null}
+          hasPdf={Boolean(booking.receipt?.pdfFileName)}
+        />
+      ) : null}
+
       {canManage && awaitingPayment ? <MarkPaidPanel bookingId={bookingId} /> : null}
 
-      {canManage ? (
+      {canManage && !walkIn ? (
         <EditBookingPanel
           bookingId={bookingId}
           guests={booking.guests}
@@ -86,36 +91,37 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
         />
       ) : null}
 
-      <div className="tbook-grid-2">
-        <Card title="Customer">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SectionCard title="Customer">
           <DescriptionList
             items={[
               { label: "Name", value: booking.customer?.name ?? "—" },
+              ...(walkIn ? [{ label: "Contact", value: <span className="text-muted-foreground">Walk-in — no contact details taken</span> }] : []),
               {
                 label: "Email",
-                value: booking.customer?.email ? (
-                  <a href={`mailto:${booking.customer.email}`}>{booking.customer.email}</a>
+                value: walkIn ? "—" : booking.customer?.email ? (
+                  <a className="text-primary hover:underline" href={`mailto:${booking.customer.email}`}>{booking.customer.email}</a>
                 ) : (
                   "—"
                 ),
               },
               {
                 label: "Phone",
-                value: booking.customer?.phone ? <a href={`tel:${booking.customer.phone}`}>{booking.customer.phone}</a> : "—",
+                value: walkIn ? "—" : booking.customer?.phone ? <a className="text-primary hover:underline" href={`tel:${booking.customer.phone}`}>{booking.customer.phone}</a> : "—",
               },
               {
                 label: "Note",
                 value: booking.customer?.note ? (
-                  <span style={{ whiteSpace: "pre-wrap" }}>{booking.customer.note}</span>
+                  <span className="whitespace-pre-wrap">{booking.customer.note}</span>
                 ) : (
                   "—"
                 ),
               },
             ]}
           />
-        </Card>
+        </SectionCard>
 
-        <Card title="Booking">
+        <SectionCard title="Booking">
           <DescriptionList
             items={[
               { label: "Event", value: booking.eventName },
@@ -133,26 +139,28 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
               {
                 label: "Created by",
                 value:
-                  booking.source === "admin" ? (
-                    <Badge tone="info">admin console</Badge>
+                  booking.source === "pos" ? (
+                    <Badge variant="info">{walkIn ? "point of sale · walk-in" : "point of sale"}</Badge>
+                  ) : booking.source === "admin" ? (
+                    <Badge variant="info">admin console</Badge>
                   ) : (
-                    <Badge tone="neutral">storefront</Badge>
+                    <Badge variant="neutral">storefront</Badge>
                   ),
               },
               { label: "Expires at", value: formatDateTime(booking.expiresAt) },
-              { label: "Booking id", value: <code className="tbook-faint">{bookingId}</code> },
+              { label: "Booking id", value: <code className="text-muted-foreground font-mono text-xs">{bookingId}</code> },
               ...(booking.adminNote
-                ? [{ label: "Admin note", value: <span style={{ whiteSpace: "pre-wrap" }}>{booking.adminNote}</span> }]
+                ? [{ label: "Admin note", value: <span className="whitespace-pre-wrap">{booking.adminNote}</span> }]
                 : []),
               ...(booking.offlinePayment?.note
                 ? [{ label: "Payment note", value: booking.offlinePayment.note }]
                 : []),
             ]}
           />
-        </Card>
+        </SectionCard>
       </div>
 
-      <Card title="Price breakdown">
+      <SectionCard title="Price breakdown">
         {quoteLines.length === 0 ? (
           <DescriptionList items={[{ label: "Total", value: formatMoney(booking.totalHuf, currency) }]} />
         ) : (
@@ -166,10 +174,10 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
             ]}
           />
         )}
-      </Card>
+      </SectionCard>
 
       {booking.billing ? (
-        <Card title="Billing details">
+        <SectionCard title="Billing details">
           <DescriptionList
             items={[
               { label: "Type", value: booking.billing.billingType },
@@ -183,21 +191,21 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
               ...(booking.invoiceError ? [{ label: "Invoice error", value: booking.invoiceError }] : []),
             ]}
           />
-        </Card>
+        </SectionCard>
       ) : null}
 
-      <Card title={isTeamBooking ? `Teams (${booking.attendees?.length ?? 0})` : `Attendees (${booking.attendees?.length ?? 0})`}>
+      <SectionCard flush title={isTeamBooking ? `Teams (${booking.attendees?.length ?? 0})` : `Attendees (${booking.attendees?.length ?? 0})`}>
         {!booking.attendees || booking.attendees.length === 0 ? (
           <EmptyState title="No attendee details captured" hint="This event doesn't collect per-attendee fields." />
         ) : (
           <Table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>{isTeamBooking ? "Roster" : "Details"}</th>
-              </tr>
-            </thead>
-            <tbody>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>{isTeamBooking ? "Roster" : "Details"}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {booking.attendees.map((attendee, index) => {
                 const own = describeFields(attendee?.fields, booking.attendeeFieldSchema ?? []);
                 // A team entry keeps its players under `members`, and the
@@ -205,12 +213,12 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
                 // those showed a bare "—" for every pair in the real data.
                 const members = attendee?.members ?? [];
                 return (
-                  <tr key={index}>
-                    <td>{index + 1}</td>
-                    <td className="tbook-wrap">
+                  <TableRow key={index}>
+                    <TableCell>{index + 1}</TableCell>
+                    <TableCell className="whitespace-normal">
                       {own ? <div>{own}</div> : null}
                       {members.length > 0 ? (
-                        <ol style={{ margin: own ? "6px 0 0" : 0, paddingLeft: 20 }}>
+                        <ol className={`list-decimal pl-5 ${own ? "mt-1.5" : ""}`}>
                           {members.map((member, memberIndex) => (
                             <li key={memberIndex}>
                               {describeFields(member?.fields, booking.teamMemberFieldSchema ?? []) || "—"}
@@ -219,17 +227,17 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
                         </ol>
                       ) : null}
                       {!own && members.length === 0 ? "—" : null}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
+            </TableBody>
           </Table>
         )}
-      </Card>
+      </SectionCard>
 
       {permissions.has("voucher:read") ? (
-        <Card title={`Entries (${vouchers.length})`}>
+        <SectionCard flush title={`Entries (${vouchers.length})`}>
           {vouchers.length === 0 ? (
             <EmptyState
               title="No entries issued"
@@ -237,64 +245,64 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
             />
           ) : (
             <Table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Attendee</th>
-                  <th>Status</th>
-                  <th>Checked in</th>
-                  <th>Emailed</th>
-                </tr>
-              </thead>
-              <tbody>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>#</TableHead>
+                  <TableHead>Attendee</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Checked in</TableHead>
+                  <TableHead>Emailed</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {vouchers.map((voucher) => (
-                  <tr key={String(voucher._id)}>
-                    <td>{voucher.attendeeIndex + 1}</td>
-                    <td>{voucher.displayName}</td>
-                    <td>
-                      <Badge tone={VOUCHER_STATUS_TONES[voucher.status] ?? "neutral"}>{voucher.status}</Badge>
-                    </td>
-                    <td className="tbook-faint">{formatDateTime(voucher.checkedInAt)}</td>
-                    <td className="tbook-faint">
+                  <TableRow key={String(voucher._id)}>
+                    <TableCell>{voucher.attendeeIndex + 1}</TableCell>
+                    <TableCell>{voucher.displayName}</TableCell>
+                    <TableCell>
+                      <Badge variant={toneFor(VOUCHER_STATUS_TONES, voucher.status)}>{voucher.status}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{formatDateTime(voucher.checkedInAt)}</TableCell>
+                    <TableCell className="text-muted-foreground">
                       {voucher.emailedAt ? `${formatDateTime(voucher.emailedAt)} → ${voucher.lastSentToEmail ?? ""}` : "—"}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
+              </TableBody>
             </Table>
           )}
-        </Card>
+        </SectionCard>
       ) : null}
 
       {booking.tdartsSync && booking.tdartsSync.length > 0 ? (
-        <Card title="tDarts sync">
+        <SectionCard flush title="tDarts sync">
           <Table>
-            <thead>
-              <tr>
-                <th>Participant</th>
-                <th>Tournament</th>
-                <th>Status</th>
-                <th>Synced</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Participant</TableHead>
+                <TableHead>Tournament</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Synced</TableHead>
+                <TableHead>Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {booking.tdartsSync.map((entry, index) => (
-                <tr key={index}>
-                  <td>{entry.participantKey}</td>
-                  <td>{entry.tournamentCode}</td>
-                  <td>
-                    <Badge tone={entry.status === "synced" ? "success" : entry.status === "failed" ? "danger" : "warning"}>
+                <TableRow key={index}>
+                  <TableCell>{entry.participantKey}</TableCell>
+                  <TableCell>{entry.tournamentCode}</TableCell>
+                  <TableCell>
+                    <Badge variant={entry.status === "synced" ? "success" : entry.status === "failed" ? "danger" : "warning"}>
                       {entry.status}
                     </Badge>
-                  </td>
-                  <td className="tbook-faint">{formatDateTime(entry.syncedAt)}</td>
-                  <td className="tbook-wrap tbook-faint">{entry.error ?? "—"}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{formatDateTime(entry.syncedAt)}</TableCell>
+                  <TableCell className="text-muted-foreground whitespace-normal">{entry.error ?? "—"}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
+            </TableBody>
           </Table>
-        </Card>
+        </SectionCard>
       ) : null}
     </>
   );

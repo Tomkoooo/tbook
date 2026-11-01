@@ -109,4 +109,23 @@ describe("day-pass events", () => {
     const again = await scanVoucher(vouchers[0]!.token, { now: onD1 });
     expect(again.result).toBe("duplicate");
   });
+
+  it("checks a chosen day or any day instead of today when the door asks for it", async () => {
+    const booking = await book({ [d2]: 1, [d1]: 1 });
+    await BookingModel.updateOne({ _id: booking._id }, { status: "paid" });
+    const vouchers = await issueVoucherRowsForBooking(String(booking._id));
+    const onD1 = new Date(`${d1}T10:00:00Z`);
+
+    // Today is d1, but the operator is admitting d2: the d1 pass is refused, the d2 pass admits.
+    const refused = await scanVoucher(vouchers[0]!.token, { now: onD1, day: d2, mode: "lookup" });
+    expect(refused.result).toBe("wrong_day");
+    expect(refused.message).toContain(d2);
+    expect((await scanVoucher(vouchers[1]!.token, { now: onD1, day: d2 })).result).toBe("valid");
+
+    // "any" accepts a pass whatever its date.
+    const booking2 = await book({ [d2]: 1 });
+    await BookingModel.updateOne({ _id: booking2._id }, { status: "paid" });
+    const [other] = await issueVoucherRowsForBooking(String(booking2._id));
+    expect((await scanVoucher(other!.token, { now: onD1, day: "any" })).result).toBe("valid");
+  });
 });

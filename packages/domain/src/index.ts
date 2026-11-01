@@ -7,3 +7,5 @@ export * from "./eligibility";
 export * from "./package-inventory";
 export * from "./wizard-flow";
 export * from "./day-pass";
+export * from "./booking-email";
+export * from "./product";

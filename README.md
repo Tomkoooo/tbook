@@ -14,7 +14,6 @@ packages/db/         Mongoose connection + models + repositories
 packages/domain/     Pure business logic (pricing, eligibility, VAT, wizard-flow)
 packages/services/   Orchestration: booking, checkout, voucher, invoice, org/RBAC, tDarts sync
 packages/actions/    Request-layer: auth/permission checks, input validation, error mapping
-packages/ui/         Shared component library (design system), component-tested
 ```
 
 Request layering: `route.ts → actions/* → services/* → domain/* + db/repositories/* → db/models/*`.
@@ -172,6 +171,37 @@ emailed, the Számlázz.hu invoice is issued with the real payment method
 and its PDF is emailed too. A seller needs the `sale:create` permission;
 `booking:manage` also works, so existing Owner roles can sell without a
 role edit. A seller can never override capacity or the sales window.
+
+## Products and shared stock
+
+Merchandise lives in tBook (**Products** in the console): products with
+options like size and colour, a SKU and stock per variant, and a log of
+every stock change. The counter sells it under **Point of sale → Merch**
+(cash or a card on the myPOS terminal, then a printed Számlázz.hu receipt).
+The webshop sells the same stock through the inventory API: it reserves
+stock at checkout, commits when the order is paid, and releases it if
+abandoned. Invoicing, orders and shipping for web orders stay in the
+webshop. Contract and integration guide: [docs/inventory-api.md](docs/inventory-api.md).
+
+## Files and storage
+
+tBook writes no files to disk. Everything lives in MongoDB, so one database
+backup covers it all:
+
+| What | Where |
+|---|---|
+| Product images, ticket pictures, manually attached invoice PDFs | `tbookblobs`: content-addressed (id = SHA-256), deduplicated, with owner organization and kind. Served publicly only for product images (`/media/<hash>.webp`) |
+| Ticket (voucher) PDFs | Not stored: rendered on demand from the booking. Only the QR token matters at the door |
+| Számlázz.hu invoice and receipt PDFs | Not stored: downloaded from Számlázz.hu when needed (the just-issued one is used directly) |
+
+Unreferenced blobs are removed automatically: the app collects every
+reference (products, ticket layouts, header images, bookings) and deletes
+blobs nothing points at once they are over 7 days old.
+
+**Moving an existing install off the uploads volume:** run
+`npm run migrate:uploads -- --dry-run` (with `DATABASE_URL` and
+`UPLOADS_DIR` set), check the "MISSING" list, then run it without
+`--dry-run`. After that the `tbook-uploads` volume can be removed.
 
 ## Backwards compatibility
 

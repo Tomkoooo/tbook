@@ -1,12 +1,11 @@
-import { voucherRepository } from "@tbook/db";
-import { loadBookingForGuestCheckout, readStoredFile } from "@tbook/services";
+import { loadBookingForGuestCheckout, renderVoucherPdfForBooking } from "@tbook/services";
 import { v1ErrorResponse, V1HttpError } from "@/lib/v1/response";
 import { NextResponse } from "next/server";
 
 /**
  * v1 — guest entry/voucher PDF download (no login, bookingId + session_id
- * is the bearer-token pair). All vouchers for a booking share one
- * multi-page PDF (one page per guest) — any row's pdfFileName points at it.
+ * is the bearer-token pair). One multi-page PDF (a page per guest),
+ * rendered on demand from the booking — nothing is stored.
  */
 export async function GET(request: Request) {
   try {
@@ -15,18 +14,15 @@ export async function GET(request: Request) {
     const sessionId = url.searchParams.get("session_id");
 
     await loadBookingForGuestCheckout(bookingId, sessionId);
-    const [voucher] = await voucherRepository.findByBookingId(bookingId);
-    if (!voucher?.pdfFileName) {
-      throw new V1HttpError(404, "Entry PDF is not available");
-    }
-    const pdf = await readStoredFile(voucher.pdfFileName);
-    if (!pdf) throw new V1HttpError(404, "Entry PDF is not available");
+    const rendered = await renderVoucherPdfForBooking(bookingId);
+    if (!rendered) throw new V1HttpError(404, "Entry PDF is not available");
 
-    return new NextResponse(new Uint8Array(pdf), {
+    return new NextResponse(new Uint8Array(rendered.bytes), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="jegy-${bookingId.slice(-8)}.pdf"`,
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {

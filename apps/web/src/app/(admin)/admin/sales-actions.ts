@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { ActionError, parseInput } from "@tbook/actions";
 import {
   cancelSumUpCardSale,
+  buildPosSaleResult,
   createPosSale,
+  issueReceiptForBooking,
   settleSumUpCheckout,
   startSumUpCardSale,
   type CardSaleState,
@@ -21,15 +23,19 @@ export interface PosSaleActionResult {
   sale?: PosSaleResult;
 }
 
-const posFormSchema = z.object({
+const saleBase = {
   eventId: z.string().min(1),
   tickets: z.number().int().min(1).max(50),
-  customer: customerSchema,
-  billing: billingInfoSchema,
   paymentMethod: posPaymentMethodSchema,
   reference: z.string().max(200).default(""),
   note: z.string().max(1000).default(""),
-});
+};
+
+/** "email": customer + billing required (ticket and invoice are emailed). "receipt": walk-in, only an optional name. */
+const posFormSchema = z.discriminatedUnion("delivery", [
+  z.object({ ...saleBase, delivery: z.literal("email"), customer: customerSchema, billing: billingInfoSchema }),
+  z.object({ ...saleBase, delivery: z.literal("receipt"), customer: z.object({ name: z.string().max(200).default("") }) }),
+]);
 
 /**
  * A seller needs `sale:create`; a console manager (`booking:manage`) may
@@ -50,44 +56,8 @@ export async function createPosSaleAction(formData: FormData): Promise<PosSaleAc
     const { organizationId } = await requireSellerContext();
     const user = await getSessionUser();
 
-    const tickets = Math.max(Number(formData.get("tickets") ?? 1) || 1, 1);
-    // Day-pass baskets arrive as JSON; the server re-derives the count and price from them.
-    const rawBasket = String(formData.get("dayPasses") ?? "").trim();
-    let selections: Record<string, Record<string, number>> | undefined;
-    if (rawBasket) {
-      try {
-        selections = { dayPasses: JSON.parse(rawBasket) as Record<string, number> };
-      } catch {
-        throw ActionError.validation("Could not read the selected days.");
-      }
-    }
-    const str = (key: string) => String(formData.get(key) ?? "").trim();
-    const company = formData.get("billingCompany") !== null;
-
-    const input = parseInput(posFormSchema, {
-      eventId: str("eventId"),
-      tickets,
-      customer: { name: str("customer.name"), email: str("customer.email"), phone: str("customer.phone"), note: "" },
-      billing: {
-        billingType: company ? "company" : "personal",
-        // Private buyers are invoiced in the customer's own name unless the seller typed another.
-        name: str("billing.name") || str("customer.name"),
-        zip: str("billing.zip"),
-        city: str("billing.city"),
-        street: str("billing.street"),
-        countryCode: str("billing.countryCode") || "HU",
-        taxNumber: company ? str("billing.taxNumber") : "",
-      },
-      paymentMethod: str("paymentMethod"),
-      reference: str("reference"),
-      note: str("note"),
-    });
-
-    const sale = await createPosSale(
-      organizationId,
-      { ...input, selections, attendees: parseAttendeesFromForm(formData, tickets) },
-      { userId: user?.id ?? null },
-    );
+    const input = parseSaleForm(formData, String(formData.get("paymentMethod") ?? ""));
+    const sale = await createPosSale(organizationId, input, { userId: user?.id ?? null });
 
     revalidatePath("/admin/bookings");
     return { ok: true, sale };
@@ -129,12 +99,14 @@ function cardResult(outcome: CardSaleState, bookingId: string): CardSaleActionRe
   }
 }
 
-/** Reads the same sale fields as the cash/manual-card action. */
-function parseSaleForm(formData: FormData) {
+/** Reads a sale form (cash, manual card or SumUp reader; emailed or walk-in). */
+function parseSaleForm(formData: FormData, paymentMethod: string) {
   const tickets = Math.max(Number(formData.get("tickets") ?? 1) || 1, 1);
   const str = (key: string) => String(formData.get(key) ?? "").trim();
   const company = formData.get("billingCompany") !== null;
+  const delivery = str("delivery") === "receipt" ? "receipt" : "email";
 
+  // Day-pass baskets arrive as JSON; the server re-derives the count and price from them.
   let selections: Record<string, Record<string, number>> | undefined;
   const rawBasket = str("dayPasses");
   if (rawBasket) {
@@ -145,23 +117,27 @@ function parseSaleForm(formData: FormData) {
     }
   }
 
-  const input = parseInput(posFormSchema, {
-    eventId: str("eventId"),
-    tickets,
-    customer: { name: str("customer.name"), email: str("customer.email"), phone: str("customer.phone"), note: "" },
-    billing: {
-      billingType: company ? "company" : "personal",
-      name: str("billing.name") || str("customer.name"),
-      zip: str("billing.zip"),
-      city: str("billing.city"),
-      street: str("billing.street"),
-      countryCode: str("billing.countryCode") || "HU",
-      taxNumber: company ? str("billing.taxNumber") : "",
-    },
-    paymentMethod: "card",
-    reference: "",
-    note: str("note"),
-  });
+  const base = { eventId: str("eventId"), tickets, paymentMethod, reference: str("reference"), note: str("note") };
+  const input = parseInput(
+    posFormSchema,
+    delivery === "receipt"
+      ? { ...base, delivery, customer: { name: str("customer.name") } }
+      : {
+          ...base,
+          delivery,
+          customer: { name: str("customer.name"), email: str("customer.email"), phone: str("customer.phone"), note: "" },
+          billing: {
+            billingType: company ? "company" : "personal",
+            // Private buyers are invoiced in the customer's own name unless the seller typed another.
+            name: str("billing.name") || str("customer.name"),
+            zip: str("billing.zip"),
+            city: str("billing.city"),
+            street: str("billing.street"),
+            countryCode: str("billing.countryCode") || "HU",
+            taxNumber: company ? str("billing.taxNumber") : "",
+          },
+        },
+  );
 
   return { ...input, selections, attendees: parseAttendeesFromForm(formData, tickets) };
 }
@@ -176,7 +152,7 @@ export async function startCardSaleAction(formData: FormData): Promise<CardSaleA
 
     const { bookingId } = await startSumUpCardSale(
       organizationId,
-      { ...parseSaleForm(formData), readerId },
+      { ...parseSaleForm(formData, "card"), readerId },
       { userId: user?.id ?? null },
     );
     revalidatePath("/admin/bookings");
@@ -221,4 +197,22 @@ async function assertBookingInOrg(organizationId: string, bookingId: string): Pr
   const { bookingRepository } = await import("@tbook/db");
   const booking = await bookingRepository.findById(bookingId);
   if (!booking || String(booking.organizationId) !== organizationId) throw ActionError.notFound("Booking not found");
+}
+
+/** Re-tries a walk-in sale's Számlázz.hu receipt (after a network error or a settings fix). */
+export async function retryReceiptAction(bookingId: string): Promise<PosSaleActionResult> {
+  try {
+    const { organizationId } = await requireSellerContext();
+    await assertBookingInOrg(organizationId, bookingId);
+    await issueReceiptForBooking(bookingId);
+    const sale = await buildPosSaleResult(bookingId);
+    revalidatePath(`/admin/bookings/${bookingId}`);
+    return sale.receipt?.status === "issued"
+      ? { ok: true, sale, message: `Receipt ${sale.receipt.number} issued.` }
+      : { ok: false, sale, message: sale.receipt?.error ?? "The receipt could not be issued." };
+  } catch (error) {
+    if (error instanceof ActionError) return { ok: false, message: error.message };
+    console.error("[pos receipt retry]", error);
+    return { ok: false, message: "Something went wrong. Try again." };
+  }
 }

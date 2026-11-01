@@ -5,9 +5,9 @@
  */
 export default function EventsPage() {
   return (
-    <main>
-      <h1>tBook</h1>
-      <p>Event listing — implemented in Phase 6.</p>
+    <main className="mx-auto grid max-w-3xl gap-2 px-4 py-16">
+      <h1 className="text-3xl font-semibold tracking-tight">tBook</h1>
+      <p className="text-muted-foreground">Event listing — implemented in Phase 6.</p>
     </main>
   );
 }

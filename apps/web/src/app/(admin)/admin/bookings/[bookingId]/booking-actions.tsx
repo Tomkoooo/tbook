@@ -1,7 +1,10 @@
 "use client";
 
 import { useActionState } from "react";
-import { Button, Card, Input, Notice } from "@tbook/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Notice } from "@/components/notice";
+import { SectionCard } from "@/components/section-card";
 import { VALID_BOOKING_STATUS_TRANSITIONS, type BookingStatus } from "@tbook/schemas";
 import { cancelBookingAction, confirmBookingAction, resendEntriesAction, type ActionResult } from "../../actions";
 
@@ -54,51 +57,45 @@ export function BookingActions({
   const notice = [cancelState, confirmState, resendState].find((state) => state?.message);
 
   return (
-    <Card title="Actions">
-      {notice ? <Notice tone={notice.ok ? "success" : "danger"}>{notice.message}</Notice> : null}
+    <SectionCard title="Actions">
+      <div className="grid gap-4">
+        {notice ? <Notice tone={notice.ok ? "success" : "danger"}>{notice.message}</Notice> : null}
 
-      <div className="tbook-stack" style={{ marginTop: notice ? 12 : 0 }}>
         {canConfirm ? (
-          <form action={confirm}>
-            <div className="tbook-row">
-              <Button type="submit" disabled={confirming}>
-                {confirming ? "Confirming…" : "Confirm booking"}
-              </Button>
-              <span className="tbook-faint">Marks a paid booking as confirmed.</span>
-            </div>
+          <form action={confirm} className="flex flex-wrap items-center gap-3">
+            <Button type="submit" disabled={confirming}>
+              {confirming ? "Confirming…" : "Confirm booking"}
+            </Button>
+            <span className="text-muted-foreground text-sm">Marks a paid booking as confirmed.</span>
           </form>
         ) : null}
 
         {canResend ? (
-          <form action={resend}>
-            <div className="tbook-row">
-              <Input
-                name="toEmail"
-                type="email"
-                placeholder={customerEmail || "guest@example.com"}
-                style={{ maxWidth: 260 }}
-                aria-label="Send entries to"
-              />
-              <Button type="submit" variant="secondary" disabled={resending}>
-                {resending ? "Sending…" : "Re-send entries"}
-              </Button>
-              <span className="tbook-faint">Leave blank to use the booking&apos;s own email.</span>
-            </div>
+          <form action={resend} className="flex flex-wrap items-center gap-3">
+            <Input
+              name="toEmail"
+              type="email"
+              placeholder={customerEmail || "guest@example.com"}
+              className="max-w-64"
+              aria-label="Send entries to"
+            />
+            <Button type="submit" variant="outline" disabled={resending}>
+              {resending ? "Sending…" : "Re-send entries"}
+            </Button>
+            <span className="text-muted-foreground text-sm">Leave blank to use the booking&apos;s own email.</span>
           </form>
         ) : null}
 
         {canCancel ? (
-          <form action={cancel}>
-            <div className="tbook-row">
-              <Input name="reason" placeholder="Reason (optional)" style={{ maxWidth: 260 }} aria-label="Cancellation reason" />
-              <button type="submit" className="tbook-btn tbook-btn-danger" disabled={cancelling}>
-                {cancelling ? "Cancelling…" : "Cancel booking"}
-              </button>
-              <span className="tbook-faint">Voids its entries and releases the event&apos;s capacity.</span>
-            </div>
+          <form action={cancel} className="flex flex-wrap items-center gap-3">
+            <Input name="reason" placeholder="Reason (optional)" className="max-w-64" aria-label="Cancellation reason" />
+            <Button type="submit" variant="destructive" disabled={cancelling}>
+              {cancelling ? "Cancelling…" : "Cancel booking"}
+            </Button>
+            <span className="text-muted-foreground text-sm">Voids its entries and releases the event&apos;s capacity.</span>
           </form>
         ) : null}
       </div>
-    </Card>
+    </SectionCard>
   );
 }

@@ -41,7 +41,7 @@ export async function assertEventInOrg(organizationId: string, eventId: string):
 }
 
 export interface CheckInRosterResult {
-  event: { id: string; name: string; startDate: Date; endDate: Date };
+  event: { id: string; name: string; startDate: Date; endDate: Date; kind: "standard" | "day_pass" };
   vouchers: IVoucher[];
   total: number;
   page: number;
@@ -76,7 +76,7 @@ export async function listCheckInRosterForOrg(
   const byStatus = (status: IVoucher["status"]) => statusTotals.find((row) => row.status === status)?.count ?? 0;
 
   return {
-    event: { id: String(event._id), name: event.name, startDate: event.startDate, endDate: event.endDate },
+    event: { id: String(event._id), name: event.name, startDate: event.startDate, endDate: event.endDate, kind: event.kind ?? "standard" },
     vouchers,
     total,
     page,

@@ -6,9 +6,9 @@
  */
 export default function BookingSuccessPage() {
   return (
-    <main>
-      <h1>Thank you for your booking</h1>
-      <p>Checkout status — implemented in Phase 6.</p>
+    <main className="mx-auto grid max-w-3xl gap-2 px-4 py-16">
+      <h1 className="text-3xl font-semibold tracking-tight">Thank you for your booking</h1>
+      <p className="text-muted-foreground">Checkout status — implemented in Phase 6.</p>
     </main>
   );
 }

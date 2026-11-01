@@ -14,7 +14,6 @@ COPY packages/db/package.json ./packages/db/
 COPY packages/domain/package.json ./packages/domain/
 COPY packages/services/package.json ./packages/services/
 COPY packages/actions/package.json ./packages/actions/
-COPY packages/ui/package.json ./packages/ui/
 RUN npm ci --legacy-peer-deps
 
 # Rebuild the source code only when needed

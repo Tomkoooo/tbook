@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { listRegistrableEvents, previewAdminRegistration } from "@tbook/services";
-import { Card, EmptyState, Notice, PageHeader } from "@tbook/ui";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/empty-state";
+import { Notice } from "@/components/notice";
+import { PageTitle } from "@/components/page-title";
+import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
 import { RegistrationForm } from "./registration-form";
 import { EventPicker } from "./event-picker";
@@ -28,10 +32,10 @@ export default async function NewRegistrationPage({
   if (events.length === 0) {
     return (
       <>
-        <PageHeader breadcrumb={<Link href="/admin/bookings">← Bookings</Link>} title="New registration" />
-        <Card>
+        <PageTitle back={{ href: "/admin/bookings", label: "Bookings" }} title="New registration" />
+        <SectionCard>
           <EmptyState title="No events yet" hint="Create an event before registering anyone into it." />
-        </Card>
+        </SectionCard>
       </>
     );
   }
@@ -39,14 +43,14 @@ export default async function NewRegistrationPage({
   if (!selected) {
     return (
       <>
-        <PageHeader
-          breadcrumb={<Link href="/admin/bookings">← Bookings</Link>}
+        <PageTitle
+          back={{ href: "/admin/bookings", label: "Bookings" }}
           title="New registration"
           description="Register someone who paid outside the storefront — by transfer, in cash, or as a comped entry."
         />
-        <Card title="Which event?">
+        <SectionCard title="Which event?" flush>
           <EventPicker events={events} />
-        </Card>
+        </SectionCard>
       </>
     );
   }
@@ -54,18 +58,18 @@ export default async function NewRegistrationPage({
   if (selected.kind === "day_pass") {
     return (
       <>
-        <PageHeader breadcrumb={<Link href="/admin/bookings/new">← Pick a different event</Link>} title={selected.name} />
-        <Card>
+        <PageTitle back={{ href: "/admin/bookings/new", label: "Pick a different event" }} title={selected.name} />
+        <SectionCard>
           <EmptyState
             title="This is a day-pass event"
             hint="Passes are sold per day. Use the Point of sale screen to choose the days and take payment."
           />
-          <div style={{ padding: "0 16px 16px" }}>
-            <Link className="tbook-btn tbook-btn-primary" href={`/admin/sales?eventId=${selected.id}`}>
-              Open point of sale
-            </Link>
+          <div className="flex justify-center pb-2">
+            <Button asChild>
+              <Link href={`/admin/sales?eventId=${selected.id}`}>Open point of sale</Link>
+            </Button>
           </div>
-        </Card>
+        </SectionCard>
       </>
     );
   }
@@ -84,8 +88,8 @@ export default async function NewRegistrationPage({
 
   return (
     <>
-      <PageHeader
-        breadcrumb={<Link href="/admin/bookings/new">← Pick a different event</Link>}
+      <PageTitle
+        back={{ href: "/admin/bookings/new", label: "Pick a different event" }}
         title={selected.name}
         description={
           isTeam

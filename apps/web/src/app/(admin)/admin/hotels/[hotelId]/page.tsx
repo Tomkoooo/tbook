@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { ActionError } from "@tbook/actions";
-import { getHotelForOrg, listGroupsForOrg } from "@tbook/services";
+import { getHotelForOrg, getOrganizationSettings, listGroupsForOrg } from "@tbook/services";
 import { normalizeHotelPricing } from "@tbook/domain";
 import { PageTitle } from "@/components/page-title";
 import { requireAdminPage } from "@/lib/admin-page";
@@ -16,6 +16,7 @@ export default async function HotelPage({ params }: { params: Promise<{ hotelId:
   const groups = (await listGroupsForOrg(organizationId)).map((group) => ({ id: String(group._id), name: group.name }));
 
   if (isNew) {
+    const { currency: orgCurrency } = await getOrganizationSettings(organizationId);
     const initial: HotelFormValues = {
       groupId: groups[0]?.id ?? "",
       name: "",
@@ -24,7 +25,7 @@ export default async function HotelPage({ params }: { params: Promise<{ hotelId:
       distanceFromVenueKm: null,
       contactEmail: "",
       contactPhone: "",
-      currency: "HUF",
+      currency: orgCurrency,
       bookingCapacity: null,
       roomInventory: null,
       status: "draft",

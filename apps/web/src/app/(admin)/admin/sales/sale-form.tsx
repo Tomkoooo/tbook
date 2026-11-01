@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Banknote, CheckCircle2, CreditCard, Loader2, Minus, Plus } from "lucide-react";
+import { Banknote, CheckCircle2, CreditCard, Loader2, Mail, Minus, Plus, Printer, ReceiptText, RotateCcw } from "lucide-react";
 import type { AttendeeFieldDef } from "@tbook/schemas";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { FormField, NativeSelect, ResultNotice } from "@/components/form-bits";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { AttendeeFields } from "../bookings/new/attendee-fields";
 import type { PosSaleResult } from "@tbook/services";
@@ -18,6 +20,7 @@ import {
   cancelCardSaleAction,
   createPosSaleAction,
   pollCardSaleAction,
+  retryReceiptAction,
   startCardSaleAction,
   type PosSaleActionResult,
 } from "../sales-actions";
@@ -26,6 +29,28 @@ const METHODS = [
   { value: "cash", label: "Cash", icon: Banknote },
   { value: "card", label: "Card", icon: CreditCard },
 ] as const;
+
+const DELIVERIES = [
+  { value: "receipt", label: "Walk-in · printed receipt", hint: "No email. Pays, gets a receipt, goes straight in.", icon: ReceiptText },
+  { value: "email", label: "Email ticket + invoice", hint: "Customer details and billing address needed.", icon: Mail },
+] as const;
+type Delivery = (typeof DELIVERIES)[number]["value"];
+
+/** The counter tablet keeps the last mode the seller used. */
+function useDelivery(): [Delivery, (next: Delivery) => void] {
+  const [delivery, setDelivery] = useState<Delivery>("email");
+  useEffect(() => {
+    const saved = window.localStorage.getItem("tbook.pos.delivery");
+    if (saved === "receipt" || saved === "email") setDelivery(saved);
+  }, []);
+  return [
+    delivery,
+    (next) => {
+      setDelivery(next);
+      window.localStorage.setItem("tbook.pos.delivery", next);
+    },
+  ];
+}
 
 export interface DayOption {
   date: string;
@@ -57,6 +82,8 @@ export function SaleForm({
 }) {
   const router = useRouter();
   const [method, setMethod] = useState<"cash" | "card">("cash");
+  const [delivery, setDelivery] = useDelivery();
+  const walkIn = delivery === "receipt";
   const [company, setCompany] = useState(false);
   // The action's result outlives the success panel, so "New sale" dismisses
   // that specific sale instead of trying to reset the action state.
@@ -113,51 +140,39 @@ export function SaleForm({
 
   const completedSale = paidSale ?? (state?.ok ? (state.sale ?? null) : null);
   if (completedSale && completedSale.bookingId !== dismissedId) {
-    const sale = completedSale;
-    return (
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CheckCircle2 className="text-primary size-5" /> Sale complete — {money(sale.totalHuf)}
-          </CardTitle>
-          <CardDescription>
-            {sale.vouchersIssued} ticket{sale.vouchersIssued === 1 ? "" : "s"} issued and emailed to the customer.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          {sale.invoiceStatus === "issued" ? (
-            <Alert>
-              <AlertDescription>Invoice issued{sale.invoiceEmailed ? " and emailed." : " — but the email could not be sent; resend it from the booking."}</AlertDescription>
-            </Alert>
-          ) : sale.invoiceStatus === "failed" ? (
-            <Alert variant="destructive">
-              <AlertTitle>Invoice failed</AlertTitle>
-              <AlertDescription>{sale.invoiceError ?? "Unknown error."} The sale itself is recorded — retry from the booking.</AlertDescription>
-            </Alert>
-          ) : (
-            <Alert>
-              <AlertDescription>Invoicing is not enabled for this organization, so no invoice was created.</AlertDescription>
-            </Alert>
-          )}
-          <div className="flex gap-2">
-            <Button type="button" onClick={() => setDismissedId(sale.bookingId)}>
-              New sale
-            </Button>
-            <Button asChild variant="outline">
-              <Link href={`/admin/bookings/${sale.bookingId}`}>View booking</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
+    return <SaleComplete sale={completedSale} money={money} onNewSale={() => setDismissedId(completedSale.bookingId)} />;
   }
 
   return (
     <>
       {waitingFor ? <CardWaiting bookingId={waitingFor} total={money(total)} onResult={finishCardSale} /> : null}
-    <form action={action} className={cn("grid max-w-3xl gap-6", waitingFor && "hidden")}>
+    <form action={action} className={cn("grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start", waitingFor && "hidden")}>
       <input type="hidden" name="eventId" value={event.id} />
       <input type="hidden" name="paymentMethod" value={method} />
+      <input type="hidden" name="delivery" value={delivery} />
+
+      <div className="grid content-start gap-6">
+      <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="What the customer gets">
+        {DELIVERIES.map(({ value, label, hint, icon: Icon }) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={delivery === value}
+            onClick={() => setDelivery(value)}
+            className={cn(
+              "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
+              delivery === value ? "border-primary bg-accent text-accent-foreground ring-primary/30 ring-2" : "bg-card hover:bg-muted",
+            )}
+          >
+            <Icon className="mt-0.5 size-6 shrink-0" />
+            <span className="grid gap-0.5">
+              <span className="text-base font-semibold">{label}</span>
+              <span className="text-muted-foreground text-xs">{hint}</span>
+            </span>
+          </button>
+        ))}
+      </div>
       <input type="hidden" name="tickets" value={Math.max(tickets, 1)} />
       {dayOptions ? <input type="hidden" name="dayPasses" value={JSON.stringify(basket)} /> : null}
 
@@ -167,7 +182,7 @@ export function SaleForm({
             <CardTitle>Days</CardTitle>
             <CardDescription>Choose how many passes for each day.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-2">
+          <CardContent className="grid gap-2 md:grid-cols-2">
             {dayOptions.map((day) => {
               const qty = basket[day.date] ?? 0;
               return (
@@ -207,7 +222,7 @@ export function SaleForm({
                 </div>
               );
             })}
-            <div className="mt-2 flex items-end justify-between">
+            <div className="mt-2 flex items-end justify-between md:col-span-2">
               <p className="text-muted-foreground text-sm">{tickets} pass{tickets === 1 ? "" : "es"}</p>
               <div className="text-right">
                 <p className="text-muted-foreground text-xs">Total to collect</p>
@@ -253,6 +268,15 @@ export function SaleForm({
       </Card>
       )}
 
+      {walkIn ? (
+        <Card>
+          <CardContent className="grid gap-2">
+            <FormField label="Name (optional)" htmlFor="customer.name" hint="Only for your records — nothing is sent to the customer.">
+              <Input id="customer.name" name="customer.name" autoComplete="off" placeholder="Walk-in customer" className="max-w-md" />
+            </FormField>
+          </CardContent>
+        </Card>
+      ) : (
       <Card>
         <CardHeader>
           <CardTitle>Customer</CardTitle>
@@ -270,6 +294,7 @@ export function SaleForm({
           </FormField>
         </CardContent>
       </Card>
+      )}
 
       {attendeeFields.length > 0 || isTeam ? (
         <Card>
@@ -292,6 +317,7 @@ export function SaleForm({
         </Card>
       ) : null}
 
+      {walkIn ? null : (
       <Card>
         <CardHeader>
           <CardTitle>Invoice</CardTitle>
@@ -325,7 +351,11 @@ export function SaleForm({
           </div>
         </CardContent>
       </Card>
+      )}
 
+      </div>
+
+      <div className="grid content-start gap-6 xl:sticky xl:top-20">
       <Card>
         <CardHeader>
           <CardTitle>Payment</CardTitle>
@@ -351,14 +381,25 @@ export function SaleForm({
           </div>
           {method === "card" && readers.length > 0 ? (
             <div className="grid gap-3 rounded-lg border p-3">
-              <div className="flex gap-4 text-sm">
-                <label className="flex items-center gap-1.5">
-                  <input type="radio" checked={cardMode === "reader"} onChange={() => setCardMode("reader")} /> Charge on a SumUp reader
-                </label>
-                <label className="flex items-center gap-1.5">
-                  <input type="radio" checked={cardMode === "manual"} onChange={() => setCardMode("manual")} /> Already taken another way
-                </label>
-              </div>
+              <RadioGroup
+                value={cardMode}
+                onValueChange={(next) => setCardMode(next as typeof cardMode)}
+                className="flex flex-wrap gap-4"
+                aria-label="Card payment mode"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id="cardMode-reader" value="reader" />
+                  <Label htmlFor="cardMode-reader" className="cursor-pointer font-normal">
+                    Charge on a SumUp reader
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id="cardMode-manual" value="manual" />
+                  <Label htmlFor="cardMode-manual" className="cursor-pointer font-normal">
+                    Already taken another way
+                  </Label>
+                </div>
+              </RadioGroup>
               {cardMode === "reader" ? (
                 <FormField label="Reader" htmlFor="readerId" hint="The amount appears on the reader for the customer to tap or insert their card.">
                   <NativeSelect id="readerId" name="readerId" defaultValue={readers[0]?.id}>
@@ -392,14 +433,18 @@ export function SaleForm({
         </Alert>
       ) : null}
       <ResultNotice result={state && !state.ok ? state : null} />
-      <div>
-        <Button type="submit" size="lg" disabled={pending || (dayOptions !== null && tickets === 0)}>
+      {/* Below xl the summary column isn't sticky, so keep the pay button on screen. */}
+      <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 z-20 -mx-4 border-t px-4 py-3 backdrop-blur md:-mx-6 md:px-6 xl:static xl:mx-0 xl:border-0 xl:bg-transparent xl:p-0 xl:backdrop-blur-none">
+        <Button type="submit" size="lg" className="h-12 w-full text-base" disabled={pending || (dayOptions !== null && tickets === 0)}>
           {pending
             ? "Processing…"
             : method === "card" && cardMode === "reader" && readers.length > 0
               ? `Send ${money(total)} to the reader`
-              : `Record ${method} payment of ${money(total)} & send`}
+              : walkIn
+                ? `Record ${method} payment of ${money(total)} & make receipt`
+                : `Record ${method} payment of ${money(total)} & send`}
         </Button>
+      </div>
       </div>
     </form>
     </>
@@ -438,7 +483,7 @@ function CardWaiting({
   }, [bookingId]);
 
   return (
-    <Card className="max-w-2xl">
+    <Card className="mx-auto w-full max-w-2xl">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Loader2 className="size-5 animate-spin" /> Waiting for the customer to pay {total}
@@ -458,6 +503,90 @@ function CardWaiting({
         >
           {cancelling ? "Cancelling…" : "Cancel payment"}
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** After payment: what happened, and — for a walk-in — the big print button. */
+function SaleComplete({ sale: initial, money, onNewSale }: { sale: PosSaleResult; money: (n: number) => string; onNewSale: () => void }) {
+  const [sale, setSale] = useState(initial);
+  const [retryState, retry, retrying] = useActionState(async () => {
+    const result = await retryReceiptAction(sale.bookingId);
+    if (result.sale) setSale(result.sale);
+    return result;
+  }, null);
+  const receiptUrl = `/admin/bookings/${sale.bookingId}/receipt`;
+  const walkIn = sale.delivery === "receipt";
+
+  return (
+    <Card className="mx-auto w-full max-w-2xl">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-xl">
+          <CheckCircle2 className="text-success size-6" /> Paid — {money(sale.totalHuf)}
+        </CardTitle>
+        <CardDescription>
+          {walkIn
+            ? sale.vouchersIssued > 0
+              ? `${sale.vouchersIssued} entr${sale.vouchersIssued === 1 ? "y" : "ies"} checked in — the customer can go straight in.`
+              : "Walk-in sale recorded."
+            : `${sale.vouchersIssued} ticket${sale.vouchersIssued === 1 ? "" : "s"} issued and emailed to the customer.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {walkIn ? (
+          sale.receipt?.status === "issued" && sale.receipt.hasPdf ? (
+            <div className="grid gap-2">
+              <Button asChild size="lg" className="h-16 text-lg">
+                <a href={receiptUrl} target="_blank" rel="noopener">
+                  <Printer className="size-6" /> Print receipt {sale.receipt.number}
+                </a>
+              </Button>
+              <p className="text-muted-foreground text-xs">
+                Opens the receipt. iPad: tap <strong>Share → Print</strong>. Android: <strong>⋮ → Share → Print</strong>. Choose the
+                receipt printer the first time; the tablet remembers it.
+              </p>
+            </div>
+          ) : (
+            <Alert variant="destructive">
+              <AlertTitle>No receipt yet</AlertTitle>
+              <AlertDescription>
+                {sale.receipt?.error ?? "The receipt could not be issued."} The payment itself is recorded.
+              </AlertDescription>
+            </Alert>
+          )
+        ) : sale.invoiceStatus === "issued" ? (
+          <Alert>
+            <AlertDescription>Invoice issued{sale.invoiceEmailed ? " and emailed." : " — but the email could not be sent; resend it from the booking."}</AlertDescription>
+          </Alert>
+        ) : sale.invoiceStatus === "failed" ? (
+          <Alert variant="destructive">
+            <AlertTitle>Invoice failed</AlertTitle>
+            <AlertDescription>{sale.invoiceError ?? "Unknown error."} The sale itself is recorded — retry from the booking.</AlertDescription>
+          </Alert>
+        ) : (
+          <Alert>
+            <AlertDescription>Invoicing is not enabled for this organization, so no invoice was created.</AlertDescription>
+          </Alert>
+        )}
+
+        {walkIn && sale.receipt?.status !== "issued" ? (
+          <form action={retry}>
+            <Button type="submit" variant="outline" size="lg" disabled={retrying}>
+              <RotateCcw /> {retrying ? "Trying again…" : "Try the receipt again"}
+            </Button>
+          </form>
+        ) : null}
+        {retryState && !retryState.ok && retryState.message !== sale.receipt?.error ? <ResultNotice result={retryState} /> : null}
+
+        <div className="flex flex-wrap gap-2 border-t pt-4">
+          <Button type="button" size="lg" variant={walkIn ? "secondary" : "default"} className="h-12" onClick={onNewSale}>
+            <Plus /> New sale
+          </Button>
+          <Button asChild variant="ghost" size="lg" className="h-12">
+            <Link href={`/admin/bookings/${sale.bookingId}`}>View booking</Link>
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { organizationRepository } from "@tbook/db";
 import { listOrganizationsForUser } from "@tbook/services";
-import { Card, Notice, PageHeader } from "@tbook/ui";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/notice";
+import { PageTitle } from "@/components/page-title";
+import { SectionCard } from "@/components/section-card";
 import { getSessionUser } from "@/lib/admin-auth";
 import { redirect } from "next/navigation";
 import { SelectOrgForm } from "./select-org-form";
@@ -26,31 +30,41 @@ export default async function SelectOrgPage({ searchParams }: { searchParams: Pr
     : await listOrganizationsForUser(user.id);
 
   return (
-    <>
-      <PageHeader
+    <div className="mx-auto grid w-full max-w-xl gap-6">
+      <PageTitle
         title="Select an organization"
         description="Everything in the console is scoped to one organization at a time."
+        actions={
+          user.isSystemAdmin ? (
+            <Button variant="outline" asChild>
+              <Link href="/admin/organizations">
+                <Plus /> New organization
+              </Link>
+            </Button>
+          ) : null
+        }
       />
 
       {error === "no-access" ? (
-        <Notice tone="warning">
-          You no longer have access to the previously selected organization. Pick another one.
-        </Notice>
+        <Notice tone="warning">You no longer have access to the previously selected organization. Pick another one.</Notice>
       ) : null}
 
-      <Card>
+      <SectionCard flush>
         {organizations.length === 0 ? (
-          <p className="tbook-muted">
+          <p className="text-muted-foreground p-5 text-sm">
             You aren&apos;t a member of any organization yet. Ask an org admin to invite you, then reload this page.
           </p>
         ) : (
           <SelectOrgForm organizations={organizations} />
         )}
-      </Card>
+      </SectionCard>
 
-      <p className="tbook-faint">
-        Signed in as {user.email}. <Link href="/api/auth/signout">Sign out</Link>
+      <p className="text-muted-foreground text-sm">
+        Signed in as {user.email}.{" "}
+        <Link className="text-primary hover:underline" href="/api/auth/signout">
+          Sign out
+        </Link>
       </p>
-    </>
+    </div>
   );
 }

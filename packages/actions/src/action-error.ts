@@ -32,4 +32,9 @@ export class ActionError extends Error {
   static validation(message: string, details?: unknown): ActionError {
     return new ActionError(400, "validation_error", message, details);
   }
+
+  /** The request is valid but clashes with current state — e.g. not enough stock. */
+  static conflict(message: string, code = "conflict", details?: unknown): ActionError {
+    return new ActionError(409, code, message, details);
+  }
 }

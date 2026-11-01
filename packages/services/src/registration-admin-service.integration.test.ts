@@ -1,3 +1,4 @@
+import { getInvoicePdfForBooking } from "./invoice-service";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { Types } from "mongoose";
 import {
@@ -605,7 +606,10 @@ describe("registration-admin-service", () => {
       const pdf = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(32, 0x20)]);
 
       const booking = await attachInvoiceToBooking(orgId, bookingId, { invoiceNumber: "SZ-2", pdf: { bytes: pdf } });
-      expect(booking.invoicePdfFileName).toBeTruthy();
+      // Kept in the database blob store (a manual invoice can't be fetched again).
+      expect(booking.invoicePdfBlobId).toMatch(/^[a-f0-9]{64}$/);
+      expect(booking.invoicePdfFileName ?? null).toBeNull();
+      expect((await getInvoicePdfForBooking(booking))?.equals(pdf)).toBe(true);
     });
 
     it("rejects a file that is not a PDF", async () => {

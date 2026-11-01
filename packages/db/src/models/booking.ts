@@ -5,6 +5,8 @@ import {
   bookingStatuses,
   invoiceSources,
   invoiceStatuses,
+  bookingDeliveries,
+  receiptStatuses,
   paymentMethods,
   cardCheckoutStatuses,
   tdartsSyncStatuses,
@@ -87,6 +89,17 @@ const OfflinePaymentSchema = new Schema(
   { _id: false },
 );
 
+const ReceiptSchema = new Schema(
+  {
+    status: { type: String, enum: receiptStatuses, default: "none" },
+    number: { type: String, default: null },
+    pdfFileName: { type: String, default: null },
+    error: { type: String, default: null },
+    issuedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const CardCheckoutSchema = new Schema(
   {
     provider: { type: String, default: "sumup" },
@@ -134,6 +147,7 @@ const BookingSchema = new Schema<IBooking>(
     invoiceStatus: { type: String, enum: invoiceStatuses, default: "none" },
     invoiceId: { type: String, default: null },
     invoicePdfFileName: { type: String, default: null },
+    invoicePdfBlobId: { type: String, default: null },
     invoiceError: { type: String, default: null },
     invoiceEmailSentAt: { type: Date, default: null },
     checkoutReturnBaseUrl: { type: String, default: null },
@@ -149,6 +163,8 @@ const BookingSchema = new Schema<IBooking>(
     invoiceSource: { type: String, enum: invoiceSources, default: "szamlazz" },
     invoiceNumber: { type: String, default: null },
     cardCheckout: { type: CardCheckoutSchema, default: null },
+    delivery: { type: String, enum: bookingDeliveries, default: "email" },
+    receipt: { type: ReceiptSchema, default: null },
     adminNote: { type: String, default: "" },
   },
   { timestamps: true },

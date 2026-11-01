@@ -181,13 +181,16 @@ export async function addMember(input: AddMemberInput): Promise<OrgMembership> {
 }
 
 export async function updateMember(input: { organizationId: string; membershipId: string; roleIds?: string[]; status?: MembershipStatus }): Promise<void> {
+  // Check ownership *before* writing — checking afterwards would already
+  // have changed another organization's membership.
+  const memberships = await orgMembershipRepository.findByOrganizationId(input.organizationId);
+  if (!memberships.some((m) => String(m._id) === input.membershipId)) {
+    throw ActionError.forbidden("Membership belongs to a different organization");
+  }
   const patch: Record<string, unknown> = {};
   if (input.roleIds) patch.roleIds = input.roleIds.map(oid);
   if (input.status) patch.status = input.status;
-  const membership = await orgMembershipRepository.updateById(input.membershipId, patch);
-  if (membership && String(membership.organizationId) !== input.organizationId) {
-    throw ActionError.forbidden("Membership belongs to a different organization");
-  }
+  await orgMembershipRepository.updateById(input.membershipId, patch);
 }
 
 export async function removeMember(organizationId: string, membershipId: string): Promise<void> {

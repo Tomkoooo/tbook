@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { bookingStatuses, invoiceStatuses } from "@tbook/schemas";
-import { Field, Input, Select } from "@tbook/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { FormField, NativeSelect } from "@/components/form-bits";
 
 /**
  * Plain GET form — no client JS. Submitting navigates to the same page
@@ -25,67 +27,60 @@ export function BookingFilters({
   };
 
   return (
-    <form method="get" action="/admin/bookings" className="tbook-filter-form">
-      <Field label="Search" htmlFor="search" hint="Name, email, phone or event">
+    <form method="get" action="/admin/bookings" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <FormField label="Search" htmlFor="search" hint="Name, email, phone or event" className="sm:col-span-2">
         <Input id="search" name="search" defaultValue={value("search")} placeholder="Kovács, bela@…, +3630…" />
-      </Field>
+      </FormField>
 
-      <Field label="Status" htmlFor="status">
-        <Select
-          id="status"
-          name="status"
-          defaultValue={value("status")}
-          placeholder="Any status"
-          options={bookingStatuses.map((status) => ({ value: status, label: status }))}
-        />
-      </Field>
+      <FilterSelect id="status" label="Status" placeholder="Any status" defaultValue={value("status")}
+        options={bookingStatuses.map((status) => ({ value: status, label: status }))} />
+      <FilterSelect id="invoiceStatus" label="Invoice" placeholder="Any invoice state" defaultValue={value("invoiceStatus")}
+        options={invoiceStatuses.map((status) => ({ value: status, label: status }))} />
+      <FilterSelect id="groupId" label="Group" placeholder="All groups" defaultValue={value("groupId")}
+        options={options.groups.map((group) => ({ value: group.id, label: group.name }))} />
+      <FilterSelect id="eventId" label="Event" placeholder="All events" defaultValue={value("eventId")}
+        options={options.events.map((event) => ({ value: event.id, label: event.name }))} />
 
-      <Field label="Invoice" htmlFor="invoiceStatus">
-        <Select
-          id="invoiceStatus"
-          name="invoiceStatus"
-          defaultValue={value("invoiceStatus")}
-          placeholder="Any invoice state"
-          options={invoiceStatuses.map((status) => ({ value: status, label: status }))}
-        />
-      </Field>
-
-      <Field label="Group" htmlFor="groupId">
-        <Select
-          id="groupId"
-          name="groupId"
-          defaultValue={value("groupId")}
-          placeholder="All groups"
-          options={options.groups.map((group) => ({ value: group.id, label: group.name }))}
-        />
-      </Field>
-
-      <Field label="Event" htmlFor="eventId">
-        <Select
-          id="eventId"
-          name="eventId"
-          defaultValue={value("eventId")}
-          placeholder="All events"
-          options={options.events.map((event) => ({ value: event.id, label: event.name }))}
-        />
-      </Field>
-
-      <Field label="Booked from" htmlFor="createdFrom">
+      <FormField label="Booked from" htmlFor="createdFrom">
         <Input id="createdFrom" name="createdFrom" type="date" defaultValue={value("createdFrom")} />
-      </Field>
-
-      <Field label="Booked to" htmlFor="createdTo">
+      </FormField>
+      <FormField label="Booked to" htmlFor="createdTo">
         <Input id="createdTo" name="createdTo" type="date" defaultValue={value("createdTo")} />
-      </Field>
+      </FormField>
 
-      <div className="tbook-filter-actions">
-        <button type="submit" className="tbook-btn tbook-btn-primary">
-          Apply
-        </button>
-        <Link href="/admin/bookings" className="tbook-btn tbook-btn-ghost">
-          Clear
-        </Link>
+      <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-4">
+        <Button type="submit">Apply filters</Button>
+        <Button variant="ghost" asChild>
+          <Link href="/admin/bookings">Clear</Link>
+        </Button>
       </div>
     </form>
+  );
+}
+
+function FilterSelect({
+  id,
+  label,
+  placeholder,
+  defaultValue,
+  options,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  defaultValue: string;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <FormField label={label} htmlFor={id}>
+      <NativeSelect id={id} name={id} defaultValue={defaultValue}>
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </NativeSelect>
+    </FormField>
   );
 }

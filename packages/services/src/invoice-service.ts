@@ -1,8 +1,7 @@
 import type { PaymentMethod } from "@tbook/schemas";
 import { bookingRepository, eventRepository, hotelRepository, organizationRepository, type IBooking } from "@tbook/db";
-import { AFTER_BOOKING_PAID_HOOKS } from "./checkout-service";
-import { sendMail, type MailTransporter } from "./mailer";
-import { storeFile } from "./media-storage";
+import { getOwnedBlob } from "./blob-store";
+import { readStoredFile } from "./media-storage";
 import { decryptOrgSecret } from "./org-secrets";
 
 /**
@@ -19,11 +18,9 @@ import { decryptOrgSecret } from "./org-secrets";
  * mapping, credential resolution, idempotency, error handling — is what's
  * actually novel here and is fully unit-tested without any network access).
  *
- * Deferred: invoice reversal (reverseBookingInvoice), guest PDF download,
- * and invoice-email delivery (deliverInvoiceEmailIfNeeded — no mailer
- * exists yet in this rewrite). PDF storage is a TODO: the follow-up pass
- * that wires real media storage for voucher PDFs should wire invoice PDF
- * storage at the same time (see voucher-service.ts's equivalent note).
+ * Deferred: invoice reversal (reverseBookingInvoice) and guest PDF
+ * download. The issued PDF is stored via media-storage and emailed to the
+ * guest inside the combined booking email (booking-email.ts).
  */
 
 // ---------------------------------------------------------------------------
@@ -65,6 +62,20 @@ export function buildInvoiceLineItems(
       vatPercent: vatForQuoteLine(line.key, vat.ticketVatPercent, vat.accommodationVatPercent),
       grossUnitPrice: line.amountHuf,
     }));
+}
+
+/** VAT rates for a booking's lines: the event's ticket VAT, and the hotel's for accommodation (falls back to the ticket VAT). */
+export async function resolveBookingVatRates(
+  booking: Pick<IBooking, "eventId" | "hotelId">,
+): Promise<{ ticketVatPercent: number; accommodationVatPercent: number }> {
+  const event = await eventRepository.findById(String(booking.eventId));
+  const ticketVatPercent = typeof event?.ticketVatPercent === "number" ? event.ticketVatPercent : 27;
+  let accommodationVatPercent = ticketVatPercent;
+  if (booking.hotelId) {
+    const hotel = await hotelRepository.findById(String(booking.hotelId));
+    if (typeof hotel?.pricing?.vatPercent === "number") accommodationVatPercent = hotel.pricing.vatPercent;
+  }
+  return { ticketVatPercent, accommodationVatPercent };
 }
 
 export type SupportedInvoiceCurrency = "HUF" | "EUR";
@@ -150,6 +161,8 @@ export interface IssueInvoiceOutput {
 
 export interface SzamlazzInvoiceProvider {
   issueInvoice(input: IssueInvoiceInput): Promise<IssueInvoiceOutput>;
+  /** Downloads an issued invoice's PDF by its number (Számla Agent `szamla_agent_pdf`). */
+  downloadInvoicePdf(input: { agentKey: string; invoiceNumber: string }): Promise<Buffer>;
 }
 
 /** Real provider — dynamically imports szamlazz.js so it's never loaded (or network-reached) during tests. */
@@ -199,6 +212,30 @@ export const defaultSzamlazzProvider: SzamlazzInvoiceProvider = {
     if (!invoiceId) throw new Error("Számlázz.hu returned no invoice id.");
     return { invoiceId, pdfBuffer: Buffer.isBuffer(response.pdf) ? response.pdf : null };
   },
+
+  async downloadInvoicePdf({ agentKey, invoiceNumber }) {
+    const escape = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // valaszVerzio 2: XML reply with the PDF in base64 (element order is fixed by the XSD).
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<xmlszamlapdf xmlns="http://www.szamlazz.hu/xmlszamlapdf" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.szamlazz.hu/xmlszamlapdf https://www.szamlazz.hu/szamla/docs/xsds/agentpdf/xmlszamlapdf.xsd">',
+      `  <szamlaagentkulcs>${escape(agentKey)}</szamlaagentkulcs>`,
+      `  <szamlaszam>${escape(invoiceNumber)}</szamlaszam>`,
+      "  <valaszVerzio>2</valaszVerzio>",
+      "</xmlszamlapdf>",
+    ].join("\n");
+    const form = new FormData();
+    form.append("action-szamla_agent_pdf", new Blob([xml], { type: "text/xml" }), "szamla.xml");
+    const response = await fetch("https://www.szamlazz.hu/szamla/", { method: "POST", body: form, signal: AbortSignal.timeout(20_000) });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.subarray(0, 4).toString("latin1") === "%PDF") return bytes;
+    const body = bytes.toString("utf8");
+    const tag = (name: string) => new RegExp(`<(?:\\w+:)?${name}>([\\s\\S]*?)</(?:\\w+:)?${name}>`).exec(body)?.[1]?.trim() ?? null;
+    const pdf = tag("pdf");
+    if (pdf) return Buffer.from(pdf.replace(/\s+/g, ""), "base64");
+    const error = response.headers.get("szlahu_error") ?? tag("hibauzenet") ?? `HTTP ${response.status}`;
+    throw new Error(`Számlázz.hu: ${decodeURIComponent(error)}`);
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -208,16 +245,22 @@ export const defaultSzamlazzProvider: SzamlazzInvoiceProvider = {
 /**
  * Fire-and-forget after payment; failures are recorded on the booking for
  * admin retry, never thrown. Idempotent — already-issued invoices are a
- * no-op (email delivery is deferred, see file header).
+ * no-op. Does not email: the PDF is attached to the single booking email
+ * (booking-email.ts), which runs right after this.
+ */
+/**
+ * Returns the PDF Számlázz.hu sent back when this call issued the invoice
+ * (null otherwise), so the booking email can attach it without a second
+ * download. Nothing is stored — see getInvoicePdfForBooking.
  */
 export async function issueInvoiceForBooking(
   bookingId: string,
-  opts?: { provider?: SzamlazzInvoiceProvider; transporter?: MailTransporter },
-): Promise<void> {
+  opts?: { provider?: SzamlazzInvoiceProvider },
+): Promise<Buffer | null> {
   const provider = opts?.provider ?? defaultSzamlazzProvider;
   const booking = await bookingRepository.findById(bookingId);
-  if (!booking) return;
-  if (booking.invoiceStatus === "issued") return;
+  if (!booking) return null;
+  if (booking.invoiceStatus === "issued") return null;
 
   const organizationId = booking.organizationId ? String(booking.organizationId) : null;
   const credsResult = await resolveOrgSzamlazzCredentials(organizationId);
@@ -226,7 +269,7 @@ export async function issueInvoiceForBooking(
       invoiceStatus: credsResult.status === "disabled" ? "none" : "failed",
       invoiceError: credsResult.message,
     });
-    return;
+    return null;
   }
 
   const currency = resolveSupportedInvoiceCurrency(booking.currency);
@@ -235,26 +278,18 @@ export async function issueInvoiceForBooking(
       invoiceStatus: "failed",
       invoiceError: `The Számlázz.hu integration only supports HUF and EUR (booking currency: ${booking.currency}).`,
     });
-    return;
+    return null;
   }
 
   if (!booking.billing) {
     await bookingRepository.updateById(bookingId, { invoiceStatus: "failed", invoiceError: "Missing billing address — cannot issue invoice." });
-    return;
+    return null;
   }
 
   await bookingRepository.updateById(bookingId, { invoiceStatus: "pending", invoiceError: null });
 
   try {
-    const event = await eventRepository.findById(String(booking.eventId));
-    const ticketVatPercent = typeof event?.ticketVatPercent === "number" ? event.ticketVatPercent : 27;
-    let accommodationVatPercent = ticketVatPercent;
-    if (booking.hotelId) {
-      const hotel = await hotelRepository.findById(String(booking.hotelId));
-      if (typeof hotel?.pricing?.vatPercent === "number") accommodationVatPercent = hotel.pricing.vatPercent;
-    }
-
-    const items = buildInvoiceLineItems(booking, { ticketVatPercent, accommodationVatPercent });
+    const items = buildInvoiceLineItems(booking, await resolveBookingVatRates(booking));
     const result = await provider.issueInvoice({
       currency,
       credentials: credsResult.credentials,
@@ -272,62 +307,46 @@ export async function issueInvoiceForBooking(
       paymentMethod: booking.paymentMethod,
     });
 
-    const invoicePdfFileName = result.pdfBuffer ? (await storeFile(result.pdfBuffer, { subdir: "invoices", fileName: `${result.invoiceId}.pdf` })).url : null;
-
     await bookingRepository.updateById(bookingId, {
       invoiceStatus: "issued",
       invoiceId: result.invoiceId,
-      invoicePdfFileName,
       invoiceError: null,
     });
-
-    await emailInvoiceIfNeeded(bookingId, organizationId, result.pdfBuffer ?? null, opts?.transporter);
+    return result.pdfBuffer ?? null;
   } catch (error) {
     await bookingRepository.updateById(bookingId, {
       invoiceStatus: "failed",
       invoiceError: error instanceof Error ? error.message : "Invoice issuance failed.",
     });
+    return null;
   }
 }
 
 /**
- * Emails the invoice PDF to the customer, for bookings made at the counter
- * or in the console. Storefront bookings are left alone: that flow already
- * had its own customer communication before this existed, and sending here
- * would double it. Never throws — a mail failure must not flip an issued
- * invoice back to "failed".
+ * An issued invoice's PDF, from wherever it lives:
+ *   1. a manually attached PDF (blob store),
+ *   2. a legacy file from before invoice PDFs stopped being stored,
+ *   3. Számlázz.hu, which keeps every invoice and returns it by number.
+ * Null when there is no invoice or no way to get it.
  */
-async function emailInvoiceIfNeeded(
-  bookingId: string,
-  organizationId: string | null,
-  pdf: Buffer | null,
-  transporter?: MailTransporter,
-): Promise<void> {
-  try {
-    const booking = await bookingRepository.findById(bookingId);
-    if (!booking || !pdf || booking.invoiceEmailSentAt) return;
-    if ((booking.source ?? "storefront") === "storefront") return;
+export async function getInvoicePdfForBooking(
+  booking: IBooking,
+  opts?: { provider?: SzamlazzInvoiceProvider },
+): Promise<Buffer | null> {
+  if (booking.invoiceStatus !== "issued") return null;
+  const organizationId = booking.organizationId ? String(booking.organizationId) : null;
 
-    await sendMail(
-      organizationId,
-      {
-        to: booking.customer.email,
-        subject: `Invoice for ${booking.eventName}`,
-        html: `<p>Hi ${booking.customer.name},</p><p>Thank you for your purchase of <strong>${booking.eventName}</strong>. Your invoice is attached.</p>`,
-        attachments: [{ filename: `invoice-${booking.invoiceId ?? bookingId}.pdf`, content: pdf, contentType: "application/pdf" }],
-      },
-      transporter,
-    );
-    await bookingRepository.updateById(bookingId, { invoiceEmailSentAt: new Date() });
-  } catch (error) {
-    console.error("[tbook] invoice email failed", bookingId, error);
+  if (booking.invoicePdfBlobId && organizationId) {
+    const blob = await getOwnedBlob(organizationId, booking.invoicePdfBlobId, "invoice");
+    if (blob) return blob.data;
   }
-}
+  if (booking.invoicePdfFileName) {
+    const legacy = await readStoredFile(booking.invoicePdfFileName);
+    if (legacy) return legacy;
+  }
+  if ((booking.invoiceSource ?? "szamlazz") !== "szamlazz" || !booking.invoiceId) return null;
 
-/** Registered into checkout-service's AFTER_BOOKING_PAID_HOOKS below — no platform fallback, so orgless bookings are skipped. */
-export async function invoiceAfterBookingPaidHook(booking: IBooking): Promise<void> {
-  if (!booking.organizationId) return;
-  await issueInvoiceForBooking(String(booking._id));
+  const creds = await resolveOrgSzamlazzCredentials(organizationId);
+  if (creds.status !== "ready") return null;
+  return (opts?.provider ?? defaultSzamlazzProvider).downloadInvoicePdf({ agentKey: creds.credentials.agentKey, invoiceNumber: booking.invoiceId });
 }
-
-AFTER_BOOKING_PAID_HOOKS.push(invoiceAfterBookingPaidHook);

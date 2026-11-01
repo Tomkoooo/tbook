@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
+import { Send, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { deleteWebhookAction, testWebhookAction, type ActionResult } from "../actions";
 
 /**
@@ -20,20 +22,20 @@ export function WebhookRowActions({ webhookId }: { webhookId: string }) {
   const notice = testState ?? deleteState;
 
   return (
-    <div className="tbook-row">
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {notice?.message ? (
+        <span className={notice.ok ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>{notice.message}</span>
+      ) : null}
       <form action={test}>
-        <button type="submit" className="tbook-btn tbook-btn-secondary tbook-btn-sm" disabled={testing}>
-          {testing ? "Sending…" : "Send test"}
-        </button>
+        <Button type="submit" variant="outline" size="sm" disabled={testing}>
+          <Send /> {testing ? "Sending…" : "Send test"}
+        </Button>
       </form>
       <form action={remove}>
-        <button type="submit" className="tbook-btn tbook-btn-danger tbook-btn-sm" disabled={removing}>
-          {removing ? "Removing…" : "Remove"}
-        </button>
+        <Button type="submit" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={removing}>
+          <Trash2 /> {removing ? "Removing…" : "Remove"}
+        </Button>
       </form>
-      {notice?.message ? (
-        <span className={notice.ok ? "tbook-faint" : "tbook-field-error"}>{notice.message}</span>
-      ) : null}
     </div>
   );
 }

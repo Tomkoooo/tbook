@@ -112,6 +112,37 @@ export async function rotateGroupKeyAction(groupId: string): Promise<CatalogActi
   }
 }
 
+/**
+ * The registration form, eligibility and price rules. Sent only when the
+ * form carried them (the step editor always does), so a caller that omits
+ * them leaves the event's stored rules alone.
+ */
+function registrationRulesFromForm(formData: FormData): Record<string, unknown> {
+  if (formData.get("attendeeFieldSchema") === null) return {};
+  const preset = text(formData, "eligibilityPreset") || "none";
+  const formRules = text(formData, "eligibilityFormRules");
+  let parsedRules: unknown = null;
+  if (preset === "form_rules" && formRules) {
+    try {
+      parsedRules = JSON.parse(formRules);
+    } catch {
+      throw ActionError.validation("Could not read the eligibility rules.");
+    }
+  }
+  return {
+    attendeeFieldSchema: jsonRows(formData, "attendeeFieldSchema"),
+    attendeeFieldSchemaMode: text(formData, "attendeeFieldSchemaMode") || "extend",
+    eligibilityPreset: preset,
+    eligibilityMinAge: preset === "custom" ? optionalNumber(formData, "eligibilityMinAge") : null,
+    eligibilityMaxAge: preset === "custom" ? optionalNumber(formData, "eligibilityMaxAge") : null,
+    eligibilityAllowedGenders: preset === "custom" ? formData.getAll("eligibilityAllowedGenders").map(String) : [],
+    eligibilityBirthDateFieldKey: text(formData, "eligibilityBirthDateFieldKey") || null,
+    eligibilityGenderFieldKey: text(formData, "eligibilityGenderFieldKey") || null,
+    eligibilityFormRules: parsedRules,
+    pricingRules: jsonRows(formData, "pricingRules"),
+  };
+}
+
 export async function saveEventAction(eventId: string | null, formData: FormData): Promise<CatalogActionResult> {
   try {
     const { organizationId } = await requireOrgPermission("event:write");
@@ -144,6 +175,7 @@ export async function saveEventAction(eventId: string | null, formData: FormData
       status: text(formData, "status") || "draft",
       tdartsEnabled,
       tdartsTournamentCode: tdartsEnabled ? text(formData, "tdartsTournamentCode") || null : null,
+      ...registrationRulesFromForm(formData),
     });
 
     revalidatePath("/admin/events");

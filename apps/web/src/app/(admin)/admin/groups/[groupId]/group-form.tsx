@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField, NativeSelect, ResultNotice, SecretNotice, StatusSelect } from "@/components/form-bits";
+import { StickyFormFooter, UnsavedBadge } from "@/components/sticky-form-footer";
 import { rotateGroupKeyAction, saveGroupAction, type CatalogActionResult } from "../../catalog-actions";
 
 export interface GroupFormValues {
@@ -44,8 +45,10 @@ export function GroupForm({
   canManageKey: boolean;
 }) {
   const router = useRouter();
+  const [dirty, setDirty] = useState(false);
   const [state, action, pending] = useActionState(async (_prev: CatalogActionResult | null, formData: FormData) => {
     const result = await saveGroupAction(groupId, formData);
+    if (result.ok) setDirty(false);
     // A new group's key is only readable in this response, so stay on the page when one came back.
     if (result.ok && !groupId && result.id && !result.apiKey) router.replace(`/admin/groups/${result.id}`);
     return result;
@@ -60,7 +63,7 @@ export function GroupForm({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-      <form action={action} className="grid gap-6">
+      <form action={action} onChange={() => setDirty(true)} className="grid gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Group details</CardTitle>
@@ -111,12 +114,12 @@ export function GroupForm({
           </CardContent>
         </Card>
 
-        <ResultNotice result={state} />
-        <div>
-          <Button type="submit" disabled={pending}>
+        <StickyFormFooter status={<UnsavedBadge dirty={dirty} />}>
+          <Button type="submit" size="lg" disabled={pending}>
             {pending ? "Saving…" : groupId ? "Save group" : "Create group"}
           </Button>
-        </div>
+          <ResultNotice result={state} />
+        </StickyFormFooter>
       </form>
 
       <div className="grid content-start gap-4">

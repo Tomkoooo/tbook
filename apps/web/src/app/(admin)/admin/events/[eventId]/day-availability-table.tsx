@@ -14,7 +14,7 @@ export function DayAvailabilityTable({
   const totalSold = days.reduce((sum, day) => sum + day.sold, 0);
 
   return (
-    <Card className="max-w-4xl">
+    <Card>
       <CardHeader>
         <CardTitle>Sales by day</CardTitle>
         <CardDescription>{totalSold} passes sold across {days.length} days.</CardDescription>

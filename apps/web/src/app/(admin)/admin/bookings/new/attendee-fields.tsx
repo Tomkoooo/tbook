@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { AttendeeFieldDef } from "@tbook/schemas";
-import { Field, Input, Select } from "@tbook/ui";
+import { Input } from "@/components/ui/input";
+import { FormField, NativeSelect } from "@/components/form-bits";
 
 /**
  * Renders one entry's fields, plus its roster when the event is a team /
@@ -38,18 +39,11 @@ export function AttendeeFields({
   const [memberCount, setMemberCount] = useState(rosterSize ?? Math.min(2, teamMemberLimit ?? 2));
 
   return (
-    <fieldset
-      style={{
-        border: "1px solid var(--tbook-border)",
-        borderRadius: "var(--tbook-radius-sm)",
-        padding: 12,
-        margin: 0,
-      }}
-    >
-      <legend className="tbook-field-label">{label}</legend>
+    <fieldset className="grid gap-4 rounded-lg border p-4">
+      <legend className="px-1 text-sm font-medium">{label}</legend>
 
       {attendeeFields.length > 0 ? (
-        <div className="tbook-filter-form">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {attendeeFields.map((field) => (
             <AttendeeField key={field.key} name={`attendee.${index}.${field.key}`} field={field} />
           ))}
@@ -57,10 +51,10 @@ export function AttendeeFields({
       ) : null}
 
       {isTeam ? (
-        <div className="tbook-stack" style={{ marginTop: attendeeFields.length > 0 ? 12 : 0 }}>
+        <div className="grid gap-4">
           {rosterSize == null && teamMemberLimit != null ? (
-            <div className="tbook-row">
-              <span className="tbook-faint">Players in this team:</span>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Players in this team:</span>
               <Input
                 type="number"
                 min={1}
@@ -69,25 +63,17 @@ export function AttendeeFields({
                 onChange={(e) =>
                   setMemberCount(Math.min(Math.max(Number(e.target.value) || 1, 1), teamMemberLimit))
                 }
-                style={{ width: 90 }}
+                className="w-24"
                 aria-label="Players in this team"
               />
-              <span className="tbook-faint">max {teamMemberLimit}</span>
+              <span className="text-muted-foreground">max {teamMemberLimit}</span>
             </div>
           ) : null}
 
           {Array.from({ length: memberCount }, (_, memberIndex) => (
-            <div
-              key={memberIndex}
-              style={{
-                borderLeft: "3px solid var(--tbook-border-strong)",
-                paddingLeft: 12,
-              }}
-            >
-              <p className="tbook-field-label" style={{ margin: "0 0 6px" }}>
-                Player {memberIndex + 1}
-              </p>
-              <div className="tbook-filter-form">
+            <div key={memberIndex} className="grid gap-2 border-l-2 pl-4">
+              <p className="text-sm font-medium">Player {memberIndex + 1}</p>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {teamMemberFields.map((field) => (
                   <AttendeeField
                     key={field.key}
@@ -118,14 +104,17 @@ export function AttendeeField({
 
   if (field.type === "select") {
     return (
-      <Field label={field.label} htmlFor={name}>
-        <Select
-          {...common}
-          placeholder={field.required ? undefined : "—"}
-          // The schema calls them `choices`, each already {value,label}.
-          options={(field.choices ?? []).map((choice) => ({ value: choice.value, label: choice.label }))}
-        />
-      </Field>
+      <FormField label={field.label} htmlFor={name}>
+        <NativeSelect {...common}>
+          {field.required ? null : <option value="">—</option>}
+          {/* The schema calls them `choices`, each already {value,label}. */}
+          {(field.choices ?? []).map((choice) => (
+            <option key={choice.value} value={choice.value}>
+              {choice.label}
+            </option>
+          ))}
+        </NativeSelect>
+      </FormField>
     );
   }
 
@@ -133,8 +122,8 @@ export function AttendeeField({
     field.type === "email" ? "email" : field.type === "number" ? "number" : field.type === "date" ? "date" : "text";
 
   return (
-    <Field label={field.label} htmlFor={name}>
+    <FormField label={field.label} htmlFor={name}>
       <Input {...common} type={inputType} autoComplete="off" />
-    </Field>
+    </FormField>
   );
 }

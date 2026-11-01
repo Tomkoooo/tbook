@@ -95,8 +95,10 @@ export async function getEventForOrg(organizationId: string, eventId: string): P
 
 function eventDocumentFromInput(input: AdminEventInput) {
   const { address, tdartsEnabled, tdartsTournamentCode, groupId, dayPass, ...rest } = input;
+  // Optional rule/form fields the caller left out must not overwrite stored data with undefined.
+  const defined = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
   return {
-    ...rest,
+    ...defined,
     // A standard event carries no pass config, so switching kinds can't leave stale pricing behind.
     dayPass: input.kind === "day_pass" ? dayPass : null,
     groupId: new Types.ObjectId(groupId),

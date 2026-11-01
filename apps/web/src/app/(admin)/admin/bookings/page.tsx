@@ -1,18 +1,16 @@
 import Link from "next/link";
-import { bookingStatuses, invoiceStatuses } from "@tbook/schemas";
+import { WALK_IN_CUSTOMER_EMAIL, bookingStatuses, invoiceStatuses } from "@tbook/schemas";
 import { listBookingFilterOptions, listBookingsForOrg } from "@tbook/services";
-import {
-  BOOKING_STATUS_TONES,
-  Badge,
-  Card,
-  EmptyState,
-  INVOICE_STATUS_TONES,
-  PageHeader,
-  Pagination,
-  Stat,
-  StatRow,
-  Table,
-} from "@tbook/ui";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Plus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-state";
+import { LinkPagination } from "@/components/link-pagination";
+import { PageTitle } from "@/components/page-title";
+import { SectionCard } from "@/components/section-card";
+import { Stat } from "@/components/stat";
+import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
 import { BookingFilters } from "./booking-filters";
 
@@ -116,113 +114,128 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader
+      <PageTitle
         title="Bookings"
         description="Every booking in this organization, including those made through the legacy storefronts."
         actions={
           <>
-            {permissions.has("booking:manage") ? (
-              <Link className="tbook-btn tbook-btn-primary" href="/admin/bookings/new">
-                New registration
-              </Link>
-            ) : null}
             {permissions.has("booking:export") ? (
-              <a
-                className="tbook-btn tbook-btn-secondary"
-                href={`/api/v2/admin/bookings/export?${exportQuery.toString()}`}
-              >
-                Export CSV
-              </a>
+              <Button variant="outline" asChild>
+                <a href={`/api/v2/admin/bookings/export?${exportQuery.toString()}`}>
+                  <Download /> Export CSV
+                </a>
+              </Button>
+            ) : null}
+            {permissions.has("booking:manage") ? (
+              <Button asChild>
+                <Link href="/admin/bookings/new">
+                  <Plus /> New registration
+                </Link>
+              </Button>
             ) : null}
           </>
         }
       />
 
-      <StatRow>
+      <div className="grid gap-4 sm:grid-cols-3">
         <Stat label="Matching" value={result.total} />
         <Stat label="Guests" value={result.paidGuests} hint="paid + confirmed" />
         <Stat label="Revenue" value={formatRevenue(result.revenueByCurrency)} hint="paid + confirmed" />
-      </StatRow>
+      </div>
 
-      <Card title="Filters">
+      <SectionCard title="Filters">
         <BookingFilters options={options} params={params} />
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <div className="tbook-card-body-flush">
-          {result.bookings.length === 0 ? (
-            <EmptyState title="No bookings match these filters" hint="Try clearing the search or widening the date range." />
-          ) : (
-            <>
-              <Table>
-                <thead>
-                  <tr>
-                    {SORTABLE.map((column) => {
-                      const active = sortBy === column.key;
-                      const nextDir = active && sortDir === "desc" ? "asc" : "desc";
-                      return (
-                        <th key={column.key} aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                          <Link href={hrefWith({ sortBy: column.key, sortDir: nextDir, page: undefined })}>
-                            {column.label}
-                            {active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-                          </Link>
-                        </th>
-                      );
-                    })}
-                    <th className="tbook-num">Guests</th>
-                    <th>Status</th>
-                    <th>Paid via</th>
-                    <th>Invoice</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.bookings.map((booking) => {
-                    const id = String(booking._id);
+      <SectionCard flush>
+        {result.bookings.length === 0 ? (
+          <EmptyState title="No bookings match these filters" hint="Try clearing the search or widening the date range." />
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {SORTABLE.map((column) => {
+                    const active = sortBy === column.key;
+                    const nextDir = active && sortDir === "desc" ? "asc" : "desc";
+                    const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
                     return (
-                      <tr key={id}>
-                        <td className="tbook-faint">{formatDateTime(booking.createdAt)}</td>
-                        <td>
-                          <Link href={`/admin/bookings/${id}`}>{booking.customer?.name}</Link>
-                          <div className="tbook-faint">{booking.customer?.email}</div>
-                        </td>
-                        <td className="tbook-wrap">
-                          {booking.eventName}
-                          {booking.hotelName ? <div className="tbook-faint">{booking.hotelName}</div> : null}
-                        </td>
-                        <td className="tbook-num">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</td>
-                        <td className="tbook-num">{booking.guests}</td>
-                        <td>
-                          <Badge tone={BOOKING_STATUS_TONES[booking.status] ?? "neutral"}>{booking.status}</Badge>
-                          {booking.source === "admin" ? <Badge tone="info">admin</Badge> : null}
-                        </td>
-                        <td className="tbook-faint">{booking.paymentMethod ?? "stripe"}</td>
-                        <td>
-                          <Badge tone={INVOICE_STATUS_TONES[booking.invoiceStatus] ?? "neutral"}>
-                            {booking.invoiceStatus}
-                          </Badge>
-                          {booking.invoiceSource === "manual" ? <Badge tone="neutral">manual</Badge> : null}
-                        </td>
-                        <td>
-                          <Link className="tbook-btn tbook-btn-ghost tbook-btn-sm" href={`/admin/bookings/${id}`}>
-                            Open
-                          </Link>
-                        </td>
-                      </tr>
+                      <TableHead
+                        key={column.key}
+                        className={column.key === "totalHuf" ? "text-right" : undefined}
+                        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                      >
+                        <Link
+                          className="hover:text-foreground inline-flex items-center gap-1"
+                          href={hrefWith({ sortBy: column.key, sortDir: nextDir, page: undefined })}
+                        >
+                          {column.label}
+                          <Icon className={active ? "size-3.5" : "size-3.5 opacity-40"} />
+                        </Link>
+                      </TableHead>
                     );
                   })}
-                </tbody>
-              </Table>
-              <Pagination
-                page={result.page}
-                pageCount={result.pageCount}
-                total={result.total}
-                hrefForPage={(target) => hrefWith({ page: String(target) })}
-              />
-            </>
-          )}
-        </div>
-      </Card>
+                  <TableHead className="text-right">Guests</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Paid via</TableHead>
+                  <TableHead>Invoice</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {result.bookings.map((booking) => {
+                  const id = String(booking._id);
+                  return (
+                    <TableRow key={id}>
+                      <TableCell className="text-muted-foreground">{formatDateTime(booking.createdAt)}</TableCell>
+                      <TableCell>
+                        <Link className="font-medium hover:underline" href={`/admin/bookings/${id}`}>
+                          {booking.customer?.name}
+                        </Link>
+                        <div className="text-muted-foreground text-xs">
+                          {booking.customer?.email === WALK_IN_CUSTOMER_EMAIL ? "walk-in · printed receipt" : booking.customer?.email}
+                        </div>
+                      </TableCell>
+                      <TableCell className="min-w-48 whitespace-normal">
+                        {booking.eventName}
+                        {booking.hotelName ? <div className="text-muted-foreground text-xs">{booking.hotelName}</div> : null}
+                      </TableCell>
+                      <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell>
+                      <TableCell className="text-right">{booking.guests}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
+                          {booking.source === "admin" ? <Badge variant="info">admin</Badge> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{booking.paymentMethod ?? "stripe"}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>{booking.invoiceStatus}</Badge>
+                          {booking.invoiceSource === "manual" ? <Badge variant="neutral">manual</Badge> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href={`/admin/bookings/${id}`}>Open</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <LinkPagination
+              page={result.page}
+              pageCount={result.pageCount}
+              total={result.total}
+              hrefForPage={(target) => hrefWith({ page: String(target) })}
+            />
+          </>
+        )}
+      </SectionCard>
     </>
   );
 }
