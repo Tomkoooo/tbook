@@ -1,7 +1,7 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { BookingModel, EventGroupModel, EventModel, HotelModel, OrganizationModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getPublicEventDetail, listPublicDirectory, listPublicEventsForGroup } from "./public-catalog-service";
+import { getPublicEntryList, getPublicEventDetail, listPublicDirectory, listPublicEventsForGroup } from "./public-catalog-service";
 
 let apiKeySeq = 0;
 
@@ -245,6 +245,54 @@ describe("public-catalog-service", () => {
       const [event] = await listPublicEventsForGroup(String(group._id));
       expect(event!.kind).toBe("standard");
       expect(event!.dayPass).toBeNull();
+    });
+  });
+
+  describe("getPublicEntryList", () => {
+    type TeamAttendee = { fields: Record<string, string>; members: Array<{ fields: Record<string, string> }> };
+    async function teamBooking(eventId: string, status: "paid" | "pending", attendees: TeamAttendee[], customerName = "Vevő Viktor") {
+      return BookingModel.create({
+        eventId,
+        eventName: "Páros",
+        customer: { name: customerName, email: "v@example.com", phone: "+36301234567", note: "" },
+        attendeeFieldSchema: [{ key: "csapatnev", label: "Csapatnév", type: "text", required: false, helpText: "", sortOrder: 0 }],
+        teamMemberFieldSchema: [{ key: "nev", label: "Név", type: "text", required: true, helpText: "", sortOrder: 0 }],
+        guests: attendees.length,
+        attendees,
+        quote: { guests: 1, accommodationGuests: 0, nights: 0, ticketSubtotalHuf: 0, accommodationBaseHuf: 0, accommodationOptionsHuf: 0, accommodationSubtotalHuf: 0, totalHuf: 0, lines: [] },
+        totalHuf: 0,
+        status,
+      });
+    }
+
+    it("lists paid teams with their players, labelled by team name or the buyer", async () => {
+      const group = await createGroup();
+      const event = await createEvent(String(group._id), { name: "Páros verseny", publicEntryList: true, registrationUnit: "team" });
+      await teamBooking(String(event._id), "paid", [
+        { fields: { csapatnev: "Nyilasok" }, members: [{ fields: { nev: "Kiss Anna" } }, { fields: { nev: "Nagy Béla" } }] },
+        { fields: {}, members: [{ fields: { nev: "Tóth Csaba" } }, { fields: { nev: " " } }] },
+      ]);
+      await teamBooking(String(event._id), "pending", [{ fields: { csapatnev: "Nem fizetett" }, members: [] }]);
+
+      expect(await getPublicEntryList(String(group._id), String(event._id))).toEqual({
+        eventName: "Páros verseny",
+        teams: [
+          { label: "Nyilasok", members: ["Kiss Anna", "Nagy Béla"] },
+          { label: "Vevő Viktor", members: ["Tóth Csaba"] },
+        ],
+      });
+    });
+
+    it("is null unless the event is active, in this group and publishes its list", async () => {
+      const group = await createGroup();
+      const other = await createGroup();
+      const hidden = await createEvent(String(group._id), { publicEntryList: false });
+      const listed = await createEvent(String(group._id), { publicEntryList: true });
+      const draft = await createEvent(String(group._id), { publicEntryList: true, status: "draft" });
+      expect(await getPublicEntryList(String(group._id), String(hidden._id))).toBeNull();
+      expect(await getPublicEntryList(String(other._id), String(listed._id))).toBeNull();
+      expect(await getPublicEntryList(String(group._id), String(draft._id))).toBeNull();
+      expect(await getPublicEntryList(String(group._id), String(listed._id))).toEqual({ eventName: "Első WDF verseny", teams: [] });
     });
   });
 });

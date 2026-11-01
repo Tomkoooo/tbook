@@ -1,4 +1,5 @@
 import {
+  BookingModel,
   eventGroupRepository,
   eventNights,
   eventRepository,
@@ -23,6 +24,7 @@ import {
   withPackageRemainingUnits,
 } from "@tbook/domain";
 import { bookingRepository } from "@tbook/db";
+import { WALK_IN_CUSTOMER_EMAIL } from "@tbook/schemas";
 import { resolveTeamMemberFieldSchema, resolveTicketAttendeeFieldSchema } from "./booking-validation";
 import { normalizeTBookCurrency } from "./currency";
 
@@ -312,4 +314,54 @@ export async function getPublicEventDetail(groupId: string, eventId: string): Pr
     groupBookingOptions: group?.defaultBookingOptions ?? [],
     hotels: serializedHotels,
   };
+}
+
+// ---- Public entry list ------------------------------------------------------------
+
+export interface PublicEntryList {
+  eventName: string;
+  teams: Array<{ label: string; members: string[] }>;
+}
+
+/**
+ * Who has entered a team event, for the storefront's public entry list
+ * (shown for events with `publicEntryList` on and no tDarts bracket).
+ * Port of the legacy plugin's `getPublicEntryList`: one row per paid team,
+ * labelled by the team's first registration field (else the buyer's name),
+ * members by each player's first field. Null when the event isn't in the
+ * group, isn't active, or doesn't publish its list.
+ */
+export async function getPublicEntryList(groupId: string, eventId: string): Promise<PublicEntryList | null> {
+  const event = await eventRepository.findById(eventId);
+  if (!event || String(event.groupId) !== groupId || event.status !== "active" || !event.publicEntryList) return null;
+
+  const bookings = await BookingModel.find(
+    { eventId: event._id, status: { $in: ["paid", "confirmed"] } },
+    { attendees: 1, attendeeFieldSchema: 1, teamMemberFieldSchema: 1, customer: 1 },
+  )
+    .sort({ paidAt: 1, createdAt: 1 })
+    .lean()
+    .exec();
+
+  const firstFieldValue = (schema: Array<{ key: string }> | undefined, fields: Record<string, unknown> | undefined): string | null => {
+    const key = schema?.[0]?.key;
+    const raw = key && fields ? fields[key] : null;
+    return raw != null && String(raw).trim() ? String(raw).trim() : null;
+  };
+
+  let index = 0;
+  const teams = bookings.flatMap((booking) =>
+    (booking.attendees ?? []).map((attendee) => {
+      index += 1;
+      // A walk-in sale has no real buyer name, so never show its placeholder.
+      const buyer = booking.customer?.email === WALK_IN_CUSTOMER_EMAIL ? null : booking.customer?.name;
+      return {
+        label: firstFieldValue(booking.attendeeFieldSchema, attendee.fields as Record<string, unknown>) ?? buyer ?? `Csapat #${index}`,
+        members: (attendee.members ?? [])
+          .map((member) => firstFieldValue(booking.teamMemberFieldSchema, member.fields as Record<string, unknown>))
+          .filter((name): name is string => Boolean(name)),
+      };
+    }),
+  );
+  return { eventName: event.name, teams };
 }

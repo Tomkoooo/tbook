@@ -181,7 +181,7 @@ every stock change. The counter sells it under **Point of sale → Merch**
 The webshop sells the same stock through the inventory API: it reserves
 stock at checkout, commits when the order is paid, and releases it if
 abandoned. Invoicing, orders and shipping for web orders stay in the
-webshop. Contract and integration guide: [docs/inventory-api.md](docs/inventory-api.md).
+webshop. Contract: [docs/inventory-api.md](docs/inventory-api.md); building a site on it: [docs/site-integration-guide.md](docs/site-integration-guide.md).
 
 ## Files and storage
 
@@ -198,10 +198,7 @@ Unreferenced blobs are removed automatically: the app collects every
 reference (products, ticket layouts, header images, bookings) and deletes
 blobs nothing points at once they are over 7 days old.
 
-**Moving an existing install off the uploads volume:** run
-`npm run migrate:uploads -- --dry-run` (with `DATABASE_URL` and
-`UPLOADS_DIR` set), check the "MISSING" list, then run it without
-`--dry-run`. After that the `tbook-uploads` volume can be removed.
+No volume is needed for the app container.
 
 ## Backwards compatibility
 

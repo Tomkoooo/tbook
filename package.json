@@ -23,7 +23,6 @@
     "test:concurrency": "vitest run --config vitest.concurrency.config.ts",
     "test:coverage": "vitest run --coverage",
     "backfill:capacity": "node scripts/migrate/backfill-sold-guest-count.mjs",
-    "migrate:uploads": "node scripts/migrate/move-uploads-to-db.mjs",
     "prepare": "husky"
   },
   "devDependencies": {

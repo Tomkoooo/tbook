@@ -7,7 +7,7 @@ storefronts and the webshop use its APIs.
 
 | Task | Read first |
 |---|---|
-| Build a storefront/webshop on tBook (in webshop-engine) | [docs/webshop-integration-guide.md](docs/webshop-integration-guide.md) |
+| Build a customer site on tBook (sironic-platform, own site repo) | [docs/site-integration-guide.md](docs/site-integration-guide.md) |
 | Ticket/booking API (v1, public) | [docs/storefront-api.md](docs/storefront-api.md) |
 | Products & stock API (v2 inventory) | [docs/inventory-api.md](docs/inventory-api.md) |
 | Any console UI change | [design-system/MASTER.md](design-system/MASTER.md) |
@@ -89,4 +89,4 @@ network.
 - **The local database may be production data.** When checking the console in a browser, look, don't save, unless the owner says it's a test database.
 - **Don't run `next build` while `npm run dev` is running.** They share `apps/web/.next`, and the build breaks the dev server. For a verification build use `NEXT_DIST_DIR=.next-verify npx next build`, then delete `.next-verify` **and** run `git checkout -- apps/web/next-env.d.ts apps/web/tsconfig.json` (Next rewrites both to point at the build folder).
 - **Stale generated types.** Typecheck errors under `apps/web/.next/types` come from a running dev server, not from your code. Check with `npx tsc --noEmit -p apps/web/tsconfig.json | grep -v '^\.next/'`.
-- **v1 is frozen.** It is byte-compatible with the legacy plugin that live storefronts use. Don't change response shapes; add to v2 instead.
+- **Keep v1's shapes.** `@sironic/plugin-tbook` (sironic-platform) is built on them. Don't rename or remove fields; add new endpoints, or extend v2, instead.

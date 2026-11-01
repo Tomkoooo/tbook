@@ -21,7 +21,6 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN mkdir -p uploads
 
 ARG DATABASE_URL="mongodb://localhost:27017/tbook-admin"
 ARG AUTH_SECRET="placeholder"
@@ -45,7 +44,6 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/apps/web/public ./apps/web/public
-RUN mkdir -p uploads && chown nextjs:nodejs uploads
 
 RUN mkdir .next
 RUN chown nextjs:nodejs .next

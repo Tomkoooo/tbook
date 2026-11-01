@@ -8,8 +8,8 @@ import { readStoredFile } from "./media-storage";
  * background), stored in the database blob store as `/media/<hash>.png|jpg`.
  * A layout may only use pictures its own organization uploaded (checked on
  * save and again on render), so a layout can never reach another tenant's
- * files. Legacy `/uploads/ticket-assets/<org>/…` paths keep working until
- * the uploads migration has run.
+ * files. Legacy `/uploads/ticket-assets/<org>/…` paths are still accepted
+ * syntactically but only resolve if such a file exists.
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;

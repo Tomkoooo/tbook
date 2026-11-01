@@ -7,9 +7,9 @@ import path from "node:path";
  * database blob store (blob-store.ts), voucher PDFs are rendered on
  * demand, and Számlázz.hu invoices/receipts are fetched from Számlázz.hu.
  *
- * Reads remain only as a fallback for records that still point at an
- * `/uploads/…` path. After `npm run migrate:uploads` has moved the
- * irreplaceable files into the database, the volume can be removed.
+ * Reads remain only as a harmless fallback for any record that still
+ * points at an `/uploads/…` path; with no volume mounted they return null
+ * and callers fall through to the database / Számlázz.hu.
  */
 
 function uploadsRoot(): string {
