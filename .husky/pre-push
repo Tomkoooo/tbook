@@ -1,5 +1,11 @@
 #!/usr/bin/env sh
 
+# Cursor's git UI can invoke hooks under Rosetta (x86_64). Native optional
+# deps (rolldown) are installed for the host arch (arm64), so re-exec as arm64.
+if [ "$(uname -m)" = "x86_64" ] && [ -x /usr/bin/arch ] && /usr/bin/arch -arm64 true 2>/dev/null; then
+  exec /usr/bin/arch -arm64 "$0" "$@"
+fi
+
 echo "tbook pre-push: lint, typecheck, test, build"
 
 npm run lint && \
