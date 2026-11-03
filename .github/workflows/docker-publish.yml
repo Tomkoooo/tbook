@@ -3,18 +3,15 @@ name: Docker publish
 on:
   push:
     branches: [main]
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build-and-push:
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -26,16 +23,32 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # GHCR rejects any uppercase in the path; github.repository keeps the
+      # owner's case as configured on GitHub, so lowercase it explicitly
+      # (same fix sironic-platform's own image-build template applies).
+      - id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
           build-args: |
             DATABASE_URL=mongodb://localhost:27017/build
             AUTH_SECRET=placeholder
             NEXTAUTH_URL=https://placeholder.example.com
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # No-op until PORTAINER_WEBHOOK_URL is set as a repo secret; tbook's
+      # stack currently redeploys via the wud.watch label instead (see
+      # portainer.stack.tbook.example.yml), but this keeps the workflow
+      # ready to switch to the sironic-platform webhook model.
+      - name: Redeploy (Portainer webhook)
+        env:
+          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+        if: ${{ env.PORTAINER_WEBHOOK_URL != '' }}
+        run: curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"

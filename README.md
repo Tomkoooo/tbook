@@ -42,6 +42,51 @@ npm run dev
 A Husky pre-push hook runs lint + typecheck + unit tests + build before
 anything reaches the remote.
 
+## Managing production data from the CLI
+
+`scripts/tbook-cli` replaces hand-editing production documents (the kind of
+incident `backups/tdarts-fix-*` and `backups/tdarts-rebuild-*` recorded) with
+a scoped, audited tool. It never touches Mongoose or the database directly —
+every read and write goes through `@tbook/services` (`catalog-admin-service`,
+`booking-admin-service`), the same functions the admin console calls, so
+organization scoping and business invariants (capacity floors, day-pass
+rules, …) are enforced exactly as they are there.
+
+```bash
+npm run tbook-cli -- event list --org horror-weeks
+npm run tbook-cli -- event show --org horror-weeks --id <eventId>
+npm run tbook-cli -- event edit --org horror-weeks --id <eventId> --set capacity=300
+npm run tbook-cli -- booking resend-voucher --org horror-weeks --id <bookingId>
+```
+
+Safety model, enforced the same way for every command and every entity
+added later:
+
+- **Dry run by default.** Omitting `--apply` only prints the plan (for an
+  edit: the before/after of each field) and writes nothing.
+- **This CLI always treats the connected database as production** —
+  regardless of its name. Writing requires both `--apply` and `--prod-ack`.
+- **No "yes to all."** Every changed field is confirmed on its own —
+  interactively, one prompt per field, or, off a TTY, by passing
+  `--confirm-field <name>` once for each field that actually changed.
+  `archive` (the soft-delete — there is no hard delete) additionally
+  requires typing the record's own name back via `--confirm-name`.
+- **Every write leaves a restore point** under `backups/cli/<entity>-
+  <action>-<id>-<timestamp>/` (gitignored, like the rest of `backups/`):
+  the affected document(s) before and after, and an audit entry (who, from
+  `--operator`, `TBOOK_CLI_OPERATOR`, or the local git identity; when;
+  what changed). `event undo --dir <that path>` reverses it by replaying
+  the "before" state through the same service calls — undoing a `create`
+  archives the record, since there is still no hard delete.
+- **Always scoped to one `--org`** (id or slug) — there is no cross-org or
+  "all organizations" mode.
+
+Structured sub-fields (an event's `dayPass`, `pricingRules`,
+`attendeeFieldSchema`, eligibility rules) aren't editable from the CLI yet —
+use the admin console for those. Sending a voucher email
+(`booking resend-voucher`) can't be undone by anything; the CLI says so and
+asks for a typed `RESEND` instead of a field diff.
+
 ## Refreshing a dev database from production
 
 ```bash
