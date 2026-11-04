@@ -20,6 +20,7 @@ import {
   remainingHotelBookingCapacity,
   remainingHotelRoomInventory,
   parseDayTickets,
+  resolveDayPassDiscountCode,
   todayDayKey,
   totalDayTickets,
   totalPackageUnits,
@@ -90,6 +91,8 @@ export interface QuoteRequest {
   hotelId?: string | null;
   nights?: number | null;
   selections?: Selections | null;
+  /** Day-pass events only: a percent-off code applied to every day's price in the basket. */
+  discountCode?: string | null;
 }
 
 export interface BookingQuoteContext {
@@ -102,6 +105,8 @@ export interface BookingQuoteContext {
   guests: number;
   /** The validated day basket (day-pass events only). */
   dayTickets: DayTickets | null;
+  /** The resolved discount code's own `code`, for the booking record — null when none was applied. */
+  discountCode: string | null;
   quote: PriceQuoteResult;
   hotelName: string;
   nights: number;
@@ -219,6 +224,7 @@ export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<B
     event,
     guests: input.guests,
     dayTickets: null,
+    discountCode: null,
     quote: quoteResult,
     hotelName,
     nights: quoteResult.nights,
@@ -273,17 +279,24 @@ async function quoteDayPass(
   });
   if (issues.length > 0) throw ActionError.validation(issues.map((issue) => issue.message).join(" "), { issues });
 
+  const discount = resolveDayPassDiscountCode(event.dayPass, input.discountCode);
+  if (input.discountCode && !discount) {
+    throw ActionError.validation("This discount code isn't valid for this event.");
+  }
+
   const priceQuote = calculateDayPassQuote({
     config: event.dayPass,
     tickets,
     priceBasis: event.ticketPriceBasis,
     vatPercent: event.ticketVatPercent,
+    discount,
   });
 
   return {
     event,
     guests: totalDayTickets(tickets),
     dayTickets: tickets,
+    discountCode: discount?.code ?? null,
     quote: priceQuote,
     hotelName: "",
     nights: 0,
@@ -365,6 +378,8 @@ export interface CreateBookingInput {
   hotelId?: string | null;
   nights?: number | null;
   selections?: Selections | null;
+  /** Day-pass events only: a percent-off code applied to every day's price in the basket. */
+  discountCode?: string | null;
   customer: Customer;
   billing?: BillingInfo | null;
   returnBaseUrl?: string | null;
@@ -390,7 +405,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       : (input.teamMemberCount ?? undefined);
 
   const ctx = await quote({ ...input, teamMemberCount: inferredTeamMemberCount }, opts);
-  const { event, quote: priceQuote, hotelName, nights, selections, currency, registrationFieldSchema, teamMemberFieldSchema, guests } = ctx;
+  const { event, quote: priceQuote, hotelName, nights, selections, discountCode, currency, registrationFieldSchema, teamMemberFieldSchema, guests } = ctx;
 
   // Per-day passes are reserved first: it is the stricter, multi-counter
   // reservation, and if the optional overall cap then fails we release it.
@@ -480,6 +495,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       guests: guests,
       nights,
       selections,
+      discountCode,
       quote: priceQuote,
       totalHuf: priceQuote.totalHuf,
       currency,

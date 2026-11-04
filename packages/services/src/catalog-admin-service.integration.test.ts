@@ -24,6 +24,9 @@ const eventInput = (groupId: string) => ({
     dailyCapacity: number | null;
     capacityOverrides: Record<string, number>;
     closedDays: string[];
+    weekdaySchedule: { openTime: string; closeTime: string } | null;
+    weekendSchedule: { openTime: string; closeTime: string } | null;
+    discountCodes: Array<{ code: string; label: string; percentOff: number; enabled: boolean }>;
   },
   name: "Open",
   description: "",
@@ -151,7 +154,17 @@ describe("catalog-admin-service", () => {
 
   it("creates a day-pass event and protects days that already have sales", async () => {
     const { group } = await newGroup(orgId);
-    const dayPass = { weekdayPriceHuf: 4000, weekendPriceHuf: 7000, weekendDays: [6, 0], dailyCapacity: 20, capacityOverrides: {}, closedDays: [] };
+    const dayPass = {
+      weekdayPriceHuf: 4000,
+      weekendPriceHuf: 7000,
+      weekendDays: [6, 0],
+      dailyCapacity: 20,
+      capacityOverrides: {},
+      closedDays: [],
+      weekdaySchedule: null,
+      weekendSchedule: null,
+      discountCodes: [],
+    };
     const input = { ...eventInput(String(group._id)), kind: "day_pass" as const, dayPass, startDate: new Date("2026-07-01"), endDate: new Date("2026-07-31") };
     const event = await createEvent(orgId, input);
     expect(event.kind).toBe("day_pass");

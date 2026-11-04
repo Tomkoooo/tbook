@@ -59,9 +59,18 @@ bookings: 20/min per client).
   "teamMemberCount": null,
   "hotelId": null,
   "nights": null,
-  "selections": { "dayPasses": { "2026-11-14": 2 } }
+  "selections": { "dayPasses": { "2026-11-14": 2 } },
+  "discountCode": null
 }
 ```
+
+`discountCode` is day-pass events only: one of the event's configured
+discount codes (console: event → Tickets → Day pass pricing → On-site
+discount codes), applied as a percent-off to every day in the basket. Omit
+it or send `null` for full price. An unknown or disabled code is a 400. The
+resolved code (or `null`) comes back on the booking as `discountCode`; it
+is never listed on `GET /events/{eventId}` — a buyer needs to already know
+it.
 
 `POST /bookings` takes the quote fields plus the customer, billing and
 attendees (`CreateBookingInput` in `booking-service.ts`, and

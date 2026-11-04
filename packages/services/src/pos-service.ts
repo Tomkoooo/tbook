@@ -38,6 +38,8 @@ export interface PosSaleInput {
   attendees?: BookingAttendee[];
   /** Day-pass events: `{ dayPasses: { "yyyy-mm-dd": count } }`. `tickets` is then derived from it. */
   selections?: Selections;
+  /** Day-pass events only: one of the event's configured on-site discount codes. */
+  discountCode?: string | null;
   note?: string;
 }
 
@@ -81,6 +83,7 @@ export function posRegistration(input: PosSaleInput): AdminRegistrationInput {
     billing: walkIn ? null : input.billing,
     attendees: input.attendees,
     selections: input.selections,
+    discountCode: input.discountCode,
     adminNote: input.note,
     source: "pos",
     // No overrides: a seller must not be able to sell past capacity or
@@ -141,12 +144,24 @@ export interface DaySaleOption {
   bookable: boolean;
 }
 
+export interface DaySaleDiscountOption {
+  code: string;
+  label: string;
+  percentOff: number;
+}
+
 /**
  * The days a seller can put in a day-pass basket, with the price the buyer
  * pays and what is left. Mirrors the public storefront's view, but a seller
  * works from the counter, so it is org-scoped rather than API-key scoped.
+ * Also surfaces the event's enabled on-site discount codes, so a seller can
+ * pick one from a list rather than having to know it ("HELYSZÍNI JEGY"
+ * discount tiers — see dayPass.discountCodes).
  */
-export async function getDayPassSaleOptions(organizationId: string, eventId: string): Promise<{ currency: string; days: DaySaleOption[] } | null> {
+export async function getDayPassSaleOptions(
+  organizationId: string,
+  eventId: string,
+): Promise<{ currency: string; days: DaySaleOption[]; discountCodes: DaySaleDiscountOption[] } | null> {
   const event = await assertEventInOrg(organizationId, eventId);
   if (event.kind !== "day_pass" || !event.dayPass) return null;
 
@@ -163,5 +178,8 @@ export async function getDayPassSaleOptions(organizationId: string, eventId: str
     remaining: day.remaining,
     bookable: !day.closed && day.date >= today && (day.remaining === null || day.remaining > 0),
   }));
-  return { currency: event.currency, days };
+  const discountCodes = (event.dayPass.discountCodes ?? [])
+    .filter((entry) => entry.enabled)
+    .map((entry) => ({ code: entry.code, label: entry.label || entry.code, percentOff: entry.percentOff }));
+  return { currency: event.currency, days, discountCodes };
 }

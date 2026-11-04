@@ -1,14 +1,16 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { parseInput } from "@tbook/actions";
 import { BookingModel, dbConnect, dbDisconnectAll, VoucherModel } from "@tbook/db";
 import { adminEventGroupInputSchema, adminEventInputSchema } from "@tbook/schemas";
-import { createEvent, createEventGroup, createOrganization, getEventForOrg, listAllOrganizations, listEventsForOrg } from "@tbook/services";
+import { createEvent, createEventGroup, createOrganization, getEventForOrg, listAllOrganizations, listEventsForOrg, listGroupsForOrg } from "@tbook/services";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { Types } from "mongoose";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runBookingCommand } from "./commands/booking";
 import { runEventCommand } from "./commands/event";
+import { runGroupCommand } from "./commands/group";
 
 /**
  * Exercises the safety plumbing every future entity will reuse: dry-run by
@@ -271,6 +273,98 @@ describe("tbook-cli", () => {
     });
   });
 
+  describe("event create --day-pass-json", () => {
+    it("sets the full dayPass config (prices, schedule, discount codes) from a JSON file", async () => {
+      const dayPass = {
+        weekdayPriceHuf: 6000,
+        weekendPriceHuf: 8000,
+        weekendDays: [6, 0],
+        dailyCapacity: null,
+        capacityOverrides: {},
+        closedDays: ["2026-12-07", "2026-12-08"],
+        weekdaySchedule: { openTime: "14:00", closeTime: "20:00" },
+        weekendSchedule: { openTime: "11:00", closeTime: "20:00" },
+        discountCodes: [{ code: "10", label: "10% kedvezmény", percentOff: 10, enabled: true }],
+      };
+      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tbook-cli-test-")), "day-pass.json");
+      fs.writeFileSync(file, JSON.stringify(dayPass));
+
+      const createArgs = [
+        "--org",
+        orgId,
+        "--uri",
+        uri,
+        "--set",
+        `groupId=${groupId}`,
+        "--set",
+        "name=Day Pass via CLI",
+        "--set",
+        "startDate=2026-12-01",
+        "--set",
+        "endDate=2026-12-10",
+        "--set",
+        "ticketFeeHuf=0",
+        "--set",
+        "kind=day_pass",
+        "--day-pass-json",
+        file,
+        "--apply",
+        "--prod-ack",
+        "--confirm-field",
+        "groupId",
+        "--confirm-field",
+        "name",
+        "--confirm-field",
+        "startDate",
+        "--confirm-field",
+        "endDate",
+        "--confirm-field",
+        "ticketFeeHuf",
+        "--confirm-field",
+        "kind",
+        "--confirm-field",
+        "dayPass",
+      ];
+      await runEventCommand("create", createArgs);
+
+      const events = await listEventsForOrg(orgId);
+      const created = events.find((e) => e.name === "Day Pass via CLI");
+      expect(created).toBeDefined();
+      expect(created?.kind).toBe("day_pass");
+      expect(created?.dayPass?.weekdayPriceHuf).toBe(6000);
+      expect(created?.dayPass?.weekendPriceHuf).toBe(8000);
+      expect(created?.dayPass?.closedDays).toEqual(["2026-12-07", "2026-12-08"]);
+      expect(created?.dayPass?.weekdaySchedule).toMatchObject({ openTime: "14:00", closeTime: "20:00" });
+      expect(created?.dayPass?.discountCodes).toHaveLength(1);
+      expect(created?.dayPass?.discountCodes[0]?.percentOff).toBe(10);
+    });
+
+    it("rejects a --day-pass-json file that isn't valid JSON", async () => {
+      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tbook-cli-test-")), "bad.json");
+      fs.writeFileSync(file, "{ not json");
+      await expect(
+        runEventCommand("create", [
+          "--org",
+          orgId,
+          "--uri",
+          uri,
+          "--set",
+          `groupId=${groupId}`,
+          "--set",
+          "name=X",
+          "--set",
+          "startDate=2026-12-01",
+          "--set",
+          "endDate=2026-12-02",
+          "--set",
+          "ticketFeeHuf=0",
+          "--day-pass-json",
+          file,
+        ]),
+      ).rejects.toThrow(/not valid JSON/);
+    });
+  });
+
   describe("event list/show", () => {
     it("lists and shows without needing --apply or --prod-ack", async () => {
       await seedEvent({ name: "Listed Event" });
@@ -331,6 +425,36 @@ describe("tbook-cli", () => {
       await expect(
         runBookingCommand("resend-voucher", ["--org", orgId, "--uri", uri, "--id", String(booking._id), "--apply", "--prod-ack"]),
       ).rejects.toThrow(/--confirm-send/);
+    });
+  });
+
+  describe("group edit", () => {
+    it("dry-runs by default, then writes once confirmed, e.g. to publish a draft group", async () => {
+      await runGroupCommand("edit", ["--org", orgId, "--uri", uri, "--id", groupId, "--set", "status=active"]);
+      expect((await listGroupsForOrg(orgId)).find((g) => String(g._id) === groupId)?.status).toBe("draft");
+
+      await runGroupCommand("edit", [
+        "--org",
+        orgId,
+        "--uri",
+        uri,
+        "--id",
+        groupId,
+        "--set",
+        "status=active",
+        "--apply",
+        "--prod-ack",
+        "--confirm-field",
+        "status",
+      ]);
+
+      expect((await listGroupsForOrg(orgId)).find((g) => String(g._id) === groupId)?.status).toBe("active");
+    });
+
+    it("rejects an edit to a field the CLI doesn't expose", async () => {
+      await expect(
+        runGroupCommand("edit", ["--org", orgId, "--uri", uri, "--id", groupId, "--set", "apiKeyHash=x"]),
+      ).rejects.toThrow(/isn't editable/);
     });
   });
 });

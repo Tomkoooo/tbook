@@ -136,6 +136,7 @@ const BookingSchema = new Schema<IBooking>(
     guests: { type: Number, required: true, min: 1 },
     nights: { type: Number, default: 0, min: 0 },
     selections: { type: Schema.Types.Mixed, default: {} },
+    discountCode: { type: String, default: null },
     quote: { type: QuoteSchema, required: true },
     totalHuf: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "HUF" },

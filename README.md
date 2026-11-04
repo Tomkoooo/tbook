@@ -59,6 +59,14 @@ npm run tbook-cli -- event edit --org horror-weeks --id <eventId> --set capacity
 npm run tbook-cli -- booking resend-voucher --org horror-weeks --id <bookingId>
 ```
 
+`event create`/`event edit` also take `--day-pass-json <file>`: the day-pass
+event's whole `dayPass` config (prices, schedule, discount codes — the full
+shape in `@tbook/schemas`' `dayPassConfigSchema`) as one JSON file, since a
+day-pass event is unusable without it. `group list`/`group edit` cover an
+event group's own scalar fields (e.g. `--set status=active` to publish a
+draft group — a group must be `active` for its API key to authenticate v1
+requests).
+
 Safety model, enforced the same way for every command and every entity
 added later:
 
@@ -81,9 +89,10 @@ added later:
 - **Always scoped to one `--org`** (id or slug) — there is no cross-org or
   "all organizations" mode.
 
-Structured sub-fields (an event's `dayPass`, `pricingRules`,
-`attendeeFieldSchema`, eligibility rules) aren't editable from the CLI yet —
-use the admin console for those. Sending a voucher email
+Structured sub-fields (an event's `pricingRules`, `attendeeFieldSchema`,
+eligibility rules) aren't editable from the CLI yet — use the admin console
+for those. `dayPass` is the exception: `--day-pass-json <file>` above.
+Sending a voucher email
 (`booking resend-voucher`) can't be undone by anything; the CLI says so and
 asks for a typed `RESEND` instead of a field diff.
 
@@ -206,6 +215,16 @@ the event document, so one atomic update checks and increments them all
 (`eventRepository.reserveDayCapacity`). Each ticket becomes a voucher dated
 to its day; the door scanner answers `wrong_day` outside that date (the
 venue's time zone is `Europe/Budapest`).
+
+A day-pass event can also carry `dayPass.weekdaySchedule` /
+`weekendSchedule` (`{ openTime, closeTime }`, display only — not enforced
+against bookability) and `dayPass.discountCodes[]` (`{ code, label,
+percentOff, enabled }`): a percent-off a buyer enters at checkout
+(`discountCode` on `/quote`/`/bookings`, see
+[docs/storefront-api.md](docs/storefront-api.md)) or a seller picks from a
+dropdown at **Point of sale**. All editable from the console (event →
+Tickets → Day pass pricing) or the CLI via `event create`/`event edit
+--day-pass-json <file>` (see below).
 
 ## Point of sale
 

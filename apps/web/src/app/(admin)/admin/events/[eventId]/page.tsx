@@ -88,6 +88,16 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                 dailyCapacity: event.dayPass.dailyCapacity ?? null,
                 capacityOverrides: Object.entries((event.dayPass.capacityOverrides ?? {}) as Record<string, number>).map(([date, capacity]) => ({ date, capacity })),
                 closedDays: [...event.dayPass.closedDays].join(", "),
+                weekdayOpenTime: event.dayPass.weekdaySchedule?.openTime ?? "",
+                weekdayCloseTime: event.dayPass.weekdaySchedule?.closeTime ?? "",
+                weekendOpenTime: event.dayPass.weekendSchedule?.openTime ?? "",
+                weekendCloseTime: event.dayPass.weekendSchedule?.closeTime ?? "",
+                discountCodes: (event.dayPass.discountCodes ?? []).map((entry) => ({
+                  code: entry.code,
+                  label: entry.label ?? "",
+                  percentOff: entry.percentOff,
+                  enabled: entry.enabled ?? true,
+                })),
               }
             : EMPTY_DAY_PASS,
           groupId: event.groupId ? String(event.groupId) : "",

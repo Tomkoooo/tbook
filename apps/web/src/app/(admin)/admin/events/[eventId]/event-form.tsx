@@ -46,6 +46,11 @@ export interface DayPassFormValues {
   dailyCapacity: number | null;
   capacityOverrides: Array<{ date: string; capacity: number | "" }>;
   closedDays: string;
+  weekdayOpenTime: string;
+  weekdayCloseTime: string;
+  weekendOpenTime: string;
+  weekendCloseTime: string;
+  discountCodes: Array<{ code: string; label: string; percentOff: number | ""; enabled: boolean }>;
 }
 
 export const EMPTY_DAY_PASS: DayPassFormValues = {
@@ -55,6 +60,11 @@ export const EMPTY_DAY_PASS: DayPassFormValues = {
   dailyCapacity: null,
   capacityOverrides: [],
   closedDays: "",
+  weekdayOpenTime: "",
+  weekdayCloseTime: "",
+  weekendOpenTime: "",
+  weekendCloseTime: "",
+  discountCodes: [],
 };
 
 export type EligibilityFormValues = Omit<EligibilityValues, "rules"> & {
@@ -153,6 +163,7 @@ export function EventForm({
   const [step, setStep] = useState(0);
   const [kind, setKind] = useState(initial.kind);
   const [overrides, setOverrides] = useState(initial.dayPass.capacityOverrides);
+  const [discountCodes, setDiscountCodes] = useState(initial.dayPass.discountCodes);
   const [fieldRows, setFieldRows] = useState<FieldRow[]>(() => fieldRowsFromDefs(initial.attendeeFieldSchema));
   const [eligibility, setEligibility] = useState<EligibilityValues>(() => ({
     ...initial.eligibility,
@@ -339,6 +350,85 @@ export function EventForm({
                         ))}
                       </div>
                     </fieldset>
+                    <fieldset className="grid gap-3">
+                      <legend className="text-sm font-medium">Advertised opening hours (display only)</legend>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          <FormField label="Weekday opens" htmlFor="weekdayOpenTime">
+                            <Input id="weekdayOpenTime" name="weekdayOpenTime" type="time" defaultValue={initial.dayPass.weekdayOpenTime} />
+                          </FormField>
+                          <FormField label="Weekday closes" htmlFor="weekdayCloseTime">
+                            <Input id="weekdayCloseTime" name="weekdayCloseTime" type="time" defaultValue={initial.dayPass.weekdayCloseTime} />
+                          </FormField>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <FormField label="Weekend opens" htmlFor="weekendOpenTime">
+                            <Input id="weekendOpenTime" name="weekendOpenTime" type="time" defaultValue={initial.dayPass.weekendOpenTime} />
+                          </FormField>
+                          <FormField label="Weekend closes" htmlFor="weekendCloseTime">
+                            <Input id="weekendCloseTime" name="weekendCloseTime" type="time" defaultValue={initial.dayPass.weekendCloseTime} />
+                          </FormField>
+                        </div>
+                      </div>
+                    </fieldset>
+                  </div>
+                </SectionCard>
+                <SectionCard
+                  title="On-site discount codes"
+                  description="Percent-off codes a seller can apply at the counter (or a buyer can enter online) to either day's price."
+                >
+                  <div className="grid gap-3">
+                    <input type="hidden" name="discountCodes" value={JSON.stringify(discountCodes)} />
+                    {discountCodes.map((row, index) => (
+                      <div key={index} className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,6rem)_auto_auto]">
+                        <FormField label="Code" htmlFor={`discount-code-${index}`}>
+                          <Input
+                            id={`discount-code-${index}`}
+                            value={row.code}
+                            onChange={(e) => setDiscountCodes((rows) => rows.map((r, i) => (i === index ? { ...r, code: e.target.value } : r)))}
+                          />
+                        </FormField>
+                        <FormField label="Label" htmlFor={`discount-label-${index}`}>
+                          <Input
+                            id={`discount-label-${index}`}
+                            value={row.label}
+                            onChange={(e) => setDiscountCodes((rows) => rows.map((r, i) => (i === index ? { ...r, label: e.target.value } : r)))}
+                          />
+                        </FormField>
+                        <FormField label="% off" htmlFor={`discount-percent-${index}`}>
+                          <Input
+                            id={`discount-percent-${index}`}
+                            type="number"
+                            min={1}
+                            max={99}
+                            value={row.percentOff}
+                            onChange={(e) =>
+                              setDiscountCodes((rows) =>
+                                rows.map((r, i) => (i === index ? { ...r, percentOff: e.target.value === "" ? "" : Number(e.target.value) } : r)),
+                              )
+                            }
+                          />
+                        </FormField>
+                        <Switch
+                          checked={row.enabled}
+                          onCheckedChange={(checked) => setDiscountCodes((rows) => rows.map((r, i) => (i === index ? { ...r, enabled: checked } : r)))}
+                          aria-label="Enabled"
+                        />
+                        <Button type="button" variant="ghost" size="icon" aria-label="Remove discount code" onClick={() => setDiscountCodes((rows) => rows.filter((_, i) => i !== index))}>
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    ))}
+                    <div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDiscountCodes((rows) => [...rows, { code: "", label: "", percentOff: "", enabled: true }])}
+                      >
+                        <Plus /> Add discount code
+                      </Button>
+                    </div>
                   </div>
                 </SectionCard>
                 <SectionCard title="Capacity per day" description="How many passes can be sold for each date.">

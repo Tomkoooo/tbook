@@ -1,4 +1,4 @@
-import type { DayPassConfig, PriceBasis } from "@tbook/schemas";
+import type { DayPassConfig, DayPassDiscountCode, PriceBasis } from "@tbook/schemas";
 import type { PriceQuoteResult } from "./pricing";
 import { toGrossAmount } from "./vat";
 
@@ -51,6 +51,24 @@ export function isWeekendDay(dayKey: string, weekendDays: number[]): boolean {
 
 export function dayPriceHuf(config: DayPassConfig, dayKey: string): number {
   return isWeekendDay(dayKey, config.weekendDays) ? config.weekendPriceHuf : config.weekdayPriceHuf;
+}
+
+/**
+ * Looks up an enabled discount code by name (trimmed, case-insensitive).
+ * Returns null for no code, an unknown code, or one that's been disabled —
+ * callers that need to tell "no code given" apart from "bad code" check
+ * `code` before calling this.
+ */
+export function resolveDayPassDiscountCode(config: DayPassConfig, code: string | null | undefined): DayPassDiscountCode | null {
+  const normalized = code?.trim().toUpperCase();
+  if (!normalized) return null;
+  return config.discountCodes.find((entry) => entry.enabled && entry.code.trim().toUpperCase() === normalized) ?? null;
+}
+
+/** Applies a resolved discount's percent-off to a base price, never below zero. */
+function discountedPriceHuf(baseHuf: number, discount: DayPassDiscountCode | null | undefined): number {
+  if (!discount) return baseHuf;
+  return Math.max(0, baseHuf * (1 - discount.percentOff / 100));
 }
 
 /** Passes available on a day; null means unlimited. */
@@ -187,17 +205,21 @@ export function calculateDayPassQuote(input: {
   tickets: DayTickets;
   priceBasis: PriceBasis;
   vatPercent: number;
+  /** Already resolved via resolveDayPassDiscountCode — this function doesn't look codes up itself. */
+  discount?: DayPassDiscountCode | null;
 }): PriceQuoteResult {
   const lines = Object.keys(input.tickets)
     .sort()
     .map((date) => {
       const qty = input.tickets[date]!;
-      const unitGross = roundMoney(toGrossAmount(Math.max(0, dayPriceHuf(input.config, date)), input.priceBasis, input.vatPercent));
+      const basePrice = Math.max(0, dayPriceHuf(input.config, date));
+      const unitGross = roundMoney(toGrossAmount(discountedPriceHuf(basePrice, input.discount), input.priceBasis, input.vatPercent));
       const kind = isWeekendDay(date, input.config.weekendDays) ? "weekend" : "weekday";
+      const discountSuffix = input.discount ? `, ${input.discount.label || input.discount.code} −${input.discount.percentOff}%` : "";
       return {
         // "ticket:" keeps invoice VAT resolution on the ticket rate.
         key: `ticket:${date}`,
-        label: `Day pass ${date} (${kind})${qty > 1 ? ` × ${qty}` : ""}`,
+        label: `Day pass ${date} (${kind}${discountSuffix})${qty > 1 ? ` × ${qty}` : ""}`,
         amountHuf: unitGross * qty,
       };
     });

@@ -128,6 +128,7 @@ export default async function SalesPage({
           readers={readers.map((reader) => ({ id: reader.id, name: reader.name }))}
           tickets={tickets}
           dayOptions={dayOptions?.days ?? null}
+          discountCodes={dayOptions?.discountCodes ?? []}
           currency={preview.event.currency}
           total={preview.quote.totalHuf}
           attendeeFields={preview.registrationFieldSchema}

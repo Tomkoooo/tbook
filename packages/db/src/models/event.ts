@@ -82,6 +82,28 @@ const EventSchema = new Schema<IEvent>(
           dailyCapacity: { type: Number, default: null, min: 0 },
           capacityOverrides: { type: Schema.Types.Mixed, default: {} },
           closedDays: { type: [String], default: [] },
+          weekdaySchedule: {
+            type: new Schema({ openTime: { type: String, required: true }, closeTime: { type: String, required: true } }, { _id: false }),
+            default: null,
+          },
+          weekendSchedule: {
+            type: new Schema({ openTime: { type: String, required: true }, closeTime: { type: String, required: true } }, { _id: false }),
+            default: null,
+          },
+          discountCodes: {
+            type: [
+              new Schema(
+                {
+                  code: { type: String, required: true },
+                  label: { type: String, default: "" },
+                  percentOff: { type: Number, required: true, min: 1, max: 99 },
+                  enabled: { type: Boolean, default: true },
+                },
+                { _id: false },
+              ),
+            ],
+            default: [],
+          },
         },
         { _id: false, minimize: false },
       ),

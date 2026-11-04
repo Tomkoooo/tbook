@@ -1,6 +1,7 @@
 import { ActionError } from "@tbook/actions";
 import { runBookingCommand } from "./commands/booking";
 import { runEventCommand } from "./commands/event";
+import { runGroupCommand } from "./commands/group";
 import { dbDisconnectAll } from "./lib/env";
 import { CliError } from "./lib/errors";
 
@@ -28,11 +29,17 @@ Usage:
 
 Entities and actions:
   event     list | show | create | edit | archive | undo | groups
+  group     list | edit
   booking   list | show | resend-voucher
 
 Every command needs --org <idOrSlug>. Every write defaults to a dry run —
 pass --apply --prod-ack to actually write (this CLI always treats the
 connected database as production). --uri overrides DATABASE_URL.
+
+A day-pass event's dayPass config (prices, schedule, discount codes — the
+full shape in @tbook/schemas' dayPassConfigSchema) is set whole via
+--day-pass-json <file> on "event create"/"event edit", alongside --set for
+the event's scalar fields.
 
 Examples:
   npx tsx scripts/tbook-cli/cli.ts event list --org horror-weeks
@@ -40,8 +47,13 @@ Examples:
   npx tsx scripts/tbook-cli/cli.ts event edit --org horror-weeks --id <eventId> --set capacity=300
   npx tsx scripts/tbook-cli/cli.ts event edit --org horror-weeks --id <eventId> --set capacity=300 \\
       --apply --prod-ack
+  npx tsx scripts/tbook-cli/cli.ts event create --org horror-weeks --set groupId=<id> --set name=X \\
+      --set startDate=2026-10-30 --set endDate=2026-11-29 --set ticketFeeHuf=0 --set kind=day_pass \\
+      --day-pass-json day-pass.json --apply --prod-ack
   npx tsx scripts/tbook-cli/cli.ts event archive --org horror-weeks --id <eventId> --apply --prod-ack
   npx tsx scripts/tbook-cli/cli.ts event undo --org horror-weeks --dir backups/cli/event-edit-... \\
+      --apply --prod-ack
+  npx tsx scripts/tbook-cli/cli.ts group edit --org horror-weeks --id <groupId> --set status=active \\
       --apply --prod-ack
   npx tsx scripts/tbook-cli/cli.ts booking list --org horror-weeks --status paid --q jane@example.com
   npx tsx scripts/tbook-cli/cli.ts booking resend-voucher --org horror-weeks --id <bookingId> \\
@@ -57,6 +69,10 @@ async function main(): Promise<void> {
   }
   if (entity === "event") {
     await runEventCommand(action, rest);
+    return;
+  }
+  if (entity === "group") {
+    await runGroupCommand(action, rest);
     return;
   }
   if (entity === "booking") {

@@ -90,6 +90,27 @@ export type EventKind = z.infer<typeof eventKindSchema>;
 /** `yyyy-mm-dd`, the key every per-day map is indexed by. */
 export const dayKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be a yyyy-mm-dd date");
 
+/** Free-text "HH:mm"-ish, display only — not enforced against bookability, same as the event's own startTime/endTime. */
+export const dayPassScheduleSchema = z.object({
+  openTime: z.string().max(10),
+  closeTime: z.string().max(10),
+});
+export type DayPassSchedule = z.infer<typeof dayPassScheduleSchema>;
+
+/**
+ * A redeemable percent-off code for day-pass tickets (e.g. an on-site
+ * discount tier). `code` is matched case-insensitively/trimmed; the
+ * discount applies to whichever day's weekday/weekend price the buyer is
+ * getting, so one code covers both rates.
+ */
+export const dayPassDiscountCodeSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  label: z.string().max(100).default(""),
+  percentOff: z.number().min(1).max(99),
+  enabled: z.boolean().default(true),
+});
+export type DayPassDiscountCode = z.infer<typeof dayPassDiscountCodeSchema>;
+
 export const dayPassConfigSchema = z.object({
   /** Price of one pass on an ordinary day (basis/VAT come from the event's ticket settings). */
   weekdayPriceHuf: z.number().min(0),
@@ -103,6 +124,12 @@ export const dayPassConfigSchema = z.object({
   capacityOverrides: z.record(dayKeySchema, z.number().int().min(0)).default({}),
   /** Days inside the event's range that aren't sold (a rest day, a venue closure). */
   closedDays: z.array(dayKeySchema).default([]),
+  /** Advertised opening hours on an ordinary day — display only. */
+  weekdaySchedule: dayPassScheduleSchema.nullable().default(null),
+  /** Advertised opening hours on a weekend day — display only. */
+  weekendSchedule: dayPassScheduleSchema.nullable().default(null),
+  /** Percent-off codes a buyer or seller can apply to a day's price. */
+  discountCodes: z.array(dayPassDiscountCodeSchema).max(20).default([]),
 });
 export type DayPassConfig = z.infer<typeof dayPassConfigSchema>;
 

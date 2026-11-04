@@ -195,6 +195,8 @@ export const bookingSchema = z.object({
   guests: z.number().min(1),
   nights: z.number().min(0).default(0),
   selections: selectionsSchema.default({}),
+  /** The day-pass discount code applied at checkout, if any (its `code`, not its label). */
+  discountCode: z.string().nullable().default(null),
   quote: priceQuoteSchema,
   totalHuf: z.number().min(0),
   currency: z.string().default("HUF"),

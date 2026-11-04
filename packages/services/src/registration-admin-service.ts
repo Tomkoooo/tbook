@@ -50,6 +50,8 @@ export interface AdminRegistrationInput {
   accommodationGuests?: number | null;
   nights?: number | null;
   selections?: Selections;
+  /** Day-pass events only: a percent-off code applied to every day's price in the basket. */
+  discountCode?: string | null;
   adminNote?: string;
   /** Where the registration was made. Defaults to the admin console. */
   source?: "admin" | "pos";
@@ -79,7 +81,7 @@ export interface AdminRegistrationResult {
  */
 export async function previewAdminRegistration(
   organizationId: string,
-  input: Pick<AdminRegistrationInput, "eventId" | "guests" | "hotelId" | "accommodationGuests" | "nights" | "selections" | "overrides">,
+  input: Pick<AdminRegistrationInput, "eventId" | "guests" | "hotelId" | "accommodationGuests" | "nights" | "selections" | "discountCode" | "overrides">,
 ) {
   await assertEventInOrgForRegistration(organizationId, input.eventId);
   const ctx = await quote(
@@ -90,6 +92,7 @@ export async function previewAdminRegistration(
       accommodationGuests: input.accommodationGuests ?? undefined,
       nights: input.nights ?? undefined,
       selections: input.selections,
+      discountCode: input.discountCode ?? undefined,
     },
     { ...input.overrides },
   );
@@ -140,6 +143,7 @@ export async function createAdminRegistration(
       accommodationGuests: input.accommodationGuests ?? undefined,
       nights: input.nights ?? undefined,
       selections: input.selections,
+      discountCode: input.discountCode ?? undefined,
     },
     { ...input.overrides },
   );

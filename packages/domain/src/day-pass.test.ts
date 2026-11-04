@@ -7,6 +7,7 @@ import {
   expandDayTickets,
   isWeekendDay,
   parseDayTickets,
+  resolveDayPassDiscountCode,
   todayDayKey,
   validateDayTickets,
 } from "./day-pass";
@@ -18,6 +19,12 @@ const config: DayPassConfig = {
   dailyCapacity: 10,
   capacityOverrides: { "2026-07-05": 3 },
   closedDays: ["2026-07-06"],
+  weekdaySchedule: null,
+  weekendSchedule: null,
+  discountCodes: [
+    { code: "10", label: "10% kedvezmény", percentOff: 10, enabled: true },
+    { code: "DISABLED", label: "Disabled code", percentOff: 50, enabled: false },
+  ],
 };
 const start = new Date("2026-07-03T00:00:00Z"); // Friday
 const end = new Date("2026-07-07T00:00:00Z"); // Tuesday
@@ -89,5 +96,22 @@ describe("day-pass", () => {
     // 22:30 UTC on the 3rd is already the 4th in Budapest (UTC+2 in summer).
     expect(todayDayKey(new Date("2026-07-03T22:30:00Z"), "Europe/Budapest")).toBe("2026-07-04");
     expect(todayDayKey(new Date("2026-07-03T22:30:00Z"), "UTC")).toBe("2026-07-03");
+  });
+
+  it("resolves a discount code case-insensitively and trims it, ignoring disabled or unknown codes", () => {
+    expect(resolveDayPassDiscountCode(config, " 10 ")).toMatchObject({ code: "10", percentOff: 10 });
+    expect(resolveDayPassDiscountCode(config, "10")).toMatchObject({ percentOff: 10 });
+    expect(resolveDayPassDiscountCode(config, "DISABLED")).toBeNull();
+    expect(resolveDayPassDiscountCode(config, "NOPE")).toBeNull();
+    expect(resolveDayPassDiscountCode(config, null)).toBeNull();
+    expect(resolveDayPassDiscountCode(config, "")).toBeNull();
+  });
+
+  it("applies a discount code's percent-off to every day's price in the quote", () => {
+    const discount = resolveDayPassDiscountCode(config, "10")!;
+    const q = calculateDayPassQuote({ config, tickets: { "2026-07-03": 1, "2026-07-04": 1 }, priceBasis: "gross", vatPercent: 27, discount });
+    // Weekday 5000 -10% = 4500, weekend 8000 -10% = 7200.
+    expect(q.totalHuf).toBe(4500 + 7200);
+    expect(q.lines.every((l) => l.label.includes("−10%"))).toBe(true);
   });
 });

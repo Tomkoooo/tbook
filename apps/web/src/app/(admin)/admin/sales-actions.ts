@@ -118,6 +118,7 @@ function parseSaleForm(formData: FormData, paymentMethod: string) {
   }
 
   const base = { eventId: str("eventId"), tickets, paymentMethod, reference: str("reference"), note: str("note") };
+  const discountCode = str("discountCode") || undefined;
   const input = parseInput(
     posFormSchema,
     delivery === "receipt"
@@ -139,7 +140,7 @@ function parseSaleForm(formData: FormData, paymentMethod: string) {
         },
   );
 
-  return { ...input, selections, attendees: parseAttendeesFromForm(formData, tickets) };
+  return { ...input, selections, discountCode, attendees: parseAttendeesFromForm(formData, tickets) };
 }
 
 /** Pushes the amount to a paired SumUp reader and leaves the sale waiting for the customer. */

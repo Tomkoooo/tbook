@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { ActionError, parseInput } from "@tbook/actions";
 import type { IEvent } from "@tbook/db";
 import { adminEventInputSchema, type AdminEventInput } from "@tbook/schemas";
@@ -16,11 +17,12 @@ import { confirmExactText, confirmFieldChanges, type FieldChange, printFieldChan
  * the soft kind the console already has: status -> "archived"; the
  * service layer has no hard delete, and this CLI doesn't add one.
  *
- * Structured sub-objects (dayPass, pricingRules, attendeeFieldSchema,
- * eligibility*) aren't editable via --set yet — only the scalar fields a
- * console operator would change one at a time. Use the admin console for
- * those; this keeps the CLI's first cut scoped to what it can confirm and
- * diff field-by-field.
+ * Structured sub-objects (pricingRules, attendeeFieldSchema, eligibility*)
+ * aren't editable via --set yet — only the scalar fields a console operator
+ * would change one at a time, plus dayPass, which `create`/`edit` accept
+ * whole via `--day-pass-json <file>` (its full JSON shape, matching
+ * @tbook/schemas' dayPassConfigSchema) since a day-pass event is unusable
+ * without it. Everything else structured still needs the admin console.
  */
 
 type FieldKind = "string" | "number" | "boolean" | "date" | "nullableString" | "nullableNumber" | "nullableDate";
@@ -30,6 +32,8 @@ const EDITABLE_EVENT_FIELDS: Record<string, FieldKind> = {
   name: "string",
   description: "string",
   address: "string",
+  /** "standard" | "day_pass" — pair with --day-pass-json when switching to "day_pass". */
+  kind: "string",
   startDate: "date",
   endDate: "date",
   startTime: "nullableString",
@@ -82,12 +86,30 @@ function parseSetFlags(flags: Flags): Record<string, unknown> {
     if (!kind) {
       throw new CliError(
         `"${field}" isn't editable from the CLI. Editable fields: ${Object.keys(EDITABLE_EVENT_FIELDS).join(", ")}.\n` +
-          "Structured fields (dayPass, pricingRules, attendeeFieldSchema, eligibility*) need the admin console.",
+          "dayPass is set with --day-pass-json <file>. Other structured fields (pricingRules, " +
+          "attendeeFieldSchema, eligibility*) need the admin console.",
       );
     }
     out[field] = castSetValue(value, kind);
   }
   return out;
+}
+
+/** Reads --day-pass-json <file>, whole JSON matching dayPassConfigSchema, if given. */
+function readDayPassJsonFlag(flags: Flags): unknown {
+  const file = flags.get("day-pass-json");
+  if (file === undefined) return undefined;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    throw new CliError(`Could not read --day-pass-json file "${file}": ${(error as Error).message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new CliError(`"${file}" is not valid JSON.`);
+  }
 }
 
 /**
@@ -266,6 +288,8 @@ async function eventCreate(flags: Flags): Promise<void> {
   await connectDb(flags.get("uri"));
   const org = await resolveOrganization(requireFlag(flags, "org"));
   const sets = parseSetFlags(flags);
+  const dayPass = readDayPassJsonFlag(flags);
+  if (dayPass !== undefined) sets.dayPass = dayPass;
 
   const missing = REQUIRED_ON_CREATE.filter((f) => !(f in sets));
   if (missing.length > 0) throw new CliError(`event create needs --set for: ${missing.join(", ")}`);
@@ -330,7 +354,9 @@ async function eventEdit(flags: Flags): Promise<void> {
   const org = await resolveOrganization(requireFlag(flags, "org"));
   const id = requireFlag(flags, "id");
   const sets = parseSetFlags(flags);
-  if (Object.keys(sets).length === 0) throw new CliError("Nothing to edit — pass at least one --set field=value.");
+  const dayPass = readDayPassJsonFlag(flags);
+  if (dayPass !== undefined) sets.dayPass = dayPass;
+  if (Object.keys(sets).length === 0) throw new CliError("Nothing to edit — pass at least one --set field=value, or --day-pass-json.");
 
   const existing = await getEventForOrg(org.id, id);
   const currentInput = eventToAdminInput(existing.toObject() as unknown as RawEventDoc);

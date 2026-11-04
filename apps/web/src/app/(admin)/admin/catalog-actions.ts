@@ -57,12 +57,22 @@ function jsonRows(form: FormData, key: string): unknown[] {
   }
 }
 
+/** A schedule card's open/close time pair, or null when either side is left blank. */
+function scheduleFromForm(form: FormData, prefix: string): { openTime: string; closeTime: string } | null {
+  const openTime = text(form, `${prefix}OpenTime`);
+  const closeTime = text(form, `${prefix}CloseTime`);
+  return openTime && closeTime ? { openTime, closeTime } : null;
+}
+
 /** Reads the day-pass section of the event form. Rows come as JSON, closed days as free text. */
 function dayPassFromForm(form: FormData) {
   const overrides: Record<string, number> = {};
   for (const row of jsonRows(form, "capacityOverrides") as Array<{ date?: string; capacity?: number | string }>) {
     if (row?.date && row.capacity !== "" && row.capacity != null) overrides[row.date] = Number(row.capacity);
   }
+  const discountCodes = (jsonRows(form, "discountCodes") as Array<{ code?: string; label?: string; percentOff?: number | string; enabled?: boolean }>)
+    .filter((row) => row?.code && row.percentOff !== "" && row.percentOff != null)
+    .map((row) => ({ code: String(row.code), label: row.label ?? "", percentOff: Number(row.percentOff), enabled: row.enabled ?? true }));
   return {
     weekdayPriceHuf: requiredNumber(form, "weekdayPriceHuf"),
     weekendPriceHuf: requiredNumber(form, "weekendPriceHuf"),
@@ -72,6 +82,9 @@ function dayPassFromForm(form: FormData) {
     closedDays: text(form, "closedDays")
       .split(/[\s,;]+/)
       .filter(Boolean),
+    weekdaySchedule: scheduleFromForm(form, "weekday"),
+    weekendSchedule: scheduleFromForm(form, "weekend"),
+    discountCodes,
   };
 }
 

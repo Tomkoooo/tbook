@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { AttendeeFields } from "../bookings/new/attendee-fields";
-import type { PosSaleResult } from "@tbook/services";
+import type { DaySaleDiscountOption, PosSaleResult } from "@tbook/services";
 import {
   cancelCardSaleAction,
   createPosSaleAction,
@@ -64,6 +64,7 @@ export function SaleForm({
   event,
   tickets: ticketsFromUrl,
   dayOptions,
+  discountCodes,
   currency,
   total: totalFromServer,
   attendeeFields,
@@ -75,6 +76,8 @@ export function SaleForm({
   tickets: number;
   /** Present for day-pass events: the days a seller can put in the basket. */
   dayOptions: DayOption[] | null;
+  /** Day-pass events only: the on-site discount tiers a seller can apply ("HELYSZÍNI JEGY" pricing). */
+  discountCodes: DaySaleDiscountOption[];
   currency: string;
   total: number;
   attendeeFields: AttendeeFieldDef[];
@@ -89,13 +92,14 @@ export function SaleForm({
   // that specific sale instead of trying to reset the action state.
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const [basket, setBasket] = useState<Record<string, number>>({});
+  const [discountCode, setDiscountCode] = useState("");
+  const selectedDiscount = discountCodes.find((d) => d.code === discountCode) ?? null;
 
   // A day-pass sale is sized by its basket; any other sale by the stepper.
   const tickets = dayOptions ? Object.values(basket).reduce((sum, qty) => sum + qty, 0) : ticketsFromUrl;
-  // Display only — the server recomputes the price from the basket.
-  const total = dayOptions
-    ? dayOptions.reduce((sum, day) => sum + (basket[day.date] ?? 0) * day.unitPriceGrossHuf, 0)
-    : totalFromServer;
+  // Display only — the server recomputes the price (and re-validates the code) from the basket.
+  const dayPassSubtotal = dayOptions ? dayOptions.reduce((sum, day) => sum + (basket[day.date] ?? 0) * day.unitPriceGrossHuf, 0) : 0;
+  const total = dayOptions ? Math.round(dayPassSubtotal * (1 - (selectedDiscount?.percentOff ?? 0) / 100)) : totalFromServer;
 
   function setDayQty(day: DayOption, qty: number) {
     const max = day.remaining ?? 50;
@@ -175,6 +179,7 @@ export function SaleForm({
       </div>
       <input type="hidden" name="tickets" value={Math.max(tickets, 1)} />
       {dayOptions ? <input type="hidden" name="dayPasses" value={JSON.stringify(basket)} /> : null}
+      {dayOptions ? <input type="hidden" name="discountCode" value={discountCode} /> : null}
 
       {dayOptions ? (
         <Card>
@@ -222,6 +227,20 @@ export function SaleForm({
                 </div>
               );
             })}
+            {discountCodes.length > 0 ? (
+              <div className="md:col-span-2">
+                <FormField label="Discount" htmlFor="discountCodeSelect">
+                  <NativeSelect id="discountCodeSelect" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)}>
+                    <option value="">No discount — full price</option>
+                    {discountCodes.map((d) => (
+                      <option key={d.code} value={d.code}>
+                        {d.label} (−{d.percentOff}%)
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </FormField>
+              </div>
+            ) : null}
             <div className="mt-2 flex items-end justify-between md:col-span-2">
               <p className="text-muted-foreground text-sm">{tickets} pass{tickets === 1 ? "" : "es"}</p>
               <div className="text-right">

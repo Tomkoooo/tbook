@@ -134,7 +134,12 @@ function publicDayPass(event: IEvent) {
       bookable: !day.closed && day.date >= today && (day.remaining === null || day.remaining > 0),
     };
   });
-  return { weekendDays: config.weekendDays, days };
+  return {
+    weekendDays: config.weekendDays,
+    weekdaySchedule: config.weekdaySchedule,
+    weekendSchedule: config.weekendSchedule,
+    days,
+  };
 }
 
 function serializePublicEvent(event: IEvent, group: IEventGroup | null, embedConfig: TDartsEmbedConfig | null) {
