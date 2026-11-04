@@ -122,6 +122,7 @@ export default async function SalesPage({
         <SaleForm
           event={{
             id: selected.id,
+            name: selected.name,
             teamMemberLimit: selected.teamMemberLimit,
             playersPerTicket: selected.playersPerTicket,
           }}

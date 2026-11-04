@@ -16,6 +16,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { AttendeeFields } from "../bookings/new/attendee-fields";
 import type { DaySaleDiscountOption, PosSaleResult } from "@tbook/services";
+import { PrinterSettings } from "./printer-settings";
+import { buildReceiptSlip, type ReceiptSlipItem } from "@/lib/thermal-printer/receipt-slip";
+import { printSlip } from "@/lib/thermal-printer/print-slip";
 import {
   cancelCardSaleAction,
   createPosSaleAction,
@@ -36,9 +39,9 @@ const DELIVERIES = [
 ] as const;
 type Delivery = (typeof DELIVERIES)[number]["value"];
 
-/** The counter tablet keeps the last mode the seller used. */
+/** The counter tablet keeps the last mode the seller used; most walk-up sales are cash-and-go, so that's the default before any mode has been saved. */
 function useDelivery(): [Delivery, (next: Delivery) => void] {
-  const [delivery, setDelivery] = useState<Delivery>("email");
+  const [delivery, setDelivery] = useState<Delivery>("receipt");
   useEffect(() => {
     const saved = window.localStorage.getItem("tbook.pos.delivery");
     if (saved === "receipt" || saved === "email") setDelivery(saved);
@@ -72,7 +75,7 @@ export function SaleForm({
   readers,
 }: {
   readers: Array<{ id: string; name: string }>;
-  event: { id: string; teamMemberLimit: number | null; playersPerTicket: number };
+  event: { id: string; name: string; teamMemberLimit: number | null; playersPerTicket: number };
   tickets: number;
   /** Present for day-pass events: the days a seller can put in the basket. */
   dayOptions: DayOption[] | null;
@@ -91,7 +94,12 @@ export function SaleForm({
   // The action's result outlives the success panel, so "New sale" dismisses
   // that specific sale instead of trying to reset the action state.
   const [dismissedId, setDismissedId] = useState<string | null>(null);
-  const [basket, setBasket] = useState<Record<string, number>>({});
+  // Only days that can actually be sold show up at the counter at all; the earliest one (today, if it's open) starts pre-selected so the common walk-up sale needs no extra tap.
+  const sellableDays = dayOptions?.filter((day) => day.bookable) ?? null;
+  const [basket, setBasket] = useState<Record<string, number>>(() => {
+    const first = sellableDays?.[0];
+    return first ? { [first.date]: 1 } : {};
+  });
   const [discountCode, setDiscountCode] = useState("");
   const selectedDiscount = discountCodes.find((d) => d.code === discountCode) ?? null;
 
@@ -144,7 +152,13 @@ export function SaleForm({
 
   const completedSale = paidSale ?? (state?.ok ? (state.sale ?? null) : null);
   if (completedSale && completedSale.bookingId !== dismissedId) {
-    return <SaleComplete sale={completedSale} money={money} onNewSale={() => setDismissedId(completedSale.bookingId)} />;
+    // Still reflects what was actually in the basket at submit time — nothing resets it before "New sale".
+    const saleItems: ReceiptSlipItem[] = sellableDays
+      ? sellableDays.filter((day) => (basket[day.date] ?? 0) > 0).map((day) => ({ label: day.date, qty: basket[day.date] ?? 0 }))
+      : [{ label: isTeam ? "Team" : "Ticket", qty: tickets }];
+    return (
+      <SaleComplete sale={completedSale} money={money} eventName={event.name} items={saleItems} onNewSale={() => setDismissedId(completedSale.bookingId)} />
+    );
   }
 
   return (
@@ -177,56 +191,61 @@ export function SaleForm({
           </button>
         ))}
       </div>
+      {walkIn ? (
+        <div className="flex justify-end">
+          <PrinterSettings />
+        </div>
+      ) : null}
       <input type="hidden" name="tickets" value={Math.max(tickets, 1)} />
       {dayOptions ? <input type="hidden" name="dayPasses" value={JSON.stringify(basket)} /> : null}
       {dayOptions ? <input type="hidden" name="discountCode" value={discountCode} /> : null}
 
-      {dayOptions ? (
+      {sellableDays ? (
         <Card>
           <CardHeader>
             <CardTitle>Days</CardTitle>
             <CardDescription>Choose how many passes for each day.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2 md:grid-cols-2">
-            {dayOptions.map((day) => {
-              const qty = basket[day.date] ?? 0;
-              return (
-                <div
-                  key={day.date}
-                  className={cn("flex items-center justify-between gap-3 rounded-lg border px-3 py-2", !day.bookable && "opacity-50", qty > 0 && "border-primary bg-accent")}
-                >
-                  <div>
-                    <p className="text-sm font-medium tabular-nums">
-                      {day.date}{" "}
-                      <span className="text-muted-foreground font-normal">
-                        {new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" })}
-                        {day.weekend ? " · weekend" : ""}
-                      </span>
-                    </p>
-                    <p className="text-muted-foreground text-xs">
-                      {money(day.unitPriceGrossHuf)} ·{" "}
-                      {!day.bookable ? "not available" : day.remaining === null ? "no limit" : `${day.remaining} left`}
-                    </p>
+            {sellableDays.length === 0 ? (
+              <p className="text-muted-foreground col-span-full text-sm">No days are available to sell right now — this event is sold out or has ended.</p>
+            ) : (
+              sellableDays.map((day) => {
+                const qty = basket[day.date] ?? 0;
+                return (
+                  <div key={day.date} className={cn("flex items-center justify-between gap-3 rounded-lg border px-3 py-2", qty > 0 && "border-primary bg-accent")}>
+                    <div>
+                      <p className="text-sm font-medium tabular-nums">
+                        {day.date}{" "}
+                        <span className="text-muted-foreground font-normal">
+                          {new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" })}
+                          {day.weekend ? " · weekend" : ""}
+                        </span>
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        {money(day.unitPriceGrossHuf)} · {day.remaining === null ? "no limit" : `${day.remaining} left`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" size="icon" aria-label={`Fewer passes for ${day.date}`} disabled={qty === 0} onClick={() => setDayQty(day, qty - 1)}>
+                        <Minus />
+                      </Button>
+                      <span className="w-6 text-center tabular-nums">{qty}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label={`More passes for ${day.date}`}
+                        disabled={day.remaining !== null && qty >= day.remaining}
+                        onClick={() => setDayQty(day, qty + 1)}
+                      >
+                        <Plus />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="icon" aria-label={`Fewer passes for ${day.date}`} disabled={qty === 0} onClick={() => setDayQty(day, qty - 1)}>
-                      <Minus />
-                    </Button>
-                    <span className="w-6 text-center tabular-nums">{qty}</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      aria-label={`More passes for ${day.date}`}
-                      disabled={!day.bookable || (day.remaining !== null && qty >= day.remaining)}
-                      onClick={() => setDayQty(day, qty + 1)}
-                    >
-                      <Plus />
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
             {discountCodes.length > 0 ? (
               <div className="md:col-span-2">
                 <FormField label="Discount" htmlFor="discountCodeSelect">
@@ -527,8 +546,20 @@ function CardWaiting({
   );
 }
 
-/** After payment: what happened, and — for a walk-in — the big print button. */
-function SaleComplete({ sale: initial, money, onNewSale }: { sale: PosSaleResult; money: (n: number) => string; onNewSale: () => void }) {
+/** After payment: what happened, and — for a walk-in — the big print button (plus an automatic 58mm slip, if this device has one set up). */
+function SaleComplete({
+  sale: initial,
+  money,
+  eventName,
+  items,
+  onNewSale,
+}: {
+  sale: PosSaleResult;
+  money: (n: number) => string;
+  eventName: string;
+  items: ReceiptSlipItem[];
+  onNewSale: () => void;
+}) {
   const [sale, setSale] = useState(initial);
   const [retryState, retry, retrying] = useActionState(async () => {
     const result = await retryReceiptAction(sale.bookingId);
@@ -537,6 +568,21 @@ function SaleComplete({ sale: initial, money, onNewSale }: { sale: PosSaleResult
   }, null);
   const receiptUrl = `/admin/bookings/${sale.bookingId}/receipt`;
   const walkIn = sale.delivery === "receipt";
+  const [autoPrintError, setAutoPrintError] = useState<string | null>(null);
+  const printedRef = useRef<string | null>(null);
+
+  // Cash is "paid" the instant this renders; card only renders this once the
+  // SumUp poll or the seller's manual confirmation already succeeded — so a
+  // single effect here, keyed on the booking, covers both without needing to
+  // know which path produced the sale.
+  useEffect(() => {
+    if (!walkIn || sale.receipt?.status !== "issued" || !sale.receipt.hasPdf) return;
+    if (printedRef.current === sale.bookingId) return;
+    printedRef.current = sale.bookingId;
+    printSlip(buildReceiptSlip({ eventName, items, totalHuf: sale.totalHuf, currency: sale.currency, receiptNumber: sale.receipt.number, printedAt: new Date() })).catch((error: unknown) =>
+      setAutoPrintError(error instanceof Error ? error.message : "Auto-print failed."),
+    );
+  }, [sale.bookingId, walkIn, sale.receipt?.status]);
 
   return (
     <Card className="mx-auto w-full max-w-2xl">
@@ -565,6 +611,7 @@ function SaleComplete({ sale: initial, money, onNewSale }: { sale: PosSaleResult
                 Opens the receipt. iPad: tap <strong>Share → Print</strong>. Android: <strong>⋮ → Share → Print</strong>. Choose the
                 receipt printer the first time; the tablet remembers it.
               </p>
+              {autoPrintError ? <p className="text-destructive text-xs">Auto-print failed ({autoPrintError}) — use the button above.</p> : null}
             </div>
           ) : (
             <Alert variant="destructive">
