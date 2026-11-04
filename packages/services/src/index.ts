@@ -87,3 +87,4 @@ export * from "./bootstrap-admin";
 export * from "./product-media-service";
 export * from "./rich-text";
 export * from "./blob-store";
+export * from "./login-qr";
