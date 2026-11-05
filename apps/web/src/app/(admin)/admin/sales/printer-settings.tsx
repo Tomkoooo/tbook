@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { buildReceiptSlip } from "@/lib/thermal-printer/receipt-slip";
+import { buildTestPrint } from "@/lib/thermal-printer/escpos";
+import { printTestPageViaBrowser } from "@/lib/thermal-printer/browser-print";
 import { getPrinterMode, setPrinterMode, type PrinterMode } from "@/lib/thermal-printer/printer-mode";
-import { printSlip } from "@/lib/thermal-printer/print-slip";
-import { isWebUsbSupported, requestPrinter } from "@/lib/thermal-printer/webusb-printer";
+import { getPairedPrinter, isWebUsbSupported, printRaw, requestPrinter } from "@/lib/thermal-printer/webusb-printer";
 
 const TRIGGER_LABEL: Record<PrinterMode, string> = { off: "Off", browser: "Browser", webusb: "USB" };
 
@@ -43,16 +43,13 @@ export function PrinterSettings() {
   async function testPrint() {
     setStatus(null);
     try {
-      await printSlip(
-        buildReceiptSlip({
-          eventName: "Test print",
-          items: [{ label: "Sample ticket", qty: 1 }],
-          totalHuf: 0,
-          currency: "HUF",
-          receiptNumber: null,
-          printedAt: new Date(),
-        }),
-      );
+      if (mode === "webusb") {
+        const device = await getPairedPrinter();
+        if (!device) throw new Error("No USB printer is paired yet — connect it above first.");
+        await printRaw(device, buildTestPrint());
+      } else if (mode === "browser") {
+        await printTestPageViaBrowser();
+      }
       setStatus("Sent to the printer.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Printing failed.");

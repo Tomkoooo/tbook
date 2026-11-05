@@ -17,8 +17,7 @@ import { cn } from "@/lib/utils";
 import { AttendeeFields } from "../bookings/new/attendee-fields";
 import type { DaySaleDiscountOption, PosSaleResult } from "@tbook/services";
 import { PrinterSettings } from "./printer-settings";
-import { buildReceiptSlip, type ReceiptSlipItem } from "@/lib/thermal-printer/receipt-slip";
-import { printSlip } from "@/lib/thermal-printer/print-slip";
+import { printReceiptPdf } from "@/lib/thermal-printer/print-receipt";
 import {
   cancelCardSaleAction,
   createPosSaleAction,
@@ -75,7 +74,7 @@ export function SaleForm({
   readers,
 }: {
   readers: Array<{ id: string; name: string }>;
-  event: { id: string; name: string; teamMemberLimit: number | null; playersPerTicket: number };
+  event: { id: string; teamMemberLimit: number | null; playersPerTicket: number };
   tickets: number;
   /** Present for day-pass events: the days a seller can put in the basket. */
   dayOptions: DayOption[] | null;
@@ -152,13 +151,7 @@ export function SaleForm({
 
   const completedSale = paidSale ?? (state?.ok ? (state.sale ?? null) : null);
   if (completedSale && completedSale.bookingId !== dismissedId) {
-    // Still reflects what was actually in the basket at submit time — nothing resets it before "New sale".
-    const saleItems: ReceiptSlipItem[] = sellableDays
-      ? sellableDays.filter((day) => (basket[day.date] ?? 0) > 0).map((day) => ({ label: day.date, qty: basket[day.date] ?? 0 }))
-      : [{ label: isTeam ? "Team" : "Ticket", qty: tickets }];
-    return (
-      <SaleComplete sale={completedSale} money={money} eventName={event.name} items={saleItems} onNewSale={() => setDismissedId(completedSale.bookingId)} />
-    );
+    return <SaleComplete sale={completedSale} money={money} onNewSale={() => setDismissedId(completedSale.bookingId)} />;
   }
 
   return (
@@ -546,20 +539,8 @@ function CardWaiting({
   );
 }
 
-/** After payment: what happened, and — for a walk-in — the big print button (plus an automatic 58mm slip, if this device has one set up). */
-function SaleComplete({
-  sale: initial,
-  money,
-  eventName,
-  items,
-  onNewSale,
-}: {
-  sale: PosSaleResult;
-  money: (n: number) => string;
-  eventName: string;
-  items: ReceiptSlipItem[];
-  onNewSale: () => void;
-}) {
+/** After payment: what happened, and — for a walk-in — the big print button (plus an automatic print of the real receipt PDF, if this device has one set up). */
+function SaleComplete({ sale: initial, money, onNewSale }: { sale: PosSaleResult; money: (n: number) => string; onNewSale: () => void }) {
   const [sale, setSale] = useState(initial);
   const [retryState, retry, retrying] = useActionState(async () => {
     const result = await retryReceiptAction(sale.bookingId);
@@ -579,10 +560,13 @@ function SaleComplete({
     if (!walkIn || sale.receipt?.status !== "issued" || !sale.receipt.hasPdf) return;
     if (printedRef.current === sale.bookingId) return;
     printedRef.current = sale.bookingId;
-    printSlip(buildReceiptSlip({ eventName, items, totalHuf: sale.totalHuf, currency: sale.currency, receiptNumber: sale.receipt.number, printedAt: new Date() })).catch((error: unknown) =>
-      setAutoPrintError(error instanceof Error ? error.message : "Auto-print failed."),
-    );
-  }, [sale.bookingId, walkIn, sale.receipt?.status]);
+    (async () => {
+      const response = await fetch(receiptUrl);
+      if (!response.ok) throw new Error(`Could not load the receipt (HTTP ${response.status}).`);
+      const pdfBytes = new Uint8Array(await response.arrayBuffer());
+      await printReceiptPdf(pdfBytes);
+    })().catch((error: unknown) => setAutoPrintError(error instanceof Error ? error.message : "Auto-print failed."));
+  }, [sale.bookingId, walkIn, sale.receipt?.status, receiptUrl]);
 
   return (
     <Card className="mx-auto w-full max-w-2xl">

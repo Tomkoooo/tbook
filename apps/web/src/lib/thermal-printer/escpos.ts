@@ -1,5 +1,3 @@
-import type { ReceiptSlip } from "./receipt-slip";
-
 /**
  * Minimal ESC/POS byte builder — only the common, widely-supported subset
  * (not every printer-specific extension), since the exact command set
@@ -68,13 +66,16 @@ export class EscPosBuilder {
   }
 }
 
-export function renderSlipToEscPos(slip: ReceiptSlip): Uint8Array<ArrayBuffer> {
-  const builder = new EscPosBuilder().init();
-  for (const line of slip.lines) {
-    builder.align(line.align === "center" ? "center" : "left");
-    builder.bold(line.bold === true);
-    builder.textLine(line.text);
-  }
-  builder.bold(false).feed(3).cut();
-  return builder.build();
+/** A minimal self-test print, so printer-settings.tsx can check the USB connection without a real sale. */
+export function buildTestPrint(): Uint8Array<ArrayBuffer> {
+  return new EscPosBuilder()
+    .init()
+    .align("center")
+    .bold(true)
+    .textLine("tbook printer test")
+    .bold(false)
+    .textLine(new Date().toLocaleString("hu-HU"))
+    .feed(3)
+    .cut()
+    .build();
 }
