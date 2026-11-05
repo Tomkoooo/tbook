@@ -2,19 +2,8 @@ import * as pdfjsLib from "pdfjs-dist";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
-/**
- * 58mm thermal paper's usable print width at the Xprinter's confirmed
- * 400 dpi (tested against the real hardware — see printer-settings.tsx's
- * "Test print"). ~48mm printable width is the norm on 58mm rolls once
- * margins are accounted for; adjust PRINTABLE_WIDTH_MM/PRINTER_DPI if a
- * different printer model is used later.
- */
-const PRINTABLE_WIDTH_MM = 48;
-const PRINTER_DPI = 400;
-export const DOTS_PER_LINE = Math.floor(((PRINTABLE_WIDTH_MM / 25.4) * PRINTER_DPI) / 8) * 8;
-
-/** Renders a PDF's first page to a canvas scaled to the printer's dot width. */
-export async function renderPdfPageToCanvas(pdfBytes: Uint8Array<ArrayBuffer>, dotsPerLine: number = DOTS_PER_LINE): Promise<HTMLCanvasElement> {
+/** Renders a PDF's first page to a canvas scaled to the printer's dot width (printer-mode.ts's getRasterWidth() — depends on the printer model, so it's a per-device setting, not a fixed constant). */
+export async function renderPdfPageToCanvas(pdfBytes: Uint8Array<ArrayBuffer>, dotsPerLine: number): Promise<HTMLCanvasElement> {
   const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
   const page = await pdf.getPage(1);
   const baseViewport = page.getViewport({ scale: 1 });

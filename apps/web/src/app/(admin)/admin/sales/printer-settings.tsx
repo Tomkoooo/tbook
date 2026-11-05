@@ -4,29 +4,39 @@ import { Printer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { getPairedBluetoothPrinter, isWebBluetoothSupported, printRawBluetooth, requestBluetoothPrinter } from "@/lib/thermal-printer/bluetooth-printer";
 import { buildTestPrint } from "@/lib/thermal-printer/escpos";
 import { printTestPageViaBrowser } from "@/lib/thermal-printer/browser-print";
-import { getPrinterMode, setPrinterMode, type PrinterMode } from "@/lib/thermal-printer/printer-mode";
+import { getPrinterMode, getRasterWidth, setPrinterMode, setRasterWidth, type PrinterMode } from "@/lib/thermal-printer/printer-mode";
 import { getPairedPrinter, isWebUsbSupported, printRaw, requestPrinter } from "@/lib/thermal-printer/webusb-printer";
 
-const TRIGGER_LABEL: Record<PrinterMode, string> = { off: "Off", browser: "Browser", webusb: "USB" };
+const TRIGGER_LABEL: Record<PrinterMode, string> = { off: "Off", browser: "Browser", webusb: "USB", bluetooth: "Bluetooth" };
 
 /** Per-device auto-print setup — see apps/web/src/lib/thermal-printer/. Lives next to the delivery toggle on the POS form. */
 export function PrinterSettings() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PrinterMode>("off");
+  const [rasterWidth, setRasterWidthState] = useState(400);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     setMode(getPrinterMode());
+    setRasterWidthState(getRasterWidth());
   }, []);
 
   function chooseMode(next: PrinterMode) {
     setMode(next);
     setPrinterMode(next);
     setStatus(null);
+  }
+
+  function changeRasterWidth(next: number) {
+    if (!Number.isFinite(next) || next <= 0) return;
+    setRasterWidthState(next);
+    setRasterWidth(next);
   }
 
   async function pairUsbPrinter() {
@@ -40,6 +50,17 @@ export function PrinterSettings() {
     }
   }
 
+  async function pairBluetoothPrinter() {
+    setStatus(null);
+    try {
+      await requestBluetoothPrinter();
+      chooseMode("bluetooth");
+      setStatus("Printer connected.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not connect to the printer.");
+    }
+  }
+
   async function testPrint() {
     setStatus(null);
     try {
@@ -47,6 +68,10 @@ export function PrinterSettings() {
         const device = await getPairedPrinter();
         if (!device) throw new Error("No USB printer is paired yet — connect it above first.");
         await printRaw(device, buildTestPrint());
+      } else if (mode === "bluetooth") {
+        const characteristic = await getPairedBluetoothPrinter();
+        if (!characteristic) throw new Error("No Bluetooth printer is paired yet — connect it above first.");
+        await printRawBluetooth(characteristic, buildTestPrint());
       } else if (mode === "browser") {
         await printTestPageViaBrowser();
       }
@@ -68,7 +93,7 @@ export function PrinterSettings() {
           <DialogTitle>Automatic receipt printing</DialogTitle>
           <DialogDescription>Per device — this choice stays on this tablet or laptop only, right next to the usual Print receipt button.</DialogDescription>
         </DialogHeader>
-        <RadioGroup value={mode === "webusb" ? "webusb" : mode} onValueChange={(v) => chooseMode(v as PrinterMode)} className="grid gap-3">
+        <RadioGroup value={mode} onValueChange={(v) => (v === "off" || v === "browser") && chooseMode(v)} className="grid gap-3">
           <div className="flex items-center gap-2">
             <RadioGroupItem id="printer-off" value="off" />
             <Label htmlFor="printer-off" className="cursor-pointer font-normal">
@@ -89,11 +114,42 @@ export function PrinterSettings() {
               </Label>
             </div>
           ) : null}
+          {isWebBluetoothSupported() ? (
+            <div className="flex items-center gap-2">
+              <RadioGroupItem id="printer-bluetooth" value="bluetooth" disabled />
+              <Label htmlFor="printer-bluetooth" className="font-normal">
+                Bluetooth printer{mode === "bluetooth" ? " — connected" : ""}
+              </Label>
+            </div>
+          ) : null}
         </RadioGroup>
-        {isWebUsbSupported() ? (
-          <Button type="button" variant="outline" onClick={pairUsbPrinter}>
-            {mode === "webusb" ? "Reconnect the USB printer" : "Connect a USB printer"}
-          </Button>
+        <div className="flex flex-wrap gap-2">
+          {isWebUsbSupported() ? (
+            <Button type="button" variant="outline" onClick={pairUsbPrinter}>
+              {mode === "webusb" ? "Reconnect the USB printer" : "Connect a USB printer"}
+            </Button>
+          ) : null}
+          {isWebBluetoothSupported() ? (
+            <Button type="button" variant="outline" onClick={pairBluetoothPrinter}>
+              {mode === "bluetooth" ? "Reconnect the Bluetooth printer" : "Connect a Bluetooth printer"}
+            </Button>
+          ) : null}
+        </div>
+        {mode === "webusb" || mode === "bluetooth" ? (
+          <div className="flex items-center gap-2">
+            <Label htmlFor="rasterWidth" className="font-normal">
+              Raster width (dots)
+            </Label>
+            <Input
+              id="rasterWidth"
+              type="number"
+              min={8}
+              step={8}
+              className="w-24"
+              value={rasterWidth}
+              onChange={(e) => changeRasterWidth(Number(e.target.value))}
+            />
+          </div>
         ) : null}
         {status ? <p className="text-muted-foreground text-sm">{status}</p> : null}
         <DialogFooter>

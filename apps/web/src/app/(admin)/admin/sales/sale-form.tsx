@@ -8,6 +8,7 @@ import type { AttendeeFieldDef } from "@tbook/schemas";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { StickyFormFooter } from "@/components/sticky-form-footer";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { FormField, NativeSelect, ResultNotice } from "@/components/form-bits";
@@ -93,12 +94,10 @@ export function SaleForm({
   // The action's result outlives the success panel, so "New sale" dismisses
   // that specific sale instead of trying to reset the action state.
   const [dismissedId, setDismissedId] = useState<string | null>(null);
-  // Only days that can actually be sold show up at the counter at all; the earliest one (today, if it's open) starts pre-selected so the common walk-up sale needs no extra tap.
+  // Only days that can actually be sold show up at the counter at all; the earliest one (today, if it's open) is highlighted below so the common walk-up sale is easy to spot, without assuming that's what's being sold.
   const sellableDays = dayOptions?.filter((day) => day.bookable) ?? null;
-  const [basket, setBasket] = useState<Record<string, number>>(() => {
-    const first = sellableDays?.[0];
-    return first ? { [first.date]: 1 } : {};
-  });
+  const todaysDate = sellableDays?.[0]?.date;
+  const [basket, setBasket] = useState<Record<string, number>>({});
   const [discountCode, setDiscountCode] = useState("");
   const selectedDiscount = discountCodes.find((d) => d.code === discountCode) ?? null;
 
@@ -205,8 +204,15 @@ export function SaleForm({
             ) : (
               sellableDays.map((day) => {
                 const qty = basket[day.date] ?? 0;
+                const isToday = day.date === todaysDate;
                 return (
-                  <div key={day.date} className={cn("flex items-center justify-between gap-3 rounded-lg border px-3 py-2", qty > 0 && "border-primary bg-accent")}>
+                  <div
+                    key={day.date}
+                    className={cn(
+                      "flex items-center justify-between gap-3 rounded-lg border px-3 py-2",
+                      qty > 0 ? "border-primary bg-accent" : isToday && "border-primary/50 ring-primary/20 ring-1",
+                    )}
+                  >
                     <div>
                       <p className="text-sm font-medium tabular-nums">
                         {day.date}{" "}
@@ -214,6 +220,7 @@ export function SaleForm({
                           {new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" })}
                           {day.weekend ? " · weekend" : ""}
                         </span>
+                        {isToday ? <span className="bg-primary/10 text-primary ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">Today</span> : null}
                       </p>
                       <p className="text-muted-foreground text-xs">
                         {money(day.unitPriceGrossHuf)} · {day.remaining === null ? "no limit" : `${day.remaining} left`}
@@ -386,7 +393,7 @@ export function SaleForm({
 
       </div>
 
-      <div className="grid content-start gap-6 xl:sticky xl:top-20">
+      <div className="grid content-start gap-6">
       <Card>
         <CardHeader>
           <CardTitle>Payment</CardTitle>
@@ -464,18 +471,25 @@ export function SaleForm({
         </Alert>
       ) : null}
       <ResultNotice result={state && !state.ok ? state : null} />
-      {/* Below xl the summary column isn't sticky, so keep the pay button on screen. */}
-      <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 z-20 -mx-4 border-t px-4 py-3 backdrop-blur md:-mx-6 md:px-6 xl:static xl:mx-0 xl:border-0 xl:bg-transparent xl:p-0 xl:backdrop-blur-none">
-        <Button type="submit" size="lg" className="h-12 w-full text-base" disabled={pending || (dayOptions !== null && tickets === 0)}>
+      {/* Always sticky (not just below xl) so the running total stays on screen on every device — desktop, tablets of any size, and phones. */}
+      <StickyFormFooter
+        status={
+          <span className="text-right">
+            <span className="text-muted-foreground block text-xs">Total to collect</span>
+            <span className="text-foreground block text-xl font-semibold tabular-nums">{money(total)}</span>
+          </span>
+        }
+      >
+        <Button type="submit" size="lg" className="h-12 text-base" disabled={pending || (dayOptions !== null && tickets === 0)}>
           {pending
             ? "Processing…"
             : method === "card" && cardMode === "reader" && readers.length > 0
-              ? `Send ${money(total)} to the reader`
+              ? "Send to the reader"
               : walkIn
-                ? `Record ${method} payment of ${money(total)} & make receipt`
-                : `Record ${method} payment of ${money(total)} & send`}
+                ? `Record ${method} payment & make receipt`
+                : `Record ${method} payment & send`}
         </Button>
-      </div>
+      </StickyFormFooter>
       </div>
     </form>
     </>

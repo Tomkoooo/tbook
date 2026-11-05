@@ -1,5 +1,6 @@
+import { getPairedBluetoothPrinter, printRawBluetooth } from "./bluetooth-printer";
 import { printPdfViaBrowser } from "./browser-print";
-import { getPrinterMode } from "./printer-mode";
+import { getPrinterMode, getRasterWidth } from "./printer-mode";
 import { getPairedPrinter, printRaw } from "./webusb-printer";
 
 /**
@@ -16,12 +17,22 @@ export async function printReceiptPdf(pdfBytes: Uint8Array<ArrayBuffer>): Promis
     return;
   }
 
-  const device = await getPairedPrinter();
-  if (!device) throw new Error("No USB printer is paired on this device yet — use Printer settings to connect it.");
-  // pdf.js (and its worker) are only pulled into the bundle for USB printing,
-  // which needs to rasterize the PDF into an ESC/POS image; browser printing
-  // hands the PDF straight to the OS instead.
+  // USB and Bluetooth both print raw ESC/POS bytes, so they share the same
+  // rasterization step; pdf.js (and its worker) are only pulled into the
+  // bundle here, never for browser printing, which hands the PDF straight
+  // to the OS instead.
   const { renderPdfPageToCanvas, canvasToEscPosRaster } = await import("./pdf-raster");
-  const canvas = await renderPdfPageToCanvas(pdfBytes);
-  await printRaw(device, canvasToEscPosRaster(canvas));
+  const canvas = await renderPdfPageToCanvas(pdfBytes, getRasterWidth());
+  const data = canvasToEscPosRaster(canvas);
+
+  if (mode === "webusb") {
+    const device = await getPairedPrinter();
+    if (!device) throw new Error("No USB printer is paired on this device yet — use Printer settings to connect it.");
+    await printRaw(device, data);
+    return;
+  }
+
+  const characteristic = await getPairedBluetoothPrinter();
+  if (!characteristic) throw new Error("No Bluetooth printer is paired on this device yet — use Printer settings to connect it.");
+  await printRawBluetooth(characteristic, data);
 }
