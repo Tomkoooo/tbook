@@ -27,6 +27,9 @@ import { bookingRepository } from "@tbook/db";
 import { WALK_IN_CUSTOMER_EMAIL } from "@tbook/schemas";
 import { resolveTeamMemberFieldSchema, resolveTicketAttendeeFieldSchema } from "./booking-validation";
 import { normalizeTBookCurrency } from "./currency";
+import type { DynamicChoice } from "./extensions";
+import { resolveModules } from "./module-registry";
+import { resolveFieldChoices } from "./registration-pipeline";
 
 /**
  * Public (unauthenticated or API-key-scoped) read models for the storefront
@@ -178,6 +181,26 @@ function serializePublicEvent(event: IEvent, group: IEventGroup | null, embedCon
   };
 }
 
+type SerializedPublicEvent = ReturnType<typeof serializePublicEvent> & {
+  /** Live options of module-fed dropdowns (bus routes, …) with remaining seats; keyed by field key. */
+  fieldChoiceDetails: Record<string, DynamicChoice[]>;
+};
+
+/**
+ * Fills module-fed dropdowns (`choicesSource`) with their live options. The
+ * schema keeps only selectable options; `fieldChoiceDetails` also lists
+ * full ones (disabled) so a storefront can show "full".
+ */
+async function withDynamicChoices(serialized: ReturnType<typeof serializePublicEvent>, event: IEvent, group: IEventGroup | null): Promise<SerializedPublicEvent> {
+  const hasDynamic = (serialized.attendeeFieldSchema ?? []).some((field) => field.choicesSource);
+  if (!hasDynamic) return { ...serialized, fieldChoiceDetails: {} };
+  const organizationId = group?.organizationId ? String(group.organizationId) : event.organizationId ? String(event.organizationId) : null;
+  const groupId = group ? String(group._id) : null;
+  const modules = await resolveModules({ organizationId, groupId, event });
+  const { schema, details } = await resolveFieldChoices(serialized.attendeeFieldSchema, { event, organizationId, groupId, modules });
+  return { ...serialized, attendeeFieldSchema: schema, fieldChoiceDetails: details };
+}
+
 // ---- Public directory (no API key) -----------------------------------------
 
 export interface PublicDirectoryListing {
@@ -216,12 +239,14 @@ export async function listPublicDirectory(): Promise<PublicDirectoryListing[]> {
 
 // ---- Public, API-key scoped reads ------------------------------------------
 
-export async function listPublicEventsForGroup(groupId: string): Promise<ReturnType<typeof serializePublicEvent>[]> {
+export async function listPublicEventsForGroup(groupId: string): Promise<SerializedPublicEvent[]> {
   const group = await eventGroupRepository.findById(groupId);
   const org = group?.organizationId ? await organizationRepository.findById(String(group.organizationId)) : null;
   const embedConfig = resolveTDartsEmbedConfig(org);
   const events = await eventRepository.findActiveByGroupId(groupId);
-  return events.filter((e) => isEventListedOnPublicSite(e.publicListing)).map((e) => serializePublicEvent(e, group, embedConfig));
+  return Promise.all(
+    events.filter((e) => isEventListedOnPublicSite(e.publicListing)).map((e) => withDynamicChoices(serializePublicEvent(e, group, embedConfig), e, group)),
+  );
 }
 
 export interface PublicHotelListing {
@@ -297,7 +322,7 @@ async function serializePublicHotel(hotel: IHotel): Promise<PublicHotelListing |
 }
 
 export interface PublicEventDetail {
-  event: ReturnType<typeof serializePublicEvent>;
+  event: SerializedPublicEvent;
   groupBookingOptions: IEventGroup["defaultBookingOptions"];
   hotels: PublicHotelListing[];
 }
@@ -315,7 +340,7 @@ export async function getPublicEventDetail(groupId: string, eventId: string): Pr
   const serializedHotels = (await Promise.all(activeHotels.map(serializePublicHotel))).filter((h): h is PublicHotelListing => h != null);
 
   return {
-    event: serializePublicEvent(event, group, embedConfig),
+    event: await withDynamicChoices(serializePublicEvent(event, group, embedConfig), event, group),
     groupBookingOptions: group?.defaultBookingOptions ?? [],
     hotels: serializedHotels,
   };

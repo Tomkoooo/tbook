@@ -7,6 +7,7 @@ import {
   type VoucherListFilter,
 } from "@tbook/db";
 import { ActionError } from "@tbook/actions";
+import { normalizeRegistrationNumber } from "@tbook/domain";
 import { scanVoucher, type ScanVoucherOptions, type VoucherScanResponse } from "./voucher-service";
 import { dispatchWebhookEvent, voucherWebhookData } from "./webhook-service";
 
@@ -100,7 +101,13 @@ export async function scanVoucherAsAdmin(
   opts: Omit<ScanVoucherOptions, "organizationId"> = {},
 ): Promise<VoucherScanResponse> {
   if (opts.eventId) await assertEventInOrg(organizationId, opts.eventId);
-  const outcome = await scanVoucher(rawToken, { ...opts, organizationId });
+  let outcome = await scanVoucher(rawToken, { ...opts, organizationId });
+  // Not a ticket QR: a registration number typed at the door ("7K3M-9QX2").
+  if (outcome.result === "invalid" && !outcome.voucher && opts.eventId) {
+    const registrationNumber = normalizeRegistrationNumber(rawToken);
+    const byNumber = registrationNumber ? await voucherRepository.findByRegistrationNumber(opts.eventId, registrationNumber) : null;
+    if (byNumber) outcome = await scanVoucher(byNumber.token, { ...opts, organizationId });
+  }
 
   // Only a real, first check-in is an event worth publishing — a duplicate
   // scan or an invalid code is not, or a door queue would spam integrations.
@@ -125,4 +132,24 @@ export async function revertCheckInAsAdmin(organizationId: string, voucherId: st
   const reverted = await voucherRepository.revertCheckIn(voucherId);
   if (!reverted) throw ActionError.validation("This entry is not checked in.");
   return reverted;
+}
+
+/** One-tap admit from the roster (a guest found by name, without their QR). Same rules as a scan. */
+export async function checkInVoucherByIdAsAdmin(
+  organizationId: string,
+  eventId: string,
+  voucherId: string,
+  opts: Omit<ScanVoucherOptions, "organizationId" | "eventId"> = {},
+): Promise<VoucherScanResponse> {
+  await assertEventInOrg(organizationId, eventId);
+  const voucher = await voucherRepository.findById(voucherId);
+  if (!voucher || String(voucher.eventId) !== eventId) return { result: "invalid", message: "Entry not found." };
+  return scanVoucherAsAdmin(organizationId, voucher.token, { ...opts, eventId });
+}
+
+/** Every entry of an event, for the arrivals export. */
+export async function listAllVouchersForEventForOrg(organizationId: string, eventId: string): Promise<{ event: IEvent; vouchers: IVoucher[] }> {
+  const event = await assertEventInOrg(organizationId, eventId);
+  const vouchers = await voucherRepository.listByEvent(eventId, {}, { limit: 100_000, skip: 0 });
+  return { event, vouchers };
 }

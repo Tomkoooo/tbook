@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { currencySchema, objectIdSchema } from "./common";
+import { modulesMapSchema } from "./modules";
 import { voucherPdfLayoutSchema } from "./voucher-pdf-layout";
 
 /**
@@ -148,6 +149,8 @@ export const organizationSchema = z.object({
   slug: z.string().min(1),
   status: organizationStatusSchema.default("active"),
   settings: organizationSettingsSchema,
+  /** Feature-module entitlements, set by a system admin (see modules.ts). */
+  modules: modulesMapSchema.default({}),
   createdBy: objectIdSchema.nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date(),

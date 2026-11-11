@@ -13,21 +13,52 @@ export interface FieldRow {
   uid: string;
   key: string;
   label: string;
-  type: "text" | "email" | "phone" | "number" | "date" | "select";
+  type: "text" | "textarea" | "email" | "phone" | "number" | "date" | "select" | "checkbox";
   required: boolean;
   helpText: string;
   /** One option per line: `label`, or `value | label` to keep the stored value separate. */
   choicesText: string;
+  /** Options come from a module (e.g. bus routes) instead of `choicesText`; "" = typed options. */
+  choicesSource: string;
+  /** Ask only when another question has one of these answers; "" = always. */
+  showWhenKey: string;
+  /** Comma-separated answer values of `showWhenKey`. */
+  showWhenValues: string;
+  /** No two registrations of the event may share this answer. */
+  unique: boolean;
+  /** Identifies the guest (e.g. employee ID) — used to look a registration up. */
+  identifier: boolean;
 }
 
 const TYPE_LABELS: Record<FieldRow["type"], string> = {
   text: "Short text",
+  textarea: "Long text",
   email: "Email",
   phone: "Phone",
   number: "Number",
   date: "Date",
   select: "Dropdown",
+  checkbox: "Checkbox (consent, yes/no)",
 };
+
+/** A module-provided option list a dropdown can use. */
+export interface ChoiceSourceOption {
+  key: string;
+  label: string;
+}
+
+interface FieldDefLike {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  helpText?: string;
+  choices?: Array<{ value: string; label: string }>;
+  choicesSource?: string | null;
+  showWhen?: { fieldKey: string; values: string[] } | null;
+  unique?: boolean;
+  identifier?: boolean;
+}
 
 let counter = 0;
 const nextUid = () => `f${Date.now().toString(36)}${counter++}`;
@@ -42,9 +73,7 @@ export function slugKey(label: string): string {
     .slice(0, 40);
 }
 
-export function fieldRowsFromDefs(
-  defs: Array<{ key: string; label: string; type: string; required: boolean; helpText?: string; choices?: Array<{ value: string; label: string }> }>,
-): FieldRow[] {
+export function fieldRowsFromDefs(defs: FieldDefLike[]): FieldRow[] {
   return defs.map((def) => ({
     uid: nextUid(),
     key: def.key,
@@ -52,7 +81,12 @@ export function fieldRowsFromDefs(
     type: (def.type as FieldRow["type"]) in TYPE_LABELS ? (def.type as FieldRow["type"]) : "text",
     required: def.required,
     helpText: def.helpText ?? "",
-    choicesText: (def.choices ?? []).map((choice) => (choice.value === choice.label ? choice.label : `${choice.value} | ${choice.label}`)).join("\n"),
+    choicesText: def.choicesSource ? "" : (def.choices ?? []).map((choice) => (choice.value === choice.label ? choice.label : `${choice.value} | ${choice.label}`)).join("\n"),
+    choicesSource: def.choicesSource ?? "",
+    showWhenKey: def.showWhen?.fieldKey ?? "",
+    showWhenValues: (def.showWhen?.values ?? []).join(", "),
+    unique: def.unique ?? false,
+    identifier: def.identifier ?? false,
   }));
 }
 
@@ -66,8 +100,20 @@ export function serializeFieldRows(rows: FieldRow[]): string {
         let key = row.key.trim() || slugKey(row.label) || `field_${index + 1}`;
         while (used.has(key)) key = `${key}_2`;
         used.add(key);
-        const base = { key, label: row.label.trim(), type: row.type, required: row.required, helpText: row.helpText.trim(), sortOrder: index };
+        const showWhenValues = row.showWhenValues.split(",").map((v) => v.trim()).filter(Boolean);
+        const base = {
+          key,
+          label: row.label.trim(),
+          type: row.type,
+          required: row.required,
+          helpText: row.helpText.trim(),
+          sortOrder: index,
+          showWhen: row.showWhenKey && showWhenValues.length ? { fieldKey: row.showWhenKey, values: showWhenValues } : null,
+          unique: row.unique,
+          identifier: row.identifier,
+        };
         if (row.type !== "select") return base;
+        if (row.choicesSource) return { ...base, choices: [], choicesSource: row.choicesSource };
         const choices = row.choicesText
           .split("\n")
           .map((line) => line.trim())
@@ -97,11 +143,14 @@ export function RegistrationFieldsEditor({
   rows,
   onChange,
   keysLocked,
+  choiceSources = [],
 }: {
   rows: FieldRow[];
   onChange: (rows: FieldRow[]) => void;
   /** Keys that already exist on the saved event. */
   keysLocked: Set<string>;
+  /** Option lists provided by the modules switched on for this event. */
+  choiceSources?: ChoiceSourceOption[];
 }) {
   const [open, setOpen] = useState<string | null>(null);
 
@@ -114,7 +163,7 @@ export function RegistrationFieldsEditor({
     onChange(next);
   };
   const add = () => {
-    const row: FieldRow = { uid: nextUid(), key: "", label: "", type: "text", required: false, helpText: "", choicesText: "" };
+    const row: FieldRow = { uid: nextUid(), key: "", label: "", type: "text", required: false, helpText: "", choicesText: "", choicesSource: "", showWhenKey: "", showWhenValues: "", unique: false, identifier: false };
     onChange([...rows, row]);
     setOpen(row.uid);
   };
@@ -137,6 +186,8 @@ export function RegistrationFieldsEditor({
                     <span className="text-muted-foreground block truncate text-xs">
                       {TYPE_LABELS[row.type]}
                       {row.required ? " · required" : " · optional"}
+                      {row.showWhenKey ? " · conditional" : ""}
+                      {row.unique ? " · unique" : ""}
                     </span>
                   </button>
                   <Button type="button" variant="ghost" size="icon" aria-label="Move up" disabled={index === 0} onClick={() => move(index, -1)}>
@@ -164,16 +215,57 @@ export function RegistrationFieldsEditor({
                       </NativeSelect>
                     </FormField>
                   </div>
-                  {row.type === "select" ? (
+                  {row.type === "select" && (choiceSources.length > 0 || row.choicesSource) ? (
+                    <FormField label="Options from" htmlFor={`${row.uid}-source`} hint="A module can supply live options, e.g. bus routes with their free seats.">
+                      <NativeSelect id={`${row.uid}-source`} value={row.choicesSource} onChange={(e) => patch(row.uid, { choicesSource: e.target.value })}>
+                        <option value="">Options typed below</option>
+                        {choiceSources.map((source) => (
+                          <option key={source.key} value={source.key}>
+                            {source.label}
+                          </option>
+                        ))}
+                        {row.choicesSource && !choiceSources.some((s) => s.key === row.choicesSource) ? (
+                          <option value={row.choicesSource}>{row.choicesSource} (module off)</option>
+                        ) : null}
+                      </NativeSelect>
+                    </FormField>
+                  ) : null}
+                  {row.type === "select" && !row.choicesSource ? (
                     <FormField label="Options" htmlFor={`${row.uid}-choices`} hint="One per line. Use “value | label” to store something different from what guests see.">
                       <Textarea id={`${row.uid}-choices`} rows={4} value={row.choicesText} onChange={(e) => patch(row.uid, { choicesText: e.target.value })} />
                     </FormField>
                   ) : null}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField label="Ask only when" htmlFor={`${row.uid}-showwhen`} hint="Leave empty to always ask.">
+                      <NativeSelect id={`${row.uid}-showwhen`} value={row.showWhenKey} onChange={(e) => patch(row.uid, { showWhenKey: e.target.value })}>
+                        <option value="">Always</option>
+                        {rows
+                          .filter((other) => other.uid !== row.uid && other.label.trim())
+                          .map((other) => {
+                            const key = other.key.trim() || slugKey(other.label);
+                            return (
+                              <option key={other.uid} value={key}>
+                                {other.label}
+                              </option>
+                            );
+                          })}
+                      </NativeSelect>
+                    </FormField>
+                    {row.showWhenKey ? (
+                      <FormField label="…is answered" htmlFor={`${row.uid}-showvalues`} hint="Stored answer values, comma-separated (a ticked checkbox is “true”).">
+                        <Input id={`${row.uid}-showvalues`} value={row.showWhenValues} placeholder="igen" onChange={(e) => patch(row.uid, { showWhenValues: e.target.value })} />
+                      </FormField>
+                    ) : null}
+                  </div>
                   <FormField label="Help text" htmlFor={`${row.uid}-help`} hint="Shown under the question.">
                     <Input id={`${row.uid}-help`} value={row.helpText} onChange={(e) => patch(row.uid, { helpText: e.target.value })} />
                   </FormField>
                   <div className="flex flex-wrap items-end justify-between gap-4">
-                    <CheckboxField label="Required" checked={row.required} onCheckedChange={(required) => patch(row.uid, { required })} />
+                    <div className="flex flex-wrap gap-4">
+                      <CheckboxField label={row.type === "checkbox" ? "Must be ticked" : "Required"} checked={row.required} onCheckedChange={(required) => patch(row.uid, { required })} />
+                      <CheckboxField label="Unique per event" checked={row.unique} onCheckedChange={(unique) => patch(row.uid, { unique })} />
+                      <CheckboxField label="Identifies the guest" checked={row.identifier} onCheckedChange={(identifier) => patch(row.uid, { identifier })} />
+                    </div>
                     <FormField
                       label="Key"
                       htmlFor={`${row.uid}-key`}

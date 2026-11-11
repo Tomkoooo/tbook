@@ -1,4 +1,5 @@
-import { getBookingDetailForOrg } from "@tbook/services";
+import { getBookingDetailForOrg, liveFieldSchemaForEvent } from "@tbook/services";
+import type { AttendeeFieldDef } from "@tbook/schemas";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DescriptionList } from "@/components/description-list";
@@ -10,8 +11,23 @@ import { formatDateTime, formatMoney, requireAdminPage } from "@/lib/admin-page"
 import { BookingActions } from "./booking-actions";
 import { ReceiptPanel } from "./receipt-panel";
 import { AttachInvoicePanel, EditBookingPanel, MarkPaidPanel } from "./manage-panels";
+import { GuestControls } from "./guest-controls";
 
 export const dynamic = "force-dynamic";
+
+const CHANGE_LABELS: Record<string, string> = {
+  edited: "Edited",
+  attendee_cancelled: "Guest cancelled",
+  booking_cancelled: "Registration cancelled",
+};
+
+function changeAuthor(by: string): string {
+  if (by === "guest") return "Guest";
+  if (by.startsWith("admin")) return "Organizer";
+  if (by.startsWith("import")) return "Import";
+  if (by.startsWith("waitlist")) return "Waitlist";
+  return "System";
+}
 
 /** Renders one quote line; the quote's own `lines` array is the authoritative breakdown. */
 interface QuoteLine {
@@ -78,7 +94,7 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
           }}
           adminNote={booking.adminNote ?? ""}
           attendees={JSON.parse(JSON.stringify(booking.attendees ?? []))}
-          attendeeFields={JSON.parse(JSON.stringify(booking.attendeeFieldSchema ?? []))}
+          attendeeFields={JSON.parse(JSON.stringify(await liveFieldSchemaForEvent(String(booking.eventId), (booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[])))}
           teamMemberFields={JSON.parse(JSON.stringify(booking.teamMemberFieldSchema ?? []))}
         />
       ) : null}
@@ -214,9 +230,21 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
                 const members = attendee?.members ?? [];
                 return (
                   <TableRow key={index}>
-                    <TableCell>{index + 1}</TableCell>
+                    <TableCell>
+                      {index + 1}
+                      {attendee?.registrationNumber ? <div className="font-mono text-xs text-muted-foreground">{attendee.registrationNumber}</div> : null}
+                    </TableCell>
                     <TableCell className="whitespace-normal">
                       {own ? <div>{own}</div> : null}
+                      {!canManage && (attendee?.tags?.length ?? 0) > 0 ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {attendee!.tags!.map((tag) => (
+                            <Badge key={tag} variant="secondary">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
                       {members.length > 0 ? (
                         <ol className={`list-decimal pl-5 ${own ? "mt-1.5" : ""}`}>
                           {members.map((member, memberIndex) => (
@@ -227,6 +255,9 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
                         </ol>
                       ) : null}
                       {!own && members.length === 0 ? "—" : null}
+                      {canManage && !walkIn && (booking.status === "paid" || booking.status === "confirmed") ? (
+                        <GuestControls bookingId={bookingId} attendeeIndex={index} tags={[...(attendee?.tags ?? [])]} canCancel />
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 );
@@ -235,6 +266,69 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
           </Table>
         )}
       </SectionCard>
+
+      {(booking.cancelledAttendees?.length ?? 0) > 0 ? (
+        <SectionCard flush title={`Cancelled guests (${booking.cancelledAttendees.length})`}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Guest</TableHead>
+                <TableHead>Cancelled</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {booking.cancelledAttendees.map((entry, index) => (
+                <TableRow key={index}>
+                  <TableCell className="whitespace-normal">
+                    {describeFields(entry.attendee?.fields, booking.attendeeFieldSchema ?? []) || "—"}
+                    {entry.attendee?.registrationNumber ? <div className="font-mono text-xs text-muted-foreground">{entry.attendee.registrationNumber}</div> : null}
+                  </TableCell>
+                  <TableCell>{formatDateTime(entry.cancelledAt)}</TableCell>
+                  <TableCell>{changeAuthor(entry.cancelledBy)}</TableCell>
+                  <TableCell className="whitespace-normal">{entry.reason || "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </SectionCard>
+      ) : null}
+
+      {(booking.changeLog?.length ?? 0) > 0 ? (
+        <SectionCard flush title="Change history">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>What</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[...booking.changeLog].reverse().map((change, index) => (
+                <TableRow key={index}>
+                  <TableCell>{formatDateTime(change.at)}</TableCell>
+                  <TableCell>{changeAuthor(change.by)}</TableCell>
+                  <TableCell className="whitespace-normal">
+                    <span className="font-medium">{CHANGE_LABELS[change.action] ?? change.action}</span>
+                    {change.registrationNumber ? <span className="ml-1 font-mono text-xs text-muted-foreground">{change.registrationNumber}</span> : null}
+                    {change.changes.length > 0 ? (
+                      <ul className="mt-1 text-sm text-muted-foreground">
+                        {change.changes.map((c, i) => (
+                          <li key={i}>
+                            {c.field}: {c.before || "—"} → {c.after || "—"}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </SectionCard>
+      ) : null}
 
       {permissions.has("voucher:read") ? (
         <SectionCard flush title={`Entries (${vouchers.length})`}>

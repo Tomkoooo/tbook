@@ -327,4 +327,88 @@ describe("v1 public API routes", () => {
       expect(body.listings).toHaveLength(1);
     });
   });
+
+  describe("guest self-service, waitlist and surveys", () => {
+    async function freeEvent(overrides: Partial<Record<string, unknown>> = {}) {
+      const on = { enabled: true };
+      const modules = { "free-registration": on, "guest-portal": on, waitlist: on, feedback: on };
+      const { OrganizationModel } = await import("@tbook/db");
+      const org = await OrganizationModel.create({ name: "ES", slug: `es-${Math.random().toString(36).slice(2, 8)}`, status: "active", modules });
+      const { group, plaintextKey } = await createGroup({ organizationId: org._id });
+      const event = await createEvent(String(group._id), {
+        organizationId: org._id,
+        startDate: new Date(Date.now() + 10 * 86_400_000),
+        endDate: new Date(Date.now() + 10 * 86_400_000),
+        ticketFeeHuf: 0,
+        vouchersEnabled: true,
+        attendeeFieldSchemaMode: "replace",
+        attendeeFieldSchema: [
+          { key: "name", label: "Név", type: "text", required: true, sortOrder: 0 },
+          { key: "employee_id", label: "Törzsszám", type: "text", required: true, unique: true, identifier: true, sortOrder: 1 },
+        ],
+        modules,
+        ...overrides,
+      });
+      return { group, plaintextKey, event, eventId: String(event._id) };
+    }
+    const post = (url: string, key: string, body: unknown) =>
+      new Request(`https://tbook.example.com/api/v1/${url}`, { method: "POST", headers: { "X-TBook-Api-Key": key, "Content-Type": "application/json", "X-Forwarded-For": `10.0.0.${Math.floor(Math.random() * 250)}` }, body: JSON.stringify(body) });
+    const customer = { name: "Teszt Elek", email: "teszt@example.com", phone: "+36301112233", note: "" };
+
+    it("looks up, updates and cancels a registration by code", async () => {
+      const { plaintextKey, eventId } = await freeEvent();
+      const bookings = await import("./bookings/route");
+      const created = await (await bookings.POST(post("bookings", plaintextKey, { eventId, guests: 1, customer, attendees: [{ fields: { name: "Teszt Elek", employee_id: "1001" } }] }))).json();
+      expect(created.status).toBe("confirmed");
+
+      const lookup = await import("./guest/lookup/route");
+      const found = await (await lookup.POST(post("guest/lookup", plaintextKey, { eventId, code: "1001" }))).json();
+      expect(found.ok).toBe(true);
+      expect(found.guest.form.find((f: { key: string }) => f.key === "employee_id").editable).toBe(false);
+      expect((await lookup.POST(post("guest/lookup", plaintextKey, { eventId }))).status).toBe(400);
+      expect((await lookup.POST(post("guest/lookup", plaintextKey, { eventId, code: "nope" }))).status).toBe(404);
+
+      const update = await import("./guest/update/route");
+      const updated = await (await update.POST(post("guest/update", plaintextKey, { eventId, code: "1001", fields: { name: "Teszt E." } }))).json();
+      expect(updated.guest.name).toBe("Teszt E.");
+
+      const cancel = await import("./guest/cancel/route");
+      const cancelled = await (await cancel.POST(post("guest/cancel", plaintextKey, { eventId, code: "1001" }))).json();
+      expect(cancelled).toMatchObject({ ok: true, cancelled: true });
+    });
+
+    it("joins the waitlist only when full, and the event detail says so", async () => {
+      const { plaintextKey, eventId } = await freeEvent({ capacity: 1 });
+      const join = await import("./waitlist/join/route");
+      const early = await join.POST(post("waitlist/join", plaintextKey, { eventId, customer, attendees: [{ fields: { name: "A", employee_id: "2001" } }] }));
+      expect(early.status).toBe(409);
+
+      const bookings = await import("./bookings/route");
+      await bookings.POST(post("bookings", plaintextKey, { eventId, guests: 1, customer, attendees: [{ fields: { name: "B", employee_id: "1001" } }] }));
+      const detail = await import("./events/[eventId]/route");
+      const event = await (await detail.GET(new Request(`https://tbook.example.com/api/v1/events/${eventId}`, { headers: { "X-TBook-Api-Key": plaintextKey } }), { params: Promise.resolve({ eventId }) })).json();
+      expect(event.waitlistOpen).toBe(true);
+
+      const joined = await (await join.POST(post("waitlist/join", plaintextKey, { eventId, customer, attendees: [{ fields: { name: "A", employee_id: "2001" } }] }))).json();
+      expect(joined).toMatchObject({ ok: true, position: 1 });
+    });
+
+    it("lists surveys and takes one answer per guest", async () => {
+      const { plaintextKey, eventId, event } = await freeEvent();
+      const bookings = await import("./bookings/route");
+      await bookings.POST(post("bookings", plaintextKey, { eventId, guests: 1, customer, attendees: [{ fields: { name: "A", employee_id: "1001" } }] }));
+      const { feedback } = await import("@tbook/modules");
+      const survey = await feedback.createSurvey(String(event.organizationId), eventId, { kind: "survey", title: "Hogy tetszett?", questions: [{ type: "rating", label: "Összesen", required: true }] });
+
+      const list = await import("./surveys/route");
+      const listed = await (await list.GET(new Request(`https://tbook.example.com/api/v1/surveys?eventId=${eventId}`, { headers: { "X-TBook-Api-Key": plaintextKey } }))).json();
+      expect(listed.surveys).toHaveLength(1);
+
+      const respond = await import("./surveys/[surveyId]/responses/route");
+      const ctx = { params: Promise.resolve({ surveyId: String(survey._id) }) };
+      const answers = { [survey.questions[0]!.id]: 5 };
+      expect((await respond.POST(post(`surveys/${survey._id}/responses`, plaintextKey, { code: "1001", answers }), ctx)).status).toBe(200);
+      expect((await respond.POST(post(`surveys/${survey._id}/responses`, plaintextKey, { code: "1001", answers }), ctx)).status).toBe(409);
+    });
+  });
 });

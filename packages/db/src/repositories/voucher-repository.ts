@@ -5,6 +5,7 @@ export interface VoucherListFilter {
   status?: IVoucher["status"][];
   /** Matched against the attendee display name, case-insensitively. */
   search?: string;
+  tag?: string;
 }
 
 /** Escapes a user-supplied search term so it can't act as a regex. */
@@ -16,7 +17,13 @@ function buildVoucherQuery(eventId: string, filter: VoucherListFilter = {}): Que
   const query: QueryFilter<IVoucher> = { eventId: new Types.ObjectId(eventId) };
   if (filter.status && filter.status.length > 0) query.status = { $in: filter.status };
   const search = filter.search?.trim();
-  if (search) query.displayName = new RegExp(escapeRegex(search), "i");
+  if (filter.tag) query.tags = filter.tag;
+  if (search) {
+    // Name, or registration number typed with or without its dash.
+    const compact = search.replace(/[\s-]+/g, "").toUpperCase();
+    const asRegistration = /^[0-9A-Z]{8}$/.test(compact) ? `${compact.slice(0, 4)}-${compact.slice(4)}` : null;
+    query.$or = [{ displayName: new RegExp(escapeRegex(search), "i") }, ...(asRegistration ? [{ registrationNumber: asRegistration }] : [])];
+  }
   return query;
 }
 
@@ -26,6 +33,9 @@ export const voucherRepository = {
   },
   findByToken(token: string): Promise<IVoucher | null> {
     return VoucherModel.findOne({ token }).exec();
+  },
+  findByRegistrationNumber(eventId: string, registrationNumber: string): Promise<IVoucher | null> {
+    return VoucherModel.findOne({ eventId, registrationNumber }).exec();
   },
   findByBookingId(bookingId: string): Promise<IVoucher[]> {
     return VoucherModel.find({ bookingId }).sort({ attendeeIndex: 1 }).exec();
@@ -38,6 +48,21 @@ export const voucherRepository = {
   },
   updateById(id: string, update: Partial<IVoucher>): Promise<IVoucher | null> {
     return VoucherModel.findByIdAndUpdate(id, update, { returnDocument: "after" }).exec();
+  },
+  /** Voids one attendee's entry and shifts the later ones down, after that attendee left the booking. */
+  async removeAttendeeIndex(bookingId: string, attendeeIndex: number): Promise<void> {
+    // (bookingId, attendeeIndex) is unique: park the removed entry on a fresh
+    // negative index, then shift the later ones down one at a time, in order.
+    const parked = await VoucherModel.countDocuments({ bookingId, attendeeIndex: { $lt: 0 } }).exec();
+    await VoucherModel.updateOne(
+      { bookingId, attendeeIndex },
+      { $set: { attendeeIndex: -(parked + 1) } },
+    ).exec();
+    await VoucherModel.updateMany({ bookingId, attendeeIndex: -(parked + 1), status: { $ne: "checked_in" } }, { $set: { status: "void" } }).exec();
+    const later = await VoucherModel.find({ bookingId, attendeeIndex: { $gt: attendeeIndex } }).sort({ attendeeIndex: 1 }).exec();
+    for (const voucher of later) {
+      await VoucherModel.updateOne({ _id: voucher._id }, { $set: { attendeeIndex: voucher.attendeeIndex - 1 } }).exec();
+    }
   },
   voidAllForBooking(bookingId: string): Promise<void> {
     return VoucherModel.updateMany({ bookingId, status: { $ne: "void" } }, { $set: { status: "void" } })

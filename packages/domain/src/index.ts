@@ -9,3 +9,4 @@ export * from "./wizard-flow";
 export * from "./day-pass";
 export * from "./booking-email";
 export * from "./product";
+export * from "./registration-fields";

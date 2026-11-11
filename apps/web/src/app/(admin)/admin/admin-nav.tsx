@@ -5,6 +5,12 @@ import { usePathname } from "next/navigation";
 import {
   ChevronsUpDown,
   BedDouble,
+  Bus,
+  ChartColumn,
+  ListOrdered,
+  MessageSquareHeart,
+  Database,
+  Mail,
   CalendarDays,
   FolderKanban,
   LayoutDashboard,
@@ -45,6 +51,8 @@ interface NavItem {
   permission: string | readonly string[] | null;
   /** Extra path prefixes that should also mark this link active. */
   alsoActiveOn?: string[];
+  /** Shown only when the organization has been granted this module. */
+  module?: string;
 }
 
 /**
@@ -66,6 +74,17 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { href: "/admin/sales", label: "Point of sale", icon: ShoppingCart, permission: ["sale:create", "booking:manage"] },
       { href: "/admin/bookings", label: "Bookings", icon: Ticket, permission: "booking:read" },
       { href: "/admin/check-in", label: "Check-in", icon: ScanLine, permission: "voucher:read" },
+    ],
+  },
+  {
+    label: "Guests",
+    items: [
+      { href: "/admin/emails", label: "Emails", icon: Mail, permission: ["email:send", "booking:manage"], module: "event-emails" },
+      { href: "/admin/bus", label: "Buses", icon: Bus, permission: ["bus:manage", "booking:manage"], module: "bus-transport" },
+      { href: "/admin/waitlist", label: "Waitlist", icon: ListOrdered, permission: ["waitlist:manage", "booking:manage"], module: "waitlist" },
+      { href: "/admin/feedback", label: "Feedback", icon: MessageSquareHeart, permission: ["feedback:manage", "event:write"], module: "feedback" },
+      { href: "/admin/reports", label: "Reports", icon: ChartColumn, permission: "booking:read" },
+      { href: "/admin/data", label: "Data", icon: Database, permission: ["list:manage", "event:write"] },
     ],
   },
   {
@@ -100,12 +119,15 @@ export function AdminNav({
   userEmail,
   isSystemAdmin,
   permissions,
+  modules = [],
 }: {
   organizationName: string | null;
   userEmail: string | null;
   isSystemAdmin: boolean;
   /** The acting member's permissions; empty when no org is selected yet. */
   permissions: string[];
+  /** Modules granted to the active organization. */
+  modules?: string[];
 }) {
   const pathname = usePathname();
   const granted = new Set(permissions);
@@ -146,7 +168,9 @@ export function AdminNav({
       <SidebarContent>
         {GROUPS.map((group) => {
           const items = group.items.filter(
-            (item) => !item.permission || [item.permission].flat().some((permission) => granted.has(permission)),
+            (item) =>
+              (!item.module || modules.includes(item.module)) &&
+              (!item.permission || [item.permission].flat().some((permission) => granted.has(permission))),
           );
           return items.length === 0 ? null : <NavGroup key={group.label} label={group.label} items={items} pathname={pathname} />;
         })}

@@ -46,6 +46,26 @@ bookings: 20/min per client).
 | GET | `/checkout/vouchers?bookingId=&session_id=` | — | The guest's ticket PDF (rendered on demand) |
 | GET | `/checkout/invoice?bookingId=&session_id=` | — | The guest's invoice PDF (fetched from Számlázz.hu on demand; 502 if Számlázz.hu is unreachable) |
 | GET | `/directory` | none | Groups opted into the public tBook directory |
+| POST | `/guest/lookup` | group | Guest self-service (module `guest-portal`): find a registration by `{ eventId, code }`, where `code` is the registration number or the identifying answer (e.g. employee ID). See below |
+| POST | `/guest/update` | group | `{ eventId, code, fields }`: change the guest's own answers |
+| POST | `/guest/cancel` | group | `{ eventId, code, reason? }`: cancel this guest (free registrations only) |
+| POST | `/waitlist/join` | group | Module `waitlist`: `{ eventId, guests?, customer, attendees, returnBaseUrl? }` with the same answers as a booking: `{ entryId, position }`. 409 `not_full` while places are left |
+| GET | `/surveys?eventId=` | group | Module `feedback`: the event's open surveys `{ surveys: [{ id, title, intro, questions, ratingMax }] }` |
+| POST | `/surveys/{surveyId}/responses` | group | `{ code \| token, answers: { questionId: value } }`: once per guest (409 `already_answered`), stored without identity |
+
+`GET /events/{eventId}` also returns `waitlistOpen` (added field): the event is full and takes waitlist entries.
+
+### Guest self-service
+
+Rate-limited per client. The lookup returns `{ guest }`:
+
+- `registrationNumber`, `name`, `fields` (answers; email and phone are masked);
+- `form`: every question with live options and `editable` (identifying questions and the module's locked questions are never editable; nothing is editable once the event has started);
+- `bus`: `{ code, city, pickupPoint, departure, returnInfo, captainName, captainPhone }`, or `null`;
+- `transferRules`: the bus module's rules text (e.g. the 15-minute wait rule);
+- `canEdit`, `canCancel`.
+
+An update is checked like a registration (required answers, rules, unique ID, bus seats). The guest's automatic confirmation email is sent again. In a group registration, cancel removes only that guest; the record is kept and listed as cancelled.
 
 ### Quote and booking body
 

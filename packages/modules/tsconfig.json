@@ -1,0 +1,4 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "../services/src/szamlazz-js.d.ts"]
+}

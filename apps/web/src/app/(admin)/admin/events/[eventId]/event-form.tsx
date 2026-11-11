@@ -27,6 +27,7 @@ import {
   effectiveFieldKeys,
   fieldRowsFromDefs,
   serializeFieldRows,
+  type ChoiceSourceOption,
   type FieldRow,
 } from "./registration-fields-editor";
 import {
@@ -133,6 +134,10 @@ export interface EventFormValues {
     required: boolean;
     helpText?: string;
     choices?: Array<{ value: string; label: string }>;
+    choicesSource?: string | null;
+    showWhen?: { fieldKey: string; values: string[] } | null;
+    unique?: boolean;
+    identifier?: boolean;
   }>;
   attendeeFieldSchemaMode: string;
   eligibility: EligibilityFormValues;
@@ -151,11 +156,17 @@ export function EventForm({
   initial,
   groups,
   soldGuestCount,
+  choiceSources,
+  dataLists,
 }: {
   eventId: string | null;
   initial: EventFormValues;
   groups: Array<{ id: string; name: string }>;
   soldGuestCount?: number;
+  /** Module-provided option lists for dropdown questions. */
+  choiceSources?: ChoiceSourceOption[];
+  /** The organization's data lists, for "is on the list" rules. */
+  dataLists?: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -526,7 +537,7 @@ export function EventForm({
             description="Every guest is asked for their name and contact details. Add the extra questions this event needs — shirt size, club, date of birth."
           >
             <div className="grid gap-5">
-              <RegistrationFieldsEditor rows={fieldRows} onChange={setFieldRows} keysLocked={savedKeys} />
+              <RegistrationFieldsEditor rows={fieldRows} onChange={setFieldRows} keysLocked={savedKeys} choiceSources={choiceSources} />
               <FormField
                 label="Questions from the group"
                 htmlFor="attendeeFieldSchemaMode"
@@ -553,7 +564,7 @@ export function EventForm({
           <input type="hidden" name="pricingRules" value={serializePricingRules(pricingRows)} />
           <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
             <SectionCard title="Who can register" description="Keep an event to the right age group, gender or members.">
-              <EligibilityEditor value={eligibility} onChange={setEligibility} fields={questions} />
+              <EligibilityEditor value={eligibility} onChange={setEligibility} fields={questions} dataLists={dataLists} />
             </SectionCard>
             <SectionCard title="Price adjustments" description="Discounts and surcharges applied automatically — a hotel guest discount, a late fee.">
               <PricingRulesEditor rows={pricingRows} onChange={setPricingRows} />

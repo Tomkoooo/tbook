@@ -261,6 +261,8 @@ export async function issueInvoiceForBooking(
   const booking = await bookingRepository.findById(bookingId);
   if (!booking) return null;
   if (booking.invoiceStatus === "issued") return null;
+  // Nothing was charged (a free registration, a comp): there is nothing to invoice.
+  if (booking.totalHuf <= 0) return null;
 
   const organizationId = booking.organizationId ? String(booking.organizationId) : null;
   const credsResult = await resolveOrgSzamlazzCredentials(organizationId);

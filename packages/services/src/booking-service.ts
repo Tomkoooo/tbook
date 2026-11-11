@@ -25,6 +25,7 @@ import {
   totalDayTickets,
   totalPackageUnits,
   validateDayTickets,
+  collectListLookups,
   validateEligibility,
   validateHotelSelections,
   validateSelections,
@@ -52,6 +53,16 @@ import {
   resolveTicketAttendeeFieldSchema,
   validateAttendees,
 } from "./booking-validation";
+import { loadDataListMembership } from "./data-list-service";
+import { resolveModules } from "./module-registry";
+import {
+  assignAttendeeIdentity,
+  claimUniqueFieldValues,
+  newRegistrationNumber,
+  releaseBookingExtensions,
+  resolveFieldChoices,
+  runRegistrationReservers,
+} from "./registration-pipeline";
 
 /**
  * Ported from the legacy plugin's services/booking-service.ts. Two scope
@@ -437,8 +448,22 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
     capacityReserved = true;
   }
 
+  let releaseClaims: (() => Promise<void>) | null = null;
+  let releaseReservations: (() => Promise<void>) | null = null;
+
   try {
     const hasHotel = Boolean(hotelName) && (priceQuote.accommodationGuests ?? 0) > 0;
+    const group = event.groupId ? await eventGroupRepository.findById(String(event.groupId)) : null;
+    const organizationId = group?.organizationId ?? event.organizationId ?? null;
+    const extensionCtx = {
+      event,
+      organizationId: organizationId ? String(organizationId) : null,
+      groupId: event.groupId ? String(event.groupId) : null,
+      modules: await resolveModules({ organizationId: organizationId ? String(organizationId) : null, groupId: event.groupId ? String(event.groupId) : null, event }),
+    };
+    // Selects whose choices come from a module (e.g. bus routes) are filled
+    // before validation, so an answer outside the live choices is refused.
+    const { schema: fieldSchema } = await resolveFieldChoices(registrationFieldSchema, extensionCtx);
 
     if (hasHotel && input.hotelId) {
       const hotel = await hotelRepository.findById(input.hotelId);
@@ -446,7 +471,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
     }
 
     const playersPerTicket = resolvePlayersPerTicket(event);
-    const attendeeIssues = validateAttendees(registrationFieldSchema, guests, input.attendees, event.registrationUnit, {
+    const attendeeIssues = validateAttendees(fieldSchema, guests, input.attendees, event.registrationUnit, {
       teamMemberFieldSchema,
       teamMemberLimit: event.teamMemberLimit ?? null,
       playersPerTicket: playersPerTicket > 1 ? playersPerTicket : null,
@@ -457,22 +482,27 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
     // matches the legacy Mongoose shape); @tbook/domain narrows it to EligibilityMatchOp for its
     // own type safety. The admin rule editor (Phase 5) is the only writer, so the value is always
     // one of the known ops at runtime — this cast just bridges the two packages' type strictness.
+    // A Mongoose document must become a plain object before spreading: a
+    // spread copies its internals, not its fields, which silently dropped
+    // every eligibility rule here before (rules were never enforced).
+    const eventFields = typeof (event as { toObject?: () => unknown }).toObject === "function" ? (event as unknown as { toObject: () => typeof event }).toObject() : event;
+    const eligibilityEvent = { ...eventFields, eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null };
     const eligibilityIssues = opts?.skipEligibility
       ? []
-      : validateEligibility(
-          { ...event, eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null },
-          input.attendees,
-          registrationFieldSchema,
-          teamMemberFieldSchema,
-          playersPerTicket > 1 ? playersPerTicket : null,
-        );
+      : validateEligibility(eligibilityEvent, input.attendees, fieldSchema, teamMemberFieldSchema, playersPerTicket > 1 ? playersPerTicket : null, {
+          listMembership: await loadDataListMembership(extensionCtx.organizationId, collectListLookups(eligibilityEvent, input.attendees)),
+        });
     if (eligibilityIssues.length > 0) throw ActionError.validation("This event has eligibility requirements that are not met.", { issues: eligibilityIssues });
 
-    const attendees = normalizeAttendeePayload(registrationFieldSchema, input.attendees, teamMemberFieldSchema);
-    const group = event.groupId ? await eventGroupRepository.findById(String(event.groupId)) : null;
+    const attendees = assignAttendeeIdentity(normalizeAttendeePayload(fieldSchema, input.attendees, teamMemberFieldSchema));
+    const bookingId = new Types.ObjectId();
+    releaseClaims = await claimUniqueFieldValues(extensionCtx, String(bookingId), attendees, fieldSchema);
+    releaseReservations = await runRegistrationReservers(extensionCtx, String(bookingId), attendees, fieldSchema);
 
     return await bookingRepository.create({
-      organizationId: group?.organizationId ?? event.organizationId ?? null,
+      _id: bookingId,
+      registrationNumber: newRegistrationNumber(),
+      organizationId: organizationId,
       groupId: event.groupId,
       eventId: event._id,
       hotelId: hasHotel && input.hotelId ? oid(input.hotelId) : null,
@@ -487,7 +517,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       },
       billing: input.billing ?? null,
       checkoutReturnBaseUrl: input.returnBaseUrl?.trim() || null,
-      attendeeFieldSchema: registrationFieldSchema,
+      attendeeFieldSchema: fieldSchema,
       teamMemberFieldSchema,
       teamMemberLimit: event.teamMemberLimit ?? null,
       playersPerTicket,
@@ -502,6 +532,8 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       status: "pending",
     });
   } catch (error) {
+    if (releaseReservations) await releaseReservations();
+    if (releaseClaims) await releaseClaims();
     if (capacityReserved) await eventRepository.releaseCapacity(String(event._id), guests);
     if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
     throw error;
@@ -549,6 +581,7 @@ export async function expireBooking(bookingId: string): Promise<IBooking | null>
 
   const updated = await bookingRepository.updateById(bookingId, { status: "expired" });
   await releaseBookingCapacity(booking);
+  await releaseBookingExtensions(booking, "expired");
   return updated;
 }
 
@@ -582,6 +615,7 @@ export async function cancelBooking(bookingId: string, opts: { reason?: string }
   const updated = await bookingRepository.markCancelled(bookingId, note);
 
   await releaseBookingCapacity(booking);
+  await releaseBookingExtensions(booking, "cancelled");
 
   return updated;
 }

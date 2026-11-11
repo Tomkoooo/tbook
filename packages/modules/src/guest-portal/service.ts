@@ -1,0 +1,191 @@
+import { ActionError } from "@tbook/actions";
+import { eventRepository, type IBooking, type IEvent } from "@tbook/db";
+import { isFieldVisible } from "@tbook/domain";
+import { bookingEventContext, cancelBookingAttendee, editBookingAttendee, editableFieldSchema, resolveModules } from "@tbook/services";
+import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
+import { BUS_TRANSPORT } from "../bus-transport";
+import { formatDeparture, routeForAttendee } from "../bus-transport/service";
+import { EVENT_EMAILS, resendAutomaticEmailsForAttendee } from "../event-emails/service";
+import { attendeeKeyOf, findAttendeeByCode, toEventAttendees } from "../shared/attendees";
+
+export const GUEST_PORTAL = "guest-portal";
+
+/**
+ * Guest self-service for an event's website: a guest finds their own
+ * registration with their registration number or their identifying answer
+ * (e.g. employee ID), sees its details (bus, captain, rules), changes
+ * answers, or cancels. No login: the code is the key, so lookups are
+ * rate-limited by the API, contact details are masked, and the
+ * identifying answers themselves can't be changed here.
+ */
+export interface GuestPortalConfig {
+  allowEdit?: "yes" | "no";
+  allowCancel?: "yes" | "no";
+  /** Comma-separated question keys guests may not change (identifying/unique ones never can). */
+  lockedFields?: string;
+}
+
+
+interface Found {
+  booking: IBooking;
+  attendeeIndex: number;
+  event: IEvent;
+  config: GuestPortalConfig;
+}
+
+function plain<T>(value: T): T {
+  return typeof (value as { toObject?: () => T }).toObject === "function" ? (value as unknown as { toObject: () => T }).toObject() : value;
+}
+
+async function portalEvent(eventId: string, groupId: string | null): Promise<{ event: IEvent; config: GuestPortalConfig }> {
+  const event = await eventRepository.findById(eventId);
+  if (!event || (groupId && String(event.groupId) !== groupId)) throw ActionError.notFound("Event not found");
+  const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
+  if (!modules.isOn(GUEST_PORTAL)) throw ActionError.notFound("Self-service isn't available for this event.");
+  return { event, config: modules.config<GuestPortalConfig>(GUEST_PORTAL) };
+}
+
+function identifyingKeys(schema: AttendeeFieldDef[]): string[] {
+  return schema.filter((field) => field.identifier || field.unique).map((field) => field.key);
+}
+
+/** Finds the guest a code belongs to: a registration number, or an identifying answer. */
+export async function findGuest(eventId: string, code: string, groupId: string | null = null): Promise<Found> {
+  const { event, config } = await portalEvent(eventId, groupId);
+  if (!code.trim()) throw ActionError.validation("Enter your registration number or ID.");
+  const hit = await findAttendeeByCode(event, code);
+  if (!hit) throw ActionError.notFound("No registration found with this code.");
+  return { ...hit, event, config };
+}
+
+function maskEmail(value: string): string {
+  const [user, domain] = value.split("@");
+  if (!domain) return "***";
+  return `${user!.slice(0, 1)}***@${domain}`;
+}
+
+function maskPhone(value: string): string {
+  const digits = value.replace(/\D+/g, "");
+  return digits.length <= 3 ? "***" : `***${digits.slice(-3)}`;
+}
+
+function isContactField(field: AttendeeFieldDef): boolean {
+  return field.type === "email" || field.type === "phone" || /phone|telefon|e-?mail/i.test(field.key);
+}
+
+function changesOpen(event: IEvent): boolean {
+  return new Date(event.startDate).getTime() > Date.now();
+}
+
+function lockedKeys(schema: AttendeeFieldDef[], config: GuestPortalConfig): string[] {
+  const configured = (config.lockedFields ?? "").split(",").map((key) => key.trim()).filter(Boolean);
+  return [...new Set([...identifyingKeys(schema), ...configured])];
+}
+
+export interface GuestView {
+  eventId: string;
+  eventName: string;
+  registrationNumber: string | null;
+  name: string;
+  /** Answers; contact details are masked. */
+  fields: Record<string, AttendeeFieldValue>;
+  /** The form, for an edit screen: every question with its live options and whether the guest may change it. */
+  form: Array<AttendeeFieldDef & { editable: boolean; masked: boolean }>;
+  bus: {
+    code: string;
+    city: string;
+    pickupPoint: string;
+    departureAt: string | null;
+    departure: string;
+    returnInfo: string;
+    captainName: string;
+    captainPhone: string;
+  } | null;
+  /** The bus module's transfer rules text (e.g. the 15-minute wait rule). */
+  transferRules: string;
+  canEdit: boolean;
+  canCancel: boolean;
+}
+
+export async function guestView(found: Found): Promise<GuestView> {
+  const { booking, attendeeIndex, event, config } = found;
+  const { ctx } = await bookingEventContext(booking);
+  const schema = await editableFieldSchema(booking, ctx);
+  const attendee = plain(booking.attendees![attendeeIndex]!) as BookingAttendee;
+  const row = toEventAttendees(booking)[attendeeIndex]!;
+  const locked = new Set(lockedKeys(schema, config));
+  const open = changesOpen(event);
+  const fields: Record<string, AttendeeFieldValue> = {};
+  for (const field of schema) {
+    const value = attendee.fields?.[field.key];
+    if (value == null) continue;
+    fields[field.key] = isContactField(field) ? (field.type === "email" || /mail/i.test(field.key) ? maskEmail(String(value)) : maskPhone(String(value))) : value;
+  }
+  const route = await routeForAttendee(booking, attendeeIndex);
+  const busOn = ctx.modules.isOn(BUS_TRANSPORT);
+  return {
+    eventId: String(event._id),
+    eventName: event.name,
+    registrationNumber: attendee.registrationNumber ?? null,
+    name: row.displayName,
+    fields,
+    form: schema.map((field) => ({ ...field, editable: open && config.allowEdit !== "no" && !locked.has(field.key), masked: isContactField(field) })),
+    bus:
+      route && busOn
+        ? {
+            code: route.code,
+            city: route.city,
+            pickupPoint: route.pickupPoint,
+            departureAt: route.departureAt ? route.departureAt.toISOString() : null,
+            departure: formatDeparture(route.departureAt),
+            returnInfo: route.returnInfo,
+            captainName: route.captainName,
+            captainPhone: route.captainPhone,
+          }
+        : null,
+    transferRules: busOn ? (ctx.modules.config<{ transferRules?: string }>(BUS_TRANSPORT).transferRules ?? "") : "",
+    canEdit: open && config.allowEdit !== "no",
+    canCancel: open && config.allowCancel !== "no" && booking.totalHuf <= 0,
+  };
+}
+
+export async function lookupGuest(eventId: string, code: string, groupId: string | null = null): Promise<GuestView> {
+  return guestView(await findGuest(eventId, code, groupId));
+}
+
+/** Changes the guest's own answers; locked and masked-but-unchanged answers keep their stored value. */
+export async function updateGuest(eventId: string, code: string, input: Record<string, unknown>, groupId: string | null = null): Promise<GuestView> {
+  const found = await findGuest(eventId, code, groupId);
+  const view = await guestView(found);
+  if (!view.canEdit) throw ActionError.forbidden("Changes are closed for this registration.");
+  const fields: Record<string, AttendeeFieldValue> = {};
+  for (const field of view.form) {
+    if (!field.editable || !(field.key in input)) continue;
+    const raw = input[field.key];
+    if (field.masked && String(raw ?? "") === String(view.fields[field.key] ?? "")) continue;
+    fields[field.key] = typeof raw === "number" ? raw : typeof raw === "boolean" ? String(raw) : String(raw ?? "").slice(0, 2000);
+  }
+  // Answers to questions that are now hidden (e.g. bus after "no transfer") are dropped.
+  const merged = { ...((plain(found.booking.attendees![found.attendeeIndex]!) as BookingAttendee).fields ?? {}), ...fields };
+  for (const field of view.form) if (!isFieldVisible(field, merged) && field.key in merged) fields[field.key] = "";
+  const updated = await editBookingAttendee(String(found.booking._id), found.attendeeIndex, fields, {
+    by: "guest",
+    lockedKeys: view.form.filter((field) => !field.editable).map((field) => field.key),
+  });
+  const { ctx } = await bookingEventContext(updated);
+  if (ctx.modules.isOn(EVENT_EMAILS) && JSON.stringify(updated.attendees?.[found.attendeeIndex]?.fields) !== JSON.stringify(found.booking.attendees?.[found.attendeeIndex]?.fields)) {
+    const attendee = updated.attendees![found.attendeeIndex] as BookingAttendee;
+    await resendAutomaticEmailsForAttendee(updated, attendeeKeyOf(updated, attendee, found.attendeeIndex)).catch((error) =>
+      console.error("[tbook] guest edit: re-sending confirmation failed", String(updated._id), error),
+    );
+  }
+  return guestView({ ...found, booking: updated });
+}
+
+export async function cancelGuest(eventId: string, code: string, reason: string, groupId: string | null = null): Promise<{ cancelled: true; registrationNumber: string | null }> {
+  const found = await findGuest(eventId, code, groupId);
+  const view = await guestView(found);
+  if (!view.canCancel) throw ActionError.forbidden("This registration can't be cancelled here. Please contact the organizer.");
+  await cancelBookingAttendee(String(found.booking._id), found.attendeeIndex, { by: "guest", reason: reason.slice(0, 500) });
+  return { cancelled: true, registrationNumber: view.registrationNumber };
+}

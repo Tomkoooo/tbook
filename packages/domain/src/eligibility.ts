@@ -18,7 +18,31 @@ export type EligibilityPreset = "none" | "custom" | "form_rules";
 /** Still present on some stored events (see @tbook/schemas event.ts) — resolved into `custom` at runtime. */
 export type LegacyEligibilityPreset = "under18" | "under18_female" | "women";
 
-export type EligibilityMatchOp = "equals" | "not_equals" | "contains" | "regex" | "min" | "max" | "min_age" | "max_age" | "in" | "not_in";
+export type EligibilityMatchOp =
+  | "equals"
+  | "not_equals"
+  | "contains"
+  | "regex"
+  | "min"
+  | "max"
+  | "min_age"
+  | "max_age"
+  | "in"
+  | "not_in"
+  /** The answer is a key in a data list; `value` is the list's id. */
+  | "in_list"
+  | "not_in_list";
+
+/**
+ * Answers "is this value a key of that data list?" for the `in_list` ops.
+ * The caller (a service) loads the membership before validating, which
+ * keeps this module free of I/O. Without one, `in_list` fails closed.
+ */
+export type DataListMembership = (listId: string, value: string) => boolean;
+
+export interface ValidateEligibilityOptions {
+  listMembership?: DataListMembership;
+}
 
 export interface EligibilityRule {
   id: string;
@@ -253,7 +277,13 @@ function listValues(raw: string): string[] {
     .filter(Boolean);
 }
 
-function evaluateFormRule(rule: EligibilityRule, fields: Record<string, AttendeeFieldValue>, fieldDefs: AttendeeFieldDef[], referenceDate: Date): boolean {
+function evaluateFormRule(
+  rule: EligibilityRule,
+  fields: Record<string, AttendeeFieldValue>,
+  fieldDefs: AttendeeFieldDef[],
+  referenceDate: Date,
+  listMembership?: DataListMembership,
+): boolean {
   const raw = fields[rule.fieldKey];
   const asString = raw == null ? "" : String(raw).trim();
   const def = fieldDefs.find((f) => f.key === rule.fieldKey);
@@ -300,6 +330,10 @@ function evaluateFormRule(rule: EligibilityRule, fields: Record<string, Attendee
       return genderLike ? listValues(expected).map(canonicalizeGenderValue).includes(canonicalizeGenderValue(asString)) : listValues(expected).includes(asString.toLowerCase());
     case "not_in":
       return genderLike ? !listValues(expected).map(canonicalizeGenderValue).includes(canonicalizeGenderValue(asString)) : !listValues(expected).includes(asString.toLowerCase());
+    case "in_list":
+      return Boolean(asString) && Boolean(listMembership?.(expected.trim(), asString));
+    case "not_in_list":
+      return !asString || !listMembership?.(expected.trim(), asString);
     default:
       return true;
   }
@@ -335,6 +369,7 @@ export function validateEligibility(
   ticketFieldSchema: AttendeeFieldDef[],
   playerFieldSchema: AttendeeFieldDef[],
   fixedRoster: number | null,
+  opts: ValidateEligibilityOptions = {},
 ): EligibilityIssue[] {
   const rules = resolveEligibilityRules(event);
   if (!rules) return [];
@@ -374,7 +409,7 @@ export function validateEligibility(
     }
 
     if (rules.formRules) {
-      const results = rules.formRules.rules.map((rule) => ({ rule, ok: evaluateFormRule(rule, row.fields, allSchemas, referenceDate) }));
+      const results = rules.formRules.rules.map((rule) => ({ rule, ok: evaluateFormRule(rule, row.fields, allSchemas, referenceDate, opts.listMembership) }));
       const passes = rules.formRules.logic === "or" ? results.some((r) => r.ok) : results.every((r) => r.ok);
       if (!passes) {
         const failed = results.filter((r) => !r.ok);
@@ -389,4 +424,49 @@ export function validateEligibility(
   }
 
   return issues;
+}
+
+/**
+ * The `(listId, value)` pairs an `in_list` rule set will ask about for these
+ * attendees, so a service can load exactly that membership in one query.
+ */
+export function collectListLookups(
+  event: EligibilityEventLike,
+  attendees: BookingAttendee[] | undefined | null,
+): Array<{ listId: string; value: string }> {
+  const rules = resolveEligibilityRules(event);
+  if (!rules?.formRules) return [];
+  const listRules = rules.formRules.rules.filter((rule) => rule.op === "in_list" || rule.op === "not_in_list");
+  if (listRules.length === 0) return [];
+  const lookups: Array<{ listId: string; value: string }> = [];
+  for (const attendee of attendees ?? []) {
+    const rows = [attendee.fields ?? {}, ...(attendee.members ?? []).map((member) => member.fields ?? {})];
+    for (const fields of rows) {
+      for (const rule of listRules) {
+        const raw = fields[rule.fieldKey];
+        const value = raw == null ? "" : String(raw).trim();
+        if (value) lookups.push({ listId: rule.value.trim(), value });
+      }
+    }
+  }
+  return lookups;
+}
+
+/**
+ * Whether one attendee's answers satisfy a rule set — the same operators and
+ * and/or logic as registration rules, reused wherever a feature needs a
+ * condition over answers (an email sent only to bus passengers, a segment).
+ * An empty or missing rule set matches everyone.
+ */
+export function matchesRuleConfig(
+  config: EligibilityRulesConfig | null | undefined,
+  fields: Record<string, AttendeeFieldValue>,
+  fieldDefs: AttendeeFieldDef[],
+  opts: ValidateEligibilityOptions & { referenceDate?: Date } = {},
+): boolean {
+  const rules = normalizeFormRules(config);
+  if (!rules) return true;
+  const referenceDate = opts.referenceDate ?? new Date();
+  const results = rules.rules.map((rule) => evaluateFormRule(rule, fields, fieldDefs, referenceDate, opts.listMembership));
+  return rules.logic === "or" ? results.some(Boolean) : results.every(Boolean);
 }

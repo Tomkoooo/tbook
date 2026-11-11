@@ -8,6 +8,7 @@ import { ActionError } from "@tbook/actions";
 import { bookingRepository, eventRepository, organizationRepository, voucherRepository, type IBooking } from "@tbook/db";
 import { WALK_IN_CUSTOMER_EMAIL } from "@tbook/schemas";
 import { AFTER_BOOKING_PAID_HOOKS } from "./checkout-service";
+import { extensions } from "./extensions";
 import { getInvoicePdfForBooking, issueInvoiceForBooking, type SzamlazzInvoiceProvider } from "./invoice-service";
 import { sendMail, type MailTransporter, type SendMailInput } from "./mailer";
 import { checkInWalkInEntries, issueReceiptForBooking } from "./receipt-service";
@@ -152,6 +153,15 @@ export async function bookingDocumentsAfterBookingPaidHook(booking: IBooking): P
       invoicePdf = await issueInvoiceForBooking(bookingId);
     } catch (error) {
       console.error("[tbook] invoice issuance failed", bookingId, error);
+    }
+  }
+  // A module that sends its own confirmation (per-attendee emails, …) asks
+  // for the default one to be skipped, so the guest doesn't get two.
+  for (const suppressor of extensions.bookingEmailSuppressors()) {
+    try {
+      if (await suppressor(booking)) return;
+    } catch (error) {
+      console.error("[tbook] booking email suppressor failed", bookingId, error);
     }
   }
   try {

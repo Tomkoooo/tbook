@@ -1,9 +1,11 @@
+import "@/lib/register-modules";
 import { ActionError } from "@tbook/actions";
 import { ensureDbConnection } from "@tbook/db";
 import { auth } from "@/auth";
 import { requireOrgPermission as requireOrgPermissionService, type OrgAuthContext } from "@tbook/services";
 import type { Permission } from "@tbook/schemas";
 import { getActiveOrganizationIdFromCookie } from "./org-cookie";
+import { permissionWithFallbacks } from "./permission-fallbacks";
 
 /**
  * Request-level auth helpers wrapping NextAuth's `auth()` + @tbook/services'
@@ -51,10 +53,26 @@ export async function requireOrgContext(): Promise<{ userId: string; organizatio
   return { userId: user.id, organizationId, isSystemAdmin: user.isSystemAdmin };
 }
 
-/** Resolves the org auth context and enforces a single permission (system admins bypass). */
+/**
+ * Resolves the org auth context and enforces a single permission (system
+ * admins bypass). A role saved before a newer permission existed passes
+ * with that permission's fallback (see permission-fallbacks.ts).
+ */
 export async function requireOrgPermission(permission: Permission): Promise<OrgAuthContext> {
   const { userId, organizationId, isSystemAdmin } = await requireOrgContext();
-  return requireOrgPermissionService(permission, { userId, organizationId, isSystemAdmin });
+  const [primary, ...fallbacks] = permissionWithFallbacks(permission);
+  try {
+    return await requireOrgPermissionService(primary!, { userId, organizationId, isSystemAdmin });
+  } catch (error) {
+    for (const fallback of fallbacks) {
+      try {
+        return await requireOrgPermissionService(fallback, { userId, organizationId, isSystemAdmin });
+      } catch {
+        // try the next fallback
+      }
+    }
+    throw error;
+  }
 }
 
 /** Throws 401/403 unless the signed-in user is a platform system admin. */

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listRegistrableEvents, previewAdminRegistration } from "@tbook/services";
+import { listRegistrableEvents, liveFieldSchemaForEvent, previewAdminRegistration } from "@tbook/services";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { Notice } from "@/components/notice";
@@ -125,7 +125,7 @@ export default async function NewRegistrationPage({
         guests={guests}
         currency={preview.event.currency}
         totalHuf={preview.quote.totalHuf}
-        attendeeFields={preview.registrationFieldSchema}
+        attendeeFields={JSON.parse(JSON.stringify(await liveFieldSchemaForEvent(selected.id, preview.registrationFieldSchema)))}
         teamMemberFields={preview.teamMemberFieldSchema}
       />
     </>

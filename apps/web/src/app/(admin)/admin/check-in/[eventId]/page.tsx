@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { eventDayKeys, todayDayKey } from "@tbook/domain";
 import { voucherStatuses } from "@tbook/schemas";
-import { listCheckInRosterForOrg } from "@tbook/services";
+import { listCheckInRosterForOrg, listEventTags } from "@tbook/services";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,9 @@ import { VOUCHER_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDate, formatDateTime, requireAdminPage } from "@/lib/admin-page";
 import { ScanPanel } from "./scan-panel";
 import { RevertCheckInButton } from "./revert-check-in-button";
+import { RosterCheckInButton } from "./roster-check-in-button";
+import { LiveRefresh } from "./live-refresh";
+import { Download } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -43,18 +46,21 @@ export default async function CheckInEventPage({
     ? [statusRaw as (typeof voucherStatuses)[number]]
     : undefined;
   const search = one(query, "search");
+  const tag = one(query, "tag") || undefined;
   const page = Math.max(Number(one(query, "page") ?? 1) || 1, 1);
 
-  const roster = await listCheckInRosterForOrg(organizationId, eventId, { status, search }, { page, pageSize: 50 });
+  const roster = await listCheckInRosterForOrg(organizationId, eventId, { status, search, tag }, { page, pageSize: 50 });
 
   function hrefForPage(target: number): string {
     const next = new URLSearchParams();
     if (statusRaw) next.set("status", statusRaw);
     if (search) next.set("search", search);
+    if (tag) next.set("tag", tag);
     next.set("page", String(target));
     return `/admin/check-in/${eventId}?${next.toString()}`;
   }
 
+  const tags = await listEventTags(eventId);
   const progress = roster.checkedIn + roster.outstanding;
   const isDayPass = roster.event.kind === "day_pass";
   const days = isDayPass ? eventDayKeys(roster.event.startDate, roster.event.endDate) : [];
@@ -65,7 +71,15 @@ export default async function CheckInEventPage({
         back={{ href: "/admin/check-in", label: "Check-in" }}
         title={roster.event.name}
         description={`${formatDate(roster.event.startDate)} – ${formatDate(roster.event.endDate)}`}
+        actions={
+          <Button asChild variant="outline">
+            <Link href={`/admin/check-in/${eventId}/export`} prefetch={false}>
+              <Download /> Arrivals (xlsx)
+            </Link>
+          </Button>
+        }
       />
+      <LiveRefresh seconds={15} />
 
       <div className="grid grid-cols-3 gap-4">
         <Stat label="Checked in" value={roster.checkedIn} hint={progress > 0 ? `of ${progress} admittable` : undefined} />
@@ -79,10 +93,10 @@ export default async function CheckInEventPage({
         <form
           method="get"
           action={`/admin/check-in/${eventId}`}
-          className="grid gap-4 border-b p-5 sm:grid-cols-[1fr_12rem_auto] sm:items-end"
+          className={`grid gap-4 border-b p-5 sm:items-end ${tags.length > 0 ? "sm:grid-cols-[1fr_12rem_10rem_auto]" : "sm:grid-cols-[1fr_12rem_auto]"}`}
         >
           <FormField label="Search" htmlFor="search">
-            <Input id="search" name="search" defaultValue={search ?? ""} placeholder="Attendee name, e.g. Kovács…" />
+            <Input id="search" name="search" defaultValue={search ?? ""} placeholder="Name or registration number, e.g. Kovács or 7K3M-9QX2" />
           </FormField>
           <FormField label="Status" htmlFor="status">
             <NativeSelect id="status" name="status" defaultValue={statusRaw ?? ""}>
@@ -94,6 +108,18 @@ export default async function CheckInEventPage({
               ))}
             </NativeSelect>
           </FormField>
+          {tags.length > 0 ? (
+            <FormField label="Tag" htmlFor="tag">
+              <NativeSelect id="tag" name="tag" defaultValue={tag ?? ""}>
+                <option value="">Any tag</option>
+                {tags.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FormField>
+          ) : null}
           <div className="flex gap-2">
             <Button type="submit">Apply</Button>
             <Button variant="ghost" asChild>
@@ -123,7 +149,19 @@ export default async function CheckInEventPage({
                   const id = String(voucher._id);
                   return (
                     <TableRow key={id}>
-                      <TableCell className="font-medium">{voucher.displayName}</TableCell>
+                      <TableCell>
+                        <span className="font-medium">{voucher.displayName}</span>
+                        {voucher.registrationNumber ? <div className="text-muted-foreground font-mono text-xs">{voucher.registrationNumber}</div> : null}
+                        {(voucher.tags?.length ?? 0) > 0 ? (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {voucher.tags.map((value) => (
+                              <Badge key={value} variant="secondary">
+                                {value}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                      </TableCell>
                       {isDayPass ? <TableCell className="tabular-nums">{voucher.validDate ?? "—"}</TableCell> : null}
                       <TableCell>
                         <Badge variant={toneFor(VOUCHER_STATUS_TONES, voucher.status)}>{voucher.status}</Badge>
@@ -133,6 +171,7 @@ export default async function CheckInEventPage({
                         {voucher.status === "checked_in" && permissions.has("voucher:manage") ? (
                           <RevertCheckInButton eventId={eventId} voucherId={id} />
                         ) : null}
+                        {voucher.status === "active" && permissions.has("voucher:scan") ? <RosterCheckInButton eventId={eventId} voucherId={id} /> : null}
                       </TableCell>
                     </TableRow>
                   );

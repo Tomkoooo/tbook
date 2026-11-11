@@ -38,6 +38,8 @@ const RULE_OPS: Array<{ value: string; label: string; hint: string }> = [
   { value: "max", label: "is at most", hint: "A number" },
   { value: "min_age", label: "gives age at least", hint: "For a date-of-birth question" },
   { value: "max_age", label: "gives age at most", hint: "For a date-of-birth question" },
+  { value: "in_list", label: "is on the list", hint: "Checked against an uploaded data list" },
+  { value: "not_in_list", label: "is not on the list", hint: "Checked against an uploaded data list" },
 ];
 
 const GENDERS = [
@@ -52,11 +54,14 @@ export function EligibilityEditor({
   value,
   onChange,
   fields,
+  dataLists = [],
 }: {
   value: EligibilityValues;
   onChange: (value: EligibilityValues) => void;
   /** The questions the form asks, to point rules at. */
   fields: Array<{ key: string; label: string }>;
+  /** The organization's data lists (Data page), for list rules. */
+  dataLists?: Array<{ id: string; name: string }>;
 }) {
   const set = (patch: Partial<EligibilityValues>) => onChange({ ...value, ...patch });
   const setRule = (uid: string, patch: Partial<FormRuleRow>) =>
@@ -130,7 +135,19 @@ export function EligibilityEditor({
                 </NativeSelect>
               </FormField>
               <FormField label="Value" htmlFor={`${rule.uid}-value`} hint={RULE_OPS.find((op) => op.value === rule.op)?.hint}>
-                <Input id={`${rule.uid}-value`} value={rule.value} onChange={(e) => setRule(rule.uid, { value: e.target.value })} />
+                {rule.op === "in_list" || rule.op === "not_in_list" ? (
+                  <NativeSelect id={`${rule.uid}-value`} value={rule.value} onChange={(e) => setRule(rule.uid, { value: e.target.value })}>
+                    <option value="">Choose a list…</option>
+                    {dataLists.map((list) => (
+                      <option key={list.id} value={list.id}>
+                        {list.name}
+                      </option>
+                    ))}
+                    {rule.value && !dataLists.some((list) => list.id === rule.value) ? <option value={rule.value}>Deleted list</option> : null}
+                  </NativeSelect>
+                ) : (
+                  <Input id={`${rule.uid}-value`} value={rule.value} onChange={(e) => setRule(rule.uid, { value: e.target.value })} />
+                )}
               </FormField>
               <Button type="button" variant="ghost" size="icon" aria-label="Remove rule" onClick={() => set({ rules: value.rules.filter((r) => r.uid !== rule.uid) })}>
                 <Trash2 />

@@ -12,6 +12,7 @@ import {
   resendVoucherEmailAsAdmin,
   revertCheckInAsAdmin,
   scanVoucherAsAdmin,
+  checkInVoucherByIdAsAdmin,
   sendTestWebhook,
   upsertWebhook,
   attachInvoiceToBooking,
@@ -103,6 +104,8 @@ export interface ScanActionResult extends ActionResult {
   attendeeName?: string | null;
   /** The pass's date, for a day-pass entry. */
   validDate?: string | null;
+  /** Guest tags (VIP, …) so the door can see them. */
+  tags?: string[];
 }
 
 /**
@@ -129,10 +132,26 @@ export async function scanAction(eventId: string, formData: FormData): Promise<S
       message: outcome.message,
       attendeeName: outcome.voucher?.displayName ?? null,
       validDate: outcome.voucher?.validDate ?? null,
+      tags: [...(outcome.voucher?.tags ?? [])],
     };
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };
     console.error("[admin scan]", error);
+    return { ok: false, message: "Something went wrong. Please try again." };
+  }
+}
+
+/** One-tap check-in from the roster, for a guest found by name or registration number. */
+export async function checkInFromRosterAction(eventId: string, voucherId: string): Promise<ScanActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("voucher:scan");
+    const user = await getSessionUser();
+    const outcome = await checkInVoucherByIdAsAdmin(organizationId, eventId, voucherId, { userId: user?.id ?? null, day: "any" });
+    revalidatePath(`/admin/check-in/${eventId}`);
+    return { ok: outcome.result === "valid", result: outcome.result, message: outcome.message, attendeeName: outcome.voucher?.displayName ?? null };
+  } catch (error) {
+    if (error instanceof ActionError) return { ok: false, message: error.message };
+    console.error("[roster check-in]", error);
     return { ok: false, message: "Something went wrong. Please try again." };
   }
 }
@@ -338,7 +357,7 @@ export interface UpdateBookingResult extends ActionResult {
 /** Edits contact details and attendee data on an existing booking. */
 export async function updateBookingAction(bookingId: string, formData: FormData): Promise<UpdateBookingResult> {
   try {
-    const { organizationId } = await requireOrgPermission("booking:manage");
+    const { organizationId, userId } = await requireOrgPermission("booking:manage");
 
     const guests = Math.max(Number(formData.get("guests") ?? 1) || 1, 1);
     const editsAttendees = formData.get("editsAttendees") !== null;
@@ -353,7 +372,7 @@ export async function updateBookingAction(bookingId: string, formData: FormData)
       ...(editsAttendees ? { attendees: parseAttendeesFromForm(formData, guests) } : {}),
     });
 
-    const result = await updateBookingDetails(organizationId, bookingId, input);
+    const result = await updateBookingDetails(organizationId, bookingId, { ...input, editedBy: userId });
     revalidatePath(`/admin/bookings/${bookingId}`);
 
     const parts = ["Booking updated."];

@@ -1,3 +1,4 @@
+import "@/lib/register-modules";
 import { NextResponse } from "next/server";
 import { ActionError } from "@tbook/actions";
 import { ensureDbConnection } from "@tbook/db";
