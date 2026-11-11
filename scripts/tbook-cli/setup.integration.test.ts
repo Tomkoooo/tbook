@@ -36,7 +36,7 @@ describe("tbook-cli setup apply", () => {
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tbook-setup-"));
     const csv = path.join(dir, "dso.csv");
-    fs.writeFileSync(csv, "Dolgozó;Név;Vállalat;E-mail cím\n60000001;Szőke Tibor;DHEL;szoke@example.com\n60000003;Benkő László;EHEL;benko@example.com\n");
+    fs.writeFileSync(csv, "Dolgozó;Név;Vállalat;E-mail cím\n60000001;Teszt Elek;DHEL;teszt@example.com\n60000003;Minta Márta;EHEL;minta@example.com\n");
     const plan = JSON.parse(fs.readFileSync(path.resolve("docs/plans/halozatok-unnepe-2026.setup.json"), "utf8"));
     plan.dataLists[0].file = csv;
     // Open now, so the test can register.
@@ -98,9 +98,9 @@ describe("tbook-cli setup apply", () => {
     expect(emails.find((e) => e.audience === "list_unregistered")?.listId?.toString()).toBe(String(list?._id));
 
     const attendee = (id: string) => ({
-      fields: { nev: "Szőke Tibor", torzsszam: id, munkaltato: "DHEL", email: "szoke@example.com", telefon: "+36301112233", transzfer: "nem", vacsora: "igen", adatkezeles: "true" },
+      fields: { nev: "Teszt Elek", torzsszam: id, munkaltato: "DHEL", email: "teszt@example.com", telefon: "+36301112233", transzfer: "nem", vacsora: "igen", adatkezeles: "true" },
     });
-    const customer = { name: "Szőke Tibor", email: "szoke@example.com", phone: "+36301112233", note: "" };
+    const customer = { name: "Teszt Elek", email: "teszt@example.com", phone: "+36301112233", note: "" };
     const ok = await createBookingWithCheckout({ eventId: String(event?._id), guests: 1, customer, attendees: [attendee("60000001")] }, { groupId: String(group?._id) });
     expect(ok.status).toBe("confirmed");
     await expect(

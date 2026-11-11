@@ -353,12 +353,12 @@ describe("v1 public API routes", () => {
     }
     const post = (url: string, key: string, body: unknown) =>
       new Request(`https://tbook.example.com/api/v1/${url}`, { method: "POST", headers: { "X-TBook-Api-Key": key, "Content-Type": "application/json", "X-Forwarded-For": `10.0.0.${Math.floor(Math.random() * 250)}` }, body: JSON.stringify(body) });
-    const customer = { name: "Szőke Tibor", email: "szoke@example.com", phone: "+36301112233", note: "" };
+    const customer = { name: "Teszt Elek", email: "teszt@example.com", phone: "+36301112233", note: "" };
 
     it("looks up, updates and cancels a registration by code", async () => {
       const { plaintextKey, eventId } = await freeEvent();
       const bookings = await import("./bookings/route");
-      const created = await (await bookings.POST(post("bookings", plaintextKey, { eventId, guests: 1, customer, attendees: [{ fields: { name: "Szőke Tibor", employee_id: "1001" } }] }))).json();
+      const created = await (await bookings.POST(post("bookings", plaintextKey, { eventId, guests: 1, customer, attendees: [{ fields: { name: "Teszt Elek", employee_id: "1001" } }] }))).json();
       expect(created.status).toBe("confirmed");
 
       const lookup = await import("./guest/lookup/route");
@@ -369,8 +369,8 @@ describe("v1 public API routes", () => {
       expect((await lookup.POST(post("guest/lookup", plaintextKey, { eventId, code: "nope" }))).status).toBe(404);
 
       const update = await import("./guest/update/route");
-      const updated = await (await update.POST(post("guest/update", plaintextKey, { eventId, code: "1001", fields: { name: "Szőke T." } }))).json();
-      expect(updated.guest.name).toBe("Szőke T.");
+      const updated = await (await update.POST(post("guest/update", plaintextKey, { eventId, code: "1001", fields: { name: "Teszt E." } }))).json();
+      expect(updated.guest.name).toBe("Teszt E.");
 
       const cancel = await import("./guest/cancel/route");
       const cancelled = await (await cancel.POST(post("guest/cancel", plaintextKey, { eventId, code: "1001" }))).json();

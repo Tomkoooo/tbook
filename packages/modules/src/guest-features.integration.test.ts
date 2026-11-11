@@ -47,7 +47,7 @@ const transporter = {
     return {} as never;
   },
 };
-const customer = { name: "Szőke Tibor", email: "szoke@example.com", phone: "+36301112233", note: "" };
+const customer = { name: "Teszt Elek", email: "teszt@example.com", phone: "+36301112233", note: "" };
 const on = { enabled: true };
 const ALL = { "free-registration": on, "bus-transport": on, "event-emails": on, "guest-portal": on, waitlist: on, feedback: on };
 
@@ -114,7 +114,7 @@ describe("guest features", () => {
     const group = await EventGroupModel.create({ name: "G", organizationId: org._id, status: "active", apiKeyHash: "h", apiKeyHint: "x", apiKeyCreatedAt: new Date() });
     groupId = String(group._id);
     eventId = await makeEvent();
-    busA = String((await createRoute(orgId, eventId, { code: "A", city: "Szeged", capacity: 1, captainName: "Kovács Péter", captainPhone: "+36 30 000 0000" }))._id);
+    busA = String((await createRoute(orgId, eventId, { code: "A", city: "Szeged", capacity: 1, captainName: "Kapitány Kázmér", captainPhone: "+36 30 000 0000" }))._id);
     busB = String((await createRoute(orgId, eventId, { code: "B", city: "Pécs", capacity: 1, captainName: "Nagy Anna", captainPhone: "+36 30 111 1111" }))._id);
   });
 
@@ -179,7 +179,7 @@ describe("guest features", () => {
     const number = (await BookingModel.findById(bookingId))!.attendees[1]!.registrationNumber!;
 
     const byId = await lookupGuest(eventId, "1001", groupId);
-    expect(byId.bus).toMatchObject({ code: "A", captainName: "Kovács Péter", captainPhone: "+36 30 000 0000" });
+    expect(byId.bus).toMatchObject({ code: "A", captainName: "Kapitány Kázmér", captainPhone: "+36 30 000 0000" });
     expect(byId.transferRules).toBe("A busz legfeljebb 15 percet vár.");
     expect(byId.fields.email).toBe("1***@example.com");
     expect(byId.form.find((f) => f.key === "employee_id")?.editable).toBe(false);

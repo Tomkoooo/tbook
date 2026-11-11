@@ -28,7 +28,7 @@ describe("registration field helpers", () => {
     expect(normalizeListKey("60000001.0", "digits_only")).toBe("60000001");
     expect(normalizeListKey(" 6000-0001 ", "digits_only")).toBe("60000001");
     expect(normalizeListKey("AB 12", "alnum")).toBe("ab12");
-    expect(normalizeListKey("  Szőke  Tibor ")).toBe("szőke tibor");
+    expect(normalizeListKey("  Teszt  Elek ")).toBe("teszt elek");
   });
 
   it("normalises unique values ignoring case, spaces and dashes", () => {

@@ -34,7 +34,7 @@ const transporter = {
   },
 };
 
-const customer = { name: "Szőke Tibor", email: "szoke.tibor@mvm.hu", phone: "+36301112233", note: "" };
+const customer = { name: "Teszt Elek", email: "teszt.elek@example.com", phone: "+36301112233", note: "" };
 
 describe("configured free registration with ID list, bus seats and event emails", () => {
   let mongod: MongoMemoryServer;
@@ -82,9 +82,9 @@ describe("configured free registration with ID list, bus seats and event emails"
       orgId,
       { name: "DSO", keyColumn: "dolgozo", keyNormalization: "digits_only", emailColumn: "email", nameColumn: "nev", columns: [{ key: "dolgozo", label: "Dolgozó" }, { key: "nev", label: "Név" }, { key: "email", label: "E-mail" }] },
       [
-        { dolgozo: "60000001", nev: "Szőke Tibor", email: "szoke.tibor@mvm.hu" },
-        { dolgozo: "60000003", nev: "Benkő László", email: "benko.laszlo@mvm.hu" },
-        { dolgozo: "60000004", nev: "Bognár István", email: "bognar.istvan@mvm.hu" },
+        { dolgozo: "60000001", nev: "Teszt Elek", email: "teszt.elek@example.com" },
+        { dolgozo: "60000003", nev: "Minta Márta", email: "minta.marta@example.com" },
+        { dolgozo: "60000004", nev: "Próba Pál", email: "proba.pal@example.com" },
       ],
     );
     listId = String(list.list._id);
@@ -115,7 +115,7 @@ describe("configured free registration with ID list, bus seats and event emails"
     });
     eventId = String(event._id);
 
-    const route = await createRoute(orgId, eventId, { code: "B01", city: "Szeged", pickupPoint: "Mars tér", capacity: 1, captainName: "Kovács Péter", captainPhone: "+36 30 000 0000" });
+    const route = await createRoute(orgId, eventId, { code: "B01", city: "Szeged", pickupPoint: "Mars tér", capacity: 1, captainName: "Kapitány Kázmér", captainPhone: "+36 30 000 0000" });
     routeId = String(route._id);
 
     await createEventEmail(orgId, eventId, {
@@ -136,11 +136,11 @@ describe("configured free registration with ID list, bus seats and event emails"
     });
   });
 
-  const attendee = (fields: Record<string, string>) => ({ fields: { name: "Szőke Tibor", consent: "true", ...fields } });
+  const attendee = (fields: Record<string, string>) => ({ fields: { name: "Teszt Elek", consent: "true", ...fields } });
 
   it("confirms a free registration at once: registration numbers, voucher, seat, and per-attendee emails", async () => {
     const result = await createBookingWithCheckout(
-      { eventId, guests: 2, customer, attendees: [attendee({ employee_id: "60000001", transfer: "igen", bus: routeId }), { fields: { name: "Benkő László", employee_id: "60000003", transfer: "nem", consent: "true" } }] },
+      { eventId, guests: 2, customer, attendees: [attendee({ employee_id: "60000001", transfer: "igen", bus: routeId }), { fields: { name: "Minta Márta", employee_id: "60000003", transfer: "nem", consent: "true" } }] },
       { groupId },
     );
 
@@ -162,15 +162,15 @@ describe("configured free registration with ID list, bus seats and event emails"
     expect(sent).toHaveLength(3);
     const confirmations = sent.filter((m) => m.subject.startsWith("Sikeres regisztráció"));
     expect(confirmations).toHaveLength(2);
-    expect(confirmations[0]?.html).toContain("Szia Tibor!");
+    expect(confirmations[0]?.html).toContain("Szia Elek!");
     expect(confirmations[0]?.html).toContain(booking?.attendees[0]?.registrationNumber);
     expect(confirmations[0]?.html).toContain("Transzfer: Igényelt");
     expect(confirmations[0]?.html).toContain('src="cid:registration-qr"');
     expect(confirmations[0]?.attachments?.some((a) => a.cid === "registration-qr")).toBe(true);
-    expect(confirmations[1]?.html).toContain("Szia László!");
+    expect(confirmations[1]?.html).toContain("Szia Márta!");
     expect(confirmations[1]?.html).toContain("Transzfer: Nem igényelt");
     const bus = sent.find((m) => m.subject === "Buszfoglalás visszaigazolása");
-    expect(bus?.html).toContain("Szeged – Mars tér (B01), kapitány: Kovács Péter +36 30 000 0000");
+    expect(bus?.html).toContain("Szeged – Mars tér (B01), kapitány: Kapitány Kázmér +36 30 000 0000");
     expect(await EmailDeliveryModel.countDocuments({ status: "sent", mode: "auto" })).toBe(3);
   });
 
@@ -243,8 +243,8 @@ describe("configured free registration with ID list, bus seats and event emails"
       listMatchFieldKey: "employee_id",
     });
     await startEventEmailSend(orgId, String(email._id), null, { wait: true });
-    expect(sent.map((m) => m.to).sort()).toEqual(["benko.laszlo@mvm.hu", "bognar.istvan@mvm.hu"]);
-    expect(sent[0]?.html).toMatch(/Szia (László|István)!/);
+    expect(sent.map((m) => m.to).sort()).toEqual(["minta.marta@example.com", "proba.pal@example.com"]);
+    expect(sent[0]?.html).toMatch(/Szia (Márta|Pál)!/);
 
     sent.length = 0;
     await startEventEmailSend(orgId, String(email._id), null, { wait: true });

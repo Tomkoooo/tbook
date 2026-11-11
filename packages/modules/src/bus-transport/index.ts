@@ -85,7 +85,7 @@ export function registerBusTransportModule(): void {
       { key: "bus.code", label: "Bus: identifier", sample: "B03" },
       { key: "bus.departure", label: "Bus: departure date and time", sample: "2026. december 4. 15:30" },
       { key: "bus.returnInfo", label: "Bus: return trip", sample: "00:00–02:00 között, a csoport igényeihez igazodva" },
-      { key: "bus.captainName", label: "Bus: captain's name", sample: "Kovács Péter" },
+      { key: "bus.captainName", label: "Bus: captain's name", sample: "Kapitány Kázmér" },
       { key: "bus.captainPhone", label: "Bus: captain's phone", sample: "+36 30 123 4567" },
       { key: "bus.rules", label: "Bus: transfer rules (module setting)", sample: "A busz legfeljebb 15 percet vár." },
     ],

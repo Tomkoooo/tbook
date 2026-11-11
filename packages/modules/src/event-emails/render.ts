@@ -14,8 +14,8 @@ export interface PlaceholderInfo {
 }
 
 export const ATTENDEE_PLACEHOLDERS: PlaceholderInfo[] = [
-  { key: "firstName", label: "Given name (Keresztnév)", sample: "Tibor" },
-  { key: "fullName", label: "Full name", sample: "Szőke Tibor" },
+  { key: "firstName", label: "Given name (Keresztnév)", sample: "Elek" },
+  { key: "fullName", label: "Full name", sample: "Teszt Elek" },
   { key: "registrationNumber", label: "Registration number", sample: "7K3M-9QX2" },
   { key: "qrCode", label: "QR code (image)", sample: "[QR]" },
   { key: "eventName", label: "Event name", sample: "MVM Hálózatok Ünnepe 2026" },
@@ -25,14 +25,14 @@ export const ATTENDEE_PLACEHOLDERS: PlaceholderInfo[] = [
   { key: "siteUrl", label: "Event website link", sample: "https://esemeny.example.hu" },
   { key: "surveyUrl", label: "Survey link", sample: "https://esemeny.example.hu/kerdoiv" },
   { key: "galleryUrl", label: "Photo gallery link", sample: "https://esemeny.example.hu/galeria" },
-  { key: "customerName", label: "Registered by (name)", sample: "Szőke Tibor" },
-  { key: "customerEmail", label: "Registered by (email)", sample: "szoke.tibor@mvm.hu" },
+  { key: "customerName", label: "Registered by (name)", sample: "Teszt Elek" },
+  { key: "customerEmail", label: "Registered by (email)", sample: "teszt.elek@example.com" },
   { key: "organizationName", label: "Organizer", sample: "Eventstructure" },
 ];
 
 export const LIST_PLACEHOLDERS: PlaceholderInfo[] = [
-  { key: "firstName", label: "Given name (Keresztnév)", sample: "Tibor" },
-  { key: "fullName", label: "Full name", sample: "Szőke Tibor" },
+  { key: "firstName", label: "Given name (Keresztnév)", sample: "Elek" },
+  { key: "fullName", label: "Full name", sample: "Teszt Elek" },
   { key: "eventName", label: "Event name", sample: "MVM Hálózatok Ünnepe 2026" },
   { key: "eventDate", label: "Event date", sample: "2026. december 4." },
   { key: "eventTime", label: "Event time", sample: "18:00–01:00" },
