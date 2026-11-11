@@ -10,6 +10,8 @@ import {
   ListOrdered,
   MessageSquareHeart,
   Database,
+  Eye,
+  LifeBuoy,
   Mail,
   CalendarDays,
   FolderKanban,
@@ -19,6 +21,7 @@ import {
   Building2,
   Package,
   Settings,
+  Tablet,
   Ticket,
   Users,
   type LucideIcon,
@@ -66,7 +69,11 @@ interface NavItem {
 const GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Overview",
-    items: [{ href: "/admin", label: "Dashboard", icon: LayoutDashboard, permission: null }],
+    items: [
+      { href: "/admin", label: "Dashboard", icon: LayoutDashboard, permission: null },
+      { href: "/admin/preview", label: "Preview", icon: Eye, permission: "event:read" },
+      { href: "/admin/help", label: "Súgó (Help)", icon: LifeBuoy, permission: null },
+    ],
   },
   {
     label: "Sales",
@@ -80,9 +87,10 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     label: "Guests",
     items: [
       { href: "/admin/emails", label: "Emails", icon: Mail, permission: ["email:send", "booking:manage"], module: "event-emails" },
-      { href: "/admin/bus", label: "Buses", icon: Bus, permission: ["bus:manage", "booking:manage"], module: "bus-transport" },
+      { href: "/admin/bus", label: "Buses", icon: Bus, permission: ["bus:manage", "bus:board", "booking:manage"], module: "bus-transport" },
       { href: "/admin/waitlist", label: "Waitlist", icon: ListOrdered, permission: ["waitlist:manage", "booking:manage"], module: "waitlist" },
       { href: "/admin/feedback", label: "Feedback", icon: MessageSquareHeart, permission: ["feedback:manage", "event:write"], module: "feedback" },
+      { href: "/admin/kiosk", label: "Kiosk", icon: Tablet, permission: ["feedback:kiosk", "feedback:manage", "event:write"], module: "feedback" },
       { href: "/admin/reports", label: "Reports", icon: ChartColumn, permission: "booking:read" },
       { href: "/admin/data", label: "Data", icon: Database, permission: ["list:manage", "event:write"] },
     ],

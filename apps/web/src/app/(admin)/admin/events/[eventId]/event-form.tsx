@@ -138,6 +138,7 @@ export interface EventFormValues {
     showWhen?: { fieldKey: string; values: string[] } | null;
     unique?: boolean;
     identifier?: boolean;
+    prefillColumn?: string | null;
   }>;
   attendeeFieldSchemaMode: string;
   eligibility: EligibilityFormValues;
@@ -158,6 +159,7 @@ export function EventForm({
   soldGuestCount,
   choiceSources,
   dataLists,
+  prefillColumns,
 }: {
   eventId: string | null;
   initial: EventFormValues;
@@ -167,6 +169,8 @@ export function EventForm({
   choiceSources?: ChoiceSourceOption[];
   /** The organization's data lists, for "is on the list" rules. */
   dataLists?: Array<{ id: string; name: string }>;
+  /** Column names of the org's data lists, offered for prefill. */
+  prefillColumns?: string[];
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -537,7 +541,7 @@ export function EventForm({
             description="Every guest is asked for their name and contact details. Add the extra questions this event needs — shirt size, club, date of birth."
           >
             <div className="grid gap-5">
-              <RegistrationFieldsEditor rows={fieldRows} onChange={setFieldRows} keysLocked={savedKeys} choiceSources={choiceSources} />
+              <RegistrationFieldsEditor rows={fieldRows} onChange={setFieldRows} keysLocked={savedKeys} choiceSources={choiceSources} prefillColumns={prefillColumns} />
               <FormField
                 label="Questions from the group"
                 htmlFor="attendeeFieldSchemaMode"

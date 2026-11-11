@@ -52,8 +52,11 @@ export function ScanPanel({
   eventId,
   today,
   days,
+  scan = scanAction,
 }: {
   eventId: string;
+  /** The scan action; the preview page swaps in a lookup-only one. */
+  scan?: (eventId: string, formData: FormData) => Promise<ScanActionResult>;
   /** Today's date in the event's time zone, `yyyy-mm-dd`. */
   today: string;
   /** The event's dates when it sells day passes; empty for a one-entry event. */
@@ -67,7 +70,7 @@ export function ScanPanel({
   const lastRead = useRef<{ code: string; at: number }>({ code: "", at: 0 });
 
   const [state, action, pending] = useActionState(
-    async (_prev: ScanActionResult | null, formData: FormData) => scanAction(eventId, formData),
+    async (_prev: ScanActionResult | null, formData: FormData) => scan(eventId, formData),
     null,
   );
 

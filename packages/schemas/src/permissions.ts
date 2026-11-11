@@ -34,10 +34,14 @@ export const TBOOK_PERMISSIONS = [
   "email:send",
   /** Manage bus routes, captain links and boarding. Falls back to booking:manage. */
   "bus:manage",
+  /** Bus captain: see the buses and mark passengers' boarding (no route editing). Falls back to bus:manage, booking:manage. */
+  "bus:board",
   /** See and manage an event's waitlist. Falls back to booking:manage. */
   "waitlist:manage",
   /** Create surveys, kiosk links, read feedback results. Falls back to event:write. */
   "feedback:manage",
+  /** Run the rating kiosk on a venue tablet while signed in. Falls back to feedback:manage, event:write. */
+  "feedback:kiosk",
 ] as const;
 
 export const permissionSchema = z.enum(TBOOK_PERMISSIONS);

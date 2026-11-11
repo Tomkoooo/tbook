@@ -126,7 +126,7 @@ export async function recountBusSeatsAction(eventId: string): Promise<BusActionR
 
 export async function setBoardingAdminAction(routeId: string, attendeeKey: string, leg: string, status: string | null): Promise<BusActionResult> {
   try {
-    const { organizationId, userId } = await requireOrgPermission("bus:manage");
+    const { organizationId, userId } = await requireOrgPermission("bus:board");
     const route = await busTransport.getRouteForOrg(organizationId, routeId);
     if (!(busTransport.busLegs as readonly string[]).includes(leg)) throw ActionError.validation("Unknown leg.");
     if (status !== null && !(busTransport.boardingStatuses as readonly string[]).includes(status)) throw ActionError.validation("Unknown status.");

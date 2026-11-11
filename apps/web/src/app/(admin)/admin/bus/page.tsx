@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
+import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
 import { BusEventPicker, BusRouteDialog, BusRouteRowActions, RecountSeatsButton } from "./bus-controls";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,9 @@ function toDateTimeLocal(date: Date | null): string {
 
 export default async function BusPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
   const { eventId: requested } = await searchParams;
-  const { organizationId } = await requireAdminPage("bus:manage");
+  // Captains (bus:board) see the list and open a bus to mark boarding; only bus:manage edits.
+  const { organizationId, permissions } = await requireAdminPage("bus:board");
+  const canManage = hasPermissionOrFallback(permissions, "bus:manage");
 
   const events = await listEventsForOrg(organizationId);
   const busEvents = [];
@@ -55,19 +58,23 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
         actions={
           <>
             {busEvents.length > 1 ? <BusEventPicker events={busEvents.map((e) => ({ id: String(e._id), name: e.name }))} value={eventId} /> : null}
-            <Button asChild variant="outline">
-              <Link href={`/admin/bus/export?eventId=${eventId}`} prefetch={false}>
-                <Download /> Export (xlsx)
-              </Link>
-            </Button>
-            <BusRouteDialog eventId={eventId} route={null} />
+            {canManage ? (
+              <>
+                <Button asChild variant="outline">
+                  <Link href={`/admin/bus/export?eventId=${eventId}`} prefetch={false}>
+                    <Download /> Export (xlsx)
+                  </Link>
+                </Button>
+                <BusRouteDialog eventId={eventId} route={null} />
+              </>
+            ) : null}
           </>
         }
       />
       <SectionCard
         title={`${event.name} — ${routes.length} buses`}
         description={`${totals.taken} of ${totals.seats} seats taken. Bulk-add buses from a spreadsheet on the Data page.`}
-        actions={<RecountSeatsButton eventId={eventId} />}
+        actions={canManage ? <RecountSeatsButton eventId={eventId} /> : undefined}
         flush
       >
         {routes.length === 0 ? (
@@ -126,24 +133,26 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
                       {back.boarded}/{back.booked}
                     </TableCell>
                     <TableCell className="text-right">
-                      <BusRouteRowActions
-                        eventId={eventId}
-                        hasLink={Boolean(route.captainTokenHash)}
-                        route={{
-                          id: routeId,
-                          code: route.code,
-                          city: route.city,
-                          pickupPoint: route.pickupPoint,
-                          departureAt: toDateTimeLocal(route.departureAt),
-                          returnInfo: route.returnInfo,
-                          capacity: route.capacity,
-                          captainName: route.captainName,
-                          captainPhone: route.captainPhone,
-                          notes: route.notes,
-                          active: route.active,
-                          sortOrder: route.sortOrder,
-                        }}
-                      />
+                      {canManage ? (
+                        <BusRouteRowActions
+                          eventId={eventId}
+                          hasLink={Boolean(route.captainTokenHash)}
+                          route={{
+                            id: routeId,
+                            code: route.code,
+                            city: route.city,
+                            pickupPoint: route.pickupPoint,
+                            departureAt: toDateTimeLocal(route.departureAt),
+                            returnInfo: route.returnInfo,
+                            capacity: route.capacity,
+                            captainName: route.captainName,
+                            captainPhone: route.captainPhone,
+                            notes: route.notes,
+                            active: route.active,
+                            sortOrder: route.sortOrder,
+                          }}
+                        />
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 );

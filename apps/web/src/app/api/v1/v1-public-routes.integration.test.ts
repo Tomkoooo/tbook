@@ -377,6 +377,41 @@ describe("v1 public API routes", () => {
       expect(cancelled).toMatchObject({ ok: true, cancelled: true });
     });
 
+    it("starts the form with the ID: the event detail names the field, /prefill fills the answers", async () => {
+      const { event, plaintextKey, eventId } = await freeEvent();
+      const { createDataList } = await import("@tbook/services");
+      const { list } = await createDataList(
+        String(event.organizationId),
+        { name: "Staff", keyColumn: "id", keyNormalization: "digits_only", columns: [{ key: "id", label: "id" }, { key: "Név", label: "Név" }] },
+        [{ id: "3001", Név: "Minta Márta" }],
+      );
+      await EventModel.updateOne(
+        { _id: event._id },
+        {
+          attendeeFieldSchema: [
+            { key: "employee_id", label: "Törzsszám", type: "text", required: true, unique: true, identifier: true, sortOrder: 0 },
+            { key: "name", label: "Név", type: "text", required: true, sortOrder: 1, prefillColumn: "Név" },
+          ],
+          eligibilityPreset: "form_rules",
+          eligibilityFormRules: { logic: "and", rules: [{ id: "r1", fieldKey: "employee_id", op: "in_list", value: String(list._id) }] },
+        },
+      );
+
+      const detail = await import("./events/[eventId]/route");
+      const got = await (await detail.GET(new Request(`https://tbook.example.com/api/v1/events/${eventId}`, { headers: { "X-TBook-Api-Key": plaintextKey } }), { params: Promise.resolve({ eventId }) })).json();
+      expect(got.registrationPrefill).toEqual({ fieldKey: "employee_id", label: "Törzsszám", helpText: "" });
+
+      const prefill = await import("./events/[eventId]/prefill/route");
+      const ctx = { params: Promise.resolve({ eventId }) };
+      const found = await (await prefill.POST(post(`events/${eventId}/prefill`, plaintextKey, { code: "3001" }), ctx)).json();
+      expect(found).toMatchObject({ ok: true, found: true, alreadyRegistered: false, fields: { employee_id: "3001", name: "Minta Márta" } });
+      const missing = await (await prefill.POST(post(`events/${eventId}/prefill`, plaintextKey, { code: "1" }), ctx)).json();
+      expect(missing).toMatchObject({ found: false, fields: {} });
+      expect((await prefill.POST(post(`events/${eventId}/prefill`, plaintextKey, {}), ctx)).status).toBe(400);
+      const { plaintextKey: otherKey } = await createGroup();
+      expect((await prefill.POST(post(`events/${eventId}/prefill`, otherKey, { code: "3001" }), ctx)).status).toBe(404);
+    });
+
     it("joins the waitlist only when full, and the event detail says so", async () => {
       const { plaintextKey, eventId } = await freeEvent({ capacity: 1 });
       const join = await import("./waitlist/join/route");

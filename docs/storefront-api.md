@@ -46,6 +46,7 @@ bookings: 20/min per client).
 | GET | `/checkout/vouchers?bookingId=&session_id=` | — | The guest's ticket PDF (rendered on demand) |
 | GET | `/checkout/invoice?bookingId=&session_id=` | — | The guest's invoice PDF (fetched from Számlázz.hu on demand; 502 if Számlázz.hu is unreachable) |
 | GET | `/directory` | none | Groups opted into the public tBook directory |
+| POST | `/events/{eventId}/prefill` | group | "Start with your ID": `{ code }` → `{ found, alreadyRegistered, fields }`, the answers to start the form with. See below |
 | POST | `/guest/lookup` | group | Guest self-service (module `guest-portal`): find a registration by `{ eventId, code }`, where `code` is the registration number or the identifying answer (e.g. employee ID). See below |
 | POST | `/guest/update` | group | `{ eventId, code, fields }`: change the guest's own answers |
 | POST | `/guest/cancel` | group | `{ eventId, code, reason? }`: cancel this guest (free registrations only) |
@@ -53,7 +54,25 @@ bookings: 20/min per client).
 | GET | `/surveys?eventId=` | group | Module `feedback`: the event's open surveys `{ surveys: [{ id, title, intro, questions, ratingMax }] }` |
 | POST | `/surveys/{surveyId}/responses` | group | `{ code \| token, answers: { questionId: value } }`: once per guest (409 `already_answered`), stored without identity |
 
-`GET /events/{eventId}` also returns `waitlistOpen` (added field): the event is full and takes waitlist entries.
+`GET /events/{eventId}` also returns these added fields:
+
+- `waitlistOpen`: the event is full and takes waitlist entries.
+- `registrationPrefill`: `{ fieldKey, label, helpText }` when the form starts with an ID lookup, otherwise `null`.
+
+### Start with the ID (prefill)
+
+When `registrationPrefill` is set, the form's first step asks only for that question (e.g. employee ID):
+
+1. Send it to `POST /events/{eventId}/prefill` with `{ "code": "12345" }`.
+2. Handle the response:
+   - `found: true`: show the whole form, filled with `fields`. Every answer stays editable, and the identifying answer is in `fields` too.
+   - `found: false`: the ID isn't on the list, so the guest can't continue (the registration rule would refuse it anyway).
+   - `alreadyRegistered: true`: no data comes back. Send the guest to self-service (`/guest/lookup`).
+3. Register with `POST /bookings` as usual. Every check runs again on the server.
+
+Organizers set this up in the form builder. They mark the ID question "Identifies the guest", put an "is in list" rule on it, and choose a "Prefill from data list column" for each other question. A list cell fills a dropdown only when it matches an option's value or label.
+
+This endpoint returns a person's details for an ID, so it allows 30 calls per client per minute. Have the site forward the guest's IP (`X-Forwarded-For`) so the limit applies per guest and not to the site as a whole.
 
 ### Guest self-service
 

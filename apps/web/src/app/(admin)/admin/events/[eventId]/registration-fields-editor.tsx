@@ -28,6 +28,8 @@ export interface FieldRow {
   unique: boolean;
   /** Identifies the guest (e.g. employee ID) — used to look a registration up. */
   identifier: boolean;
+  /** Data list column this answer is prefilled from after the ID lookup; "" = not prefilled. */
+  prefillColumn: string;
 }
 
 const TYPE_LABELS: Record<FieldRow["type"], string> = {
@@ -58,6 +60,7 @@ interface FieldDefLike {
   showWhen?: { fieldKey: string; values: string[] } | null;
   unique?: boolean;
   identifier?: boolean;
+  prefillColumn?: string | null;
 }
 
 let counter = 0;
@@ -87,6 +90,7 @@ export function fieldRowsFromDefs(defs: FieldDefLike[]): FieldRow[] {
     showWhenValues: (def.showWhen?.values ?? []).join(", "),
     unique: def.unique ?? false,
     identifier: def.identifier ?? false,
+    prefillColumn: def.prefillColumn ?? "",
   }));
 }
 
@@ -111,6 +115,7 @@ export function serializeFieldRows(rows: FieldRow[]): string {
           showWhen: row.showWhenKey && showWhenValues.length ? { fieldKey: row.showWhenKey, values: showWhenValues } : null,
           unique: row.unique,
           identifier: row.identifier,
+          prefillColumn: !row.identifier && row.prefillColumn.trim() ? row.prefillColumn.trim() : null,
         };
         if (row.type !== "select") return base;
         if (row.choicesSource) return { ...base, choices: [], choicesSource: row.choicesSource };
@@ -144,6 +149,7 @@ export function RegistrationFieldsEditor({
   onChange,
   keysLocked,
   choiceSources = [],
+  prefillColumns = [],
 }: {
   rows: FieldRow[];
   onChange: (rows: FieldRow[]) => void;
@@ -151,6 +157,8 @@ export function RegistrationFieldsEditor({
   keysLocked: Set<string>;
   /** Option lists provided by the modules switched on for this event. */
   choiceSources?: ChoiceSourceOption[];
+  /** Column names of the organization's data lists (suggestions for prefill). */
+  prefillColumns?: string[];
 }) {
   const [open, setOpen] = useState<string | null>(null);
 
@@ -163,7 +171,7 @@ export function RegistrationFieldsEditor({
     onChange(next);
   };
   const add = () => {
-    const row: FieldRow = { uid: nextUid(), key: "", label: "", type: "text", required: false, helpText: "", choicesText: "", choicesSource: "", showWhenKey: "", showWhenValues: "", unique: false, identifier: false };
+    const row: FieldRow = { uid: nextUid(), key: "", label: "", type: "text", required: false, helpText: "", choicesText: "", choicesSource: "", showWhenKey: "", showWhenValues: "", unique: false, identifier: false, prefillColumn: "" };
     onChange([...rows, row]);
     setOpen(row.uid);
   };
@@ -260,6 +268,26 @@ export function RegistrationFieldsEditor({
                   <FormField label="Help text" htmlFor={`${row.uid}-help`} hint="Shown under the question.">
                     <Input id={`${row.uid}-help`} value={row.helpText} onChange={(e) => patch(row.uid, { helpText: e.target.value })} />
                   </FormField>
+                  {!row.identifier ? (
+                    <FormField
+                      label="Prefill from data list column"
+                      htmlFor={`${row.uid}-prefill`}
+                      hint="The guest types their ID first; this answer is copied from that row of the list the ID is checked against (needs an “Identifies the guest” question with an “is in list” rule). They can still change it. Leave empty to ask normally."
+                    >
+                      <Input
+                        id={`${row.uid}-prefill`}
+                        value={row.prefillColumn}
+                        list={`${row.uid}-prefill-columns`}
+                        placeholder="e.g. Név"
+                        onChange={(e) => patch(row.uid, { prefillColumn: e.target.value })}
+                      />
+                      <datalist id={`${row.uid}-prefill-columns`}>
+                        {prefillColumns.map((column) => (
+                          <option key={column} value={column} />
+                        ))}
+                      </datalist>
+                    </FormField>
+                  ) : null}
                   <div className="flex flex-wrap items-end justify-between gap-4">
                     <div className="flex flex-wrap gap-4">
                       <CheckboxField label={row.type === "checkbox" ? "Must be ticked" : "Required"} checked={row.required} onCheckedChange={(required) => patch(row.uid, { required })} />

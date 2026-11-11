@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
+import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
 import { setBoardingAdminAction } from "../../bus-actions";
 import { PassengerList } from "../passenger-list";
 
@@ -14,7 +15,8 @@ export const dynamic = "force-dynamic";
 
 export default async function BusRoutePage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = await params;
-  const { organizationId } = await requireAdminPage("bus:manage");
+  const { organizationId, permissions } = await requireAdminPage("bus:board");
+  const canManage = hasPermissionOrFallback(permissions, "bus:manage");
   const route = await busTransport.getRouteForOrg(organizationId, routeId).catch((error) => {
     if (error instanceof ActionError) return null;
     throw error;
@@ -34,11 +36,13 @@ export default async function BusRoutePage({ params }: { params: Promise<{ route
         description={[route.pickupPoint, busTransport.formatDeparture(route.departureAt), route.captainName && `captain: ${route.captainName} ${route.captainPhone}`].filter(Boolean).join(" · ")}
         back={{ href: `/admin/bus?eventId=${String(route.eventId)}`, label: "Buses" }}
         actions={
-          <Button asChild variant="outline">
-            <Link href={`/admin/bus/export?eventId=${String(route.eventId)}&routeId=${routeId}`} prefetch={false}>
-              <Download /> Export (xlsx)
-            </Link>
-          </Button>
+          canManage ? (
+            <Button asChild variant="outline">
+              <Link href={`/admin/bus/export?eventId=${String(route.eventId)}&routeId=${routeId}`} prefetch={false}>
+                <Download /> Export (xlsx)
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
       <SectionCard title={`Passengers (${passengers.length} / ${route.capacity})`}>

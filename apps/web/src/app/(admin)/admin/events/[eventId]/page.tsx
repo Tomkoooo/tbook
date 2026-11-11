@@ -83,7 +83,9 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
     .choiceProviders()
     .filter((provider) => modules.isOn(provider.moduleKey))
     .map((provider) => ({ key: provider.key, label: provider.label }));
-  const dataLists = (await listDataListsForOrg(organizationId)).map((list) => ({ id: String(list._id), name: `${list.name} (${list.rowCount})` }));
+  const orgLists = await listDataListsForOrg(organizationId);
+  const dataLists = orgLists.map((list) => ({ id: String(list._id), name: `${list.name} (${list.rowCount})` }));
+  const prefillColumns = [...new Set(orgLists.flatMap((list) => list.columns.map((column) => column.key)))];
   const entitled = await resolveModules({ organizationId });
   const moduleRows = listModuleDefinitions()
     .filter((definition) => definition.scopes.includes("event") && entitled.isOn(definition.key))
@@ -109,6 +111,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
         soldGuestCount={event.soldGuestCount}
         choiceSources={choiceSources}
         dataLists={dataLists}
+        prefillColumns={prefillColumns}
         initial={{
           kind: event.kind ?? "standard",
           dayPass: event.dayPass
@@ -167,6 +170,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
               showWhen: field.showWhen ? { fieldKey: field.showWhen.fieldKey, values: [...field.showWhen.values] } : null,
               unique: field.unique ?? false,
               identifier: field.identifier ?? false,
+              prefillColumn: field.prefillColumn ?? null,
             })),
           attendeeFieldSchemaMode: event.attendeeFieldSchemaMode ?? "extend",
           eligibility: {

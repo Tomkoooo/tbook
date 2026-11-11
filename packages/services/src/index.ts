@@ -94,5 +94,6 @@ export * from "./data-list-service";
 export * from "./registration-pipeline";
 export * from "./spreadsheet-import";
 export * from "./registration-changes";
+export * from "./registration-prefill";
 export * from "./guest-tags";
 export * from "./event-report-service";

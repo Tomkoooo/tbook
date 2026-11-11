@@ -15,10 +15,13 @@ import {
 import {
   cancelBookingAttendee,
   createBookingWithCheckout,
+  createDataList,
   createMultiBookingWithCheckout,
   eventReport,
   exportEventRegistrationsXlsx,
   listImportTargets,
+  prefillRegistration,
+  registrationPrefillSetup,
   updateBookingDetails,
 } from "@tbook/services";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +31,18 @@ import { createRoute } from "./bus-transport/service";
 import { EmailDeliveryModel, EventEmailModel } from "./event-emails/model";
 import { createEventEmail, setEventEmailTransporter } from "./event-emails/service";
 import { SurveyModel, SurveyRespondentModel, SurveyResponseModel } from "./feedback/model";
-import { createSurvey, getKiosk, personalFeedbackUrl, rotateKioskToken, submitKiosk, submitSurvey, surveyResults } from "./feedback/service";
+import {
+  createSurvey,
+  getKiosk,
+  getKioskForOrg,
+  listOpenKiosks,
+  personalFeedbackUrl,
+  rotateKioskToken,
+  submitKiosk,
+  submitKioskForOrg,
+  submitSurvey,
+  surveyResults,
+} from "./feedback/service";
 import { cancelGuest, lookupGuest, updateGuest } from "./guest-portal/service";
 import { WaitlistEntryModel } from "./waitlist/model";
 import { acceptOffer, expireOffers, getOffer, joinWaitlist, listWaitlist, setWaitlistTransporter } from "./waitlist/service";
@@ -323,6 +337,65 @@ describe("guest features", () => {
     expect(results.questions[1]!.counts).toEqual([{ label: "Igen", count: 1 }, { label: "Nem", count: 0 }]);
     expect(results.questions[2]!.texts).toEqual(["Szuper volt"]);
     expect((await surveyResults(orgId, String(kiosk._id))).questions[0]!.average).toBe(4.5);
+  });
+
+  it("the form starts with the ID: answers come from the data list, editable, and a registered ID returns no data", async () => {
+    const { list } = await createDataList(
+      orgId,
+      { name: "Staff", keyColumn: "Dolgozó", keyNormalization: "digits_only", columns: ["Dolgozó", "Név", "E-mail", "Étrend"].map((key) => ({ key, label: key })) },
+      [
+        { Dolgozó: "2001", Név: "Minta Márta", "E-mail": "marta@example.com", Étrend: "Vegetáriánus" },
+        { Dolgozó: "2002", Név: "Próba Pál", "E-mail": "pal@example.com", Étrend: "ismeretlen" },
+      ],
+    );
+    const listId = String(list._id);
+    const prefilled = await makeEvent({
+      attendeeFieldSchema: [
+        { key: "employee_id", label: "Törzsszám", type: "text", required: true, unique: true, identifier: true, sortOrder: 0 },
+        { key: "name", label: "Név", type: "text", required: true, sortOrder: 1, prefillColumn: "Név" },
+        { key: "email", label: "E-mail", type: "email", required: false, sortOrder: 2, prefillColumn: "E-mail" },
+        { key: "diet", label: "Étkezés", type: "select", required: false, choices: [{ value: "normal", label: "Normál" }, { value: "veg", label: "Vegetáriánus" }], sortOrder: 3, prefillColumn: "Étrend" },
+      ],
+      eligibilityPreset: "form_rules",
+      eligibilityFormRules: { logic: "and", rules: [{ id: "r1", fieldKey: "employee_id", op: "in_list", value: listId, message: "Nincs a listán." }] },
+    });
+
+    const event = await EventModel.findById(prefilled);
+    expect(registrationPrefillSetup(event as never)).toMatchObject({ fieldKey: "employee_id", listId, columns: { name: "Név", email: "E-mail", diet: "Étrend" } });
+
+    expect(await prefillRegistration(prefilled, " 2001 ")).toEqual({
+      found: true,
+      alreadyRegistered: false,
+      fields: { employee_id: "2001", name: "Minta Márta", email: "marta@example.com", diet: "veg" },
+    });
+    // A cell that matches no dropdown option is left for the guest to answer.
+    expect((await prefillRegistration(prefilled, "2002")).fields).toEqual({ employee_id: "2002", name: "Próba Pál", email: "pal@example.com" });
+    expect(await prefillRegistration(prefilled, "9999")).toEqual({ found: false, alreadyRegistered: false, fields: {} });
+
+    // The guest changes a prefilled answer; the normal checks still apply.
+    await createBookingWithCheckout({ eventId: prefilled, guests: 1, customer, attendees: [{ fields: { employee_id: "2001", name: "Minta Márta Anna", email: "marta@example.com" } }] }, { groupId });
+    expect(await prefillRegistration(prefilled, "2001")).toEqual({ found: true, alreadyRegistered: true, fields: { employee_id: "2001" } });
+
+    // Without prefill columns the event has no ID-first step.
+    expect(registrationPrefillSetup((await EventModel.findById(eventId)) as never)).toBeNull();
+    await expect(prefillRegistration(eventId, "2001")).rejects.toThrow(/ID lookup/);
+  });
+
+  it("a signed-in kiosk member answers the org's open kiosks, stored like kiosk-link taps", async () => {
+    const kiosk = await createSurvey(orgId, eventId, { kind: "kiosk", title: "Jósda", questions: [{ type: "rating", label: "Milyen volt?", required: true }] });
+    await createSurvey(orgId, eventId, { kind: "survey", title: "Kérdőív", questions: [{ type: "rating", label: "Összességében", required: true }] });
+    const id = String(kiosk._id);
+
+    expect((await listOpenKiosks(orgId)).map((k) => k.title)).toEqual(["Jósda"]);
+    expect((await getKioskForOrg(orgId, id))?.title).toBe("Jósda");
+    expect(await getKioskForOrg("000000000000000000000000", id)).toBeNull();
+
+    await submitKioskForOrg(orgId, id, { [kiosk.questions[0]!.id]: 5 });
+    await expect(submitKioskForOrg("000000000000000000000000", id, { [kiosk.questions[0]!.id]: 5 })).rejects.toThrow(/isn't active/);
+    expect(await SurveyResponseModel.countDocuments({ surveyId: kiosk._id, source: "kiosk" })).toBe(1);
+
+    await SurveyModel.updateOne({ _id: kiosk._id }, { active: false });
+    expect(await listOpenKiosks(orgId)).toEqual([]);
   });
 
   it("multi-event free registration confirms every booking without Stripe", async () => {

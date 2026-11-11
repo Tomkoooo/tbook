@@ -58,8 +58,10 @@ export const PERMISSION_GROUPS: Array<{ label: string; permissions: Array<{ key:
       { key: "list:manage", label: "Import spreadsheets, manage data lists" },
       { key: "email:send", label: "Send event emails" },
       { key: "bus:manage", label: "Manage buses, captain links and boarding" },
+      { key: "bus:board", label: "Bus captain: see buses, mark boarding" },
       { key: "waitlist:manage", label: "Manage the waitlist" },
       { key: "feedback:manage", label: "Surveys, kiosk ratings and their results" },
+      { key: "feedback:kiosk", label: "Run the rating kiosk on a tablet" },
     ],
   },
 ];

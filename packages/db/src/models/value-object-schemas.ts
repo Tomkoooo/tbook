@@ -67,6 +67,7 @@ export const attendeeFieldDefSchema = new Schema(
     unique: { type: Boolean },
     identifier: { type: Boolean },
     choicesSource: { type: String },
+    prefillColumn: { type: String },
   },
   { _id: false },
 );

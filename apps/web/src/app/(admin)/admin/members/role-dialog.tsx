@@ -13,8 +13,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { CheckboxField, FormField, ResultNotice } from "@/components/form-bits";
+import { CheckboxField, FormField, NativeSelect, ResultNotice } from "@/components/form-bits";
 import { PERMISSION_GROUPS } from "@/lib/permission-labels";
+import { ROLE_TEMPLATES } from "@/lib/role-templates";
 import { deleteRoleAction, saveRoleAction, type SettingsActionResult } from "../settings-actions";
 
 interface RoleValues {
@@ -28,6 +29,23 @@ interface RoleValues {
 /** Create (role = null) or edit a role: name, description and grouped permission checkboxes. */
 export function RoleDialog({ role }: { role: RoleValues | null }) {
   const [open, setOpen] = useState(false);
+  const [name, setName] = useState(role?.name ?? "");
+  const [description, setDescription] = useState(role?.description ?? "");
+  const [granted, setGranted] = useState<Set<string>>(new Set(role?.permissions ?? []));
+  const applyTemplate = (key: string) => {
+    const template = ROLE_TEMPLATES.find((t) => t.key === key);
+    if (!template) return;
+    if (!role?.isBuiltIn) setName(template.name);
+    setDescription(template.description);
+    setGranted(new Set(template.permissions));
+  };
+  const toggle = (permission: string, on: boolean) =>
+    setGranted((current) => {
+      const next = new Set(current);
+      if (on) next.add(permission);
+      else next.delete(permission);
+      return next;
+    });
   const [state, action, pending] = useActionState(async (_prev: SettingsActionResult | null, formData: FormData) => {
     const result = await saveRoleAction(role?.id ?? null, formData);
     if (result.ok) setOpen(false);
@@ -53,12 +71,24 @@ export function RoleDialog({ role }: { role: RoleValues | null }) {
           <DialogDescription>Members with this role get exactly the permissions ticked below.</DialogDescription>
         </DialogHeader>
         <form action={action} className="grid gap-4">
+          {role?.isBuiltIn ? null : (
+            <FormField label="Start from a template" htmlFor="role-template" hint="Fills in the name and the permissions for a typical job. You can change everything afterwards.">
+              <NativeSelect id="role-template" defaultValue="" onChange={(e) => applyTemplate(e.target.value)}>
+                <option value="">—</option>
+                {ROLE_TEMPLATES.map((template) => (
+                  <option key={template.key} value={template.key}>
+                    {template.name} — {template.description}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FormField>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="Name" htmlFor="role-name" hint={role?.isBuiltIn ? "Built-in role names can't be changed." : undefined}>
-              <Input id="role-name" name="name" defaultValue={role?.name ?? ""} readOnly={role?.isBuiltIn} required placeholder="Door staff" />
+              <Input id="role-name" name="name" value={name} onChange={(e) => setName(e.target.value)} readOnly={role?.isBuiltIn} required placeholder="Door staff" />
             </FormField>
             <FormField label="Description" htmlFor="role-description">
-              <Input id="role-description" name="description" defaultValue={role?.description ?? ""} placeholder="Scans tickets at the entrance" />
+              <Input id="role-description" name="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scans tickets at the entrance" />
             </FormField>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -71,7 +101,8 @@ export function RoleDialog({ role }: { role: RoleValues | null }) {
                     name="permissions"
                     value={permission.key}
                     label={permission.label}
-                    defaultChecked={role?.permissions.includes(permission.key) ?? false}
+                    checked={granted.has(permission.key)}
+                    onCheckedChange={(on) => toggle(permission.key, on)}
                   />
                 ))}
               </fieldset>

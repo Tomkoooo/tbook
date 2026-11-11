@@ -88,6 +88,13 @@ export const attendeeFieldDefSchema = z.object({
    * `choices` (e.g. "bus-transport:routes"). Null = static choices.
    */
   choicesSource: z.string().max(100).nullable().optional(),
+  /**
+   * Prefill: when the guest starts with their identifying answer (e.g.
+   * employee ID), this answer is copied from that column of the data list
+   * the identifying field is checked against (`in_list` rule). The guest may
+   * still change it. Null = not prefilled.
+   */
+  prefillColumn: z.string().max(200).nullable().optional(),
 });
 export type AttendeeFieldDef = z.infer<typeof attendeeFieldDefSchema>;
 

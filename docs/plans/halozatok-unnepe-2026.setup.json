@@ -50,16 +50,24 @@
     "tdartsTournamentCode": null,
     "attendeeFieldSchemaMode": "replace",
     "attendeeFieldSchema": [
-      { "key": "nev", "label": "Teljes név", "type": "text", "required": true, "helpText": "", "sortOrder": 0 },
       {
         "key": "torzsszam",
         "label": "Törzsszám",
         "type": "text",
         "required": true,
-        "helpText": "A dolgozói törzsszámod — ezzel ellenőrizzük a jogosultságot.",
-        "sortOrder": 1,
+        "helpText": "Add meg a dolgozói törzsszámod — ez alapján kitöltjük az adataidat, amiket utána módosíthatsz.",
+        "sortOrder": 0,
         "unique": true,
         "identifier": true
+      },
+      {
+        "key": "nev",
+        "label": "Teljes név",
+        "type": "text",
+        "required": true,
+        "helpText": "",
+        "sortOrder": 1,
+        "prefillColumn": "Név"
       },
       {
         "key": "munkaltato",
@@ -73,7 +81,8 @@
           { "value": "EHEL", "label": "MVM ÉMÁSZ Áramhálózati" },
           { "value": "EGDG", "label": "MVM Égáz-Dégáz Zrt." },
           { "value": "FGEL", "label": "MVM Főgáz Kft." }
-        ]
+        ],
+        "prefillColumn": "Vállalat"
       },
       {
         "key": "email",
@@ -81,9 +90,17 @@
         "type": "email",
         "required": true,
         "helpText": "Ide küldjük a visszaigazolást és a QR-kódot. Csoportos regisztrációnál lehet mindenkinél ugyanaz.",
-        "sortOrder": 3
+        "sortOrder": 3,
+        "prefillColumn": "E-mail cím"
       },
-      { "key": "telefon", "label": "Telefonszám", "type": "phone", "required": true, "helpText": "", "sortOrder": 4 },
+      {
+        "key": "telefon",
+        "label": "Telefonszám",
+        "type": "phone",
+        "required": true,
+        "helpText": "",
+        "sortOrder": 4
+      },
       {
         "key": "transzfer",
         "label": "Kérsz buszos transzfert?",
@@ -91,10 +108,7 @@
         "required": true,
         "helpText": "",
         "sortOrder": 5,
-        "choices": [
-          { "value": "igen", "label": "Igen" },
-          { "value": "nem", "label": "Nem" }
-        ]
+        "choices": [{"value": "igen", "label": "Igen"}, {"value": "nem", "label": "Nem"}]
       },
       {
         "key": "busz",
@@ -114,10 +128,7 @@
         "required": true,
         "helpText": "",
         "sortOrder": 7,
-        "choices": [
-          { "value": "igen", "label": "Igen" },
-          { "value": "nem", "label": "Nem" }
-        ]
+        "choices": [{"value": "igen", "label": "Igen"}, {"value": "nem", "label": "Nem"}]
       },
       {
         "key": "etkezesi_igeny",
@@ -155,7 +166,10 @@
   "eventModules": {
     "free-registration": { "enabled": true },
     "bus-transport": { "enabled": true },
-    "event-emails": { "enabled": true, "config": { "siteUrl": "", "surveyUrl": "", "galleryUrl": "", "nameOrder": "family_first" } }
+    "event-emails": {
+      "enabled": true,
+      "config": { "siteUrl": "", "surveyUrl": "", "galleryUrl": "", "nameOrder": "family_first" }
+    }
   },
   "emails": [
     {
@@ -199,7 +213,7 @@
       "audience": "registered",
       "conditions": {
         "logic": "and",
-        "rules": [{ "id": "c1", "fieldKey": "transzfer", "op": "equals", "value": "igen", "message": "" }]
+        "rules": [{"id": "c1", "fieldKey": "transzfer", "op": "equals", "value": "igen", "message": ""}]
       },
       "attachTicket": false,
       "active": true,

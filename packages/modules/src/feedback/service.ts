@@ -314,3 +314,35 @@ export async function exportSurveyXlsx(organizationId: string, surveyId: string)
   const safe = survey.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "survey";
   return { fileName: `${safe}.xlsx`, buffer: Buffer.from(await workbook.xlsx.writeBuffer()) };
 }
+
+// ---- Kiosk for signed-in staff ---------------------------------------------------------
+
+/** The organization's kiosks that are open right now (active, module on), for staff with feedback:kiosk. */
+export async function listOpenKiosks(organizationId: string): Promise<PublicSurvey[]> {
+  const surveys = await SurveyModel.find({ organizationId, kind: "kiosk", active: true }).sort({ createdAt: 1 }).exec();
+  const open: PublicSurvey[] = [];
+  for (const survey of surveys) {
+    const hit = await openSurvey(survey);
+    if (hit) open.push(toPublic(hit.survey, hit.event));
+  }
+  return open;
+}
+
+async function openKioskForOrg(organizationId: string, surveyId: string) {
+  if (!/^[a-f0-9]{24}$/i.test(surveyId)) return null;
+  const survey = await SurveyModel.findOne({ _id: surveyId, organizationId, kind: "kiosk" }).exec();
+  return openSurvey(survey);
+}
+
+/** One open kiosk of the organization, or null. */
+export async function getKioskForOrg(organizationId: string, surveyId: string): Promise<PublicSurvey | null> {
+  const open = await openKioskForOrg(organizationId, surveyId);
+  return open ? toPublic(open.survey, open.event) : null;
+}
+
+/** A tap on a kiosk run by a signed-in member: stored exactly like a kiosk-link answer. */
+export async function submitKioskForOrg(organizationId: string, surveyId: string, raw: Record<string, unknown>): Promise<void> {
+  const open = await openKioskForOrg(organizationId, surveyId);
+  if (!open) throw ActionError.notFound("This kiosk isn't active.");
+  await record(open.survey, cleanAnswers(open.survey, raw), "kiosk");
+}
