@@ -45,6 +45,8 @@ function toPageInput(voucher: IVoucher, booking: IBooking): VoucherPdfPageInput 
 export interface RenderVoucherPdfOptions {
   /** Test seam — see buildVoucherPdf's loadFont param. Defaults to the vendored local font. */
   loadFont?: () => Promise<Uint8Array>;
+  /** Only these attendees' tickets (by attendee index); default every ticket of the booking. */
+  attendeeIndexes?: number[];
 }
 
 export interface RenderedVoucherPdf {
@@ -57,7 +59,8 @@ export interface RenderedVoucherPdf {
  * Returns null if the booking has no vouchers yet.
  */
 export async function renderVoucherPdfForBooking(bookingId: string, opts: RenderVoucherPdfOptions = {}): Promise<RenderedVoucherPdf | null> {
-  const [booking, vouchers] = await Promise.all([bookingRepository.findById(bookingId), voucherRepository.findByBookingId(bookingId)]);
+  const [booking, allVouchers] = await Promise.all([bookingRepository.findById(bookingId), voucherRepository.findByBookingId(bookingId)]);
+  const vouchers = opts.attendeeIndexes ? allVouchers.filter((v) => opts.attendeeIndexes!.includes(v.attendeeIndex)) : allVouchers;
   if (!booking || vouchers.length === 0) return null;
 
   const organizationId = booking.organizationId ? String(booking.organizationId) : null;

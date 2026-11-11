@@ -23,6 +23,7 @@ const EventGroupSchema = new Schema<IEventGroup>(
     listingImage: { type: String, default: "" },
     defaultHeroImage: { type: String, default: "" },
     voucherHeaderImage: { type: String, default: "" },
+    modules: { type: Schema.Types.Mixed, default: {} },
     apiKeyHash: { type: String, required: true, index: true },
     apiKeyHint: { type: String, required: true },
     apiKeyCreatedAt: { type: Date, required: true },

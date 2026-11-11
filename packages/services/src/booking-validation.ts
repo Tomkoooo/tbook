@@ -1,3 +1,4 @@
+import { isCheckboxChecked, isFieldVisible } from "@tbook/domain";
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
 
 /**
@@ -177,10 +178,13 @@ export interface AttendeeValidationIssue {
 }
 
 function validateFieldValue(field: AttendeeFieldDef, raw: AttendeeFieldValue | undefined): AttendeeIssueReason | null {
+  // A required checkbox (consent) must be ticked; an unticked optional one is fine.
+  if (field.type === "checkbox") return field.required && !isCheckboxChecked(raw) ? "field_required" : null;
   if (raw == null || raw === "") return field.required ? "field_required" : null;
 
   switch (field.type) {
     case "text":
+    case "textarea":
       return typeof raw === "string" && raw.trim() ? null : "field_invalid";
     case "email":
       return typeof raw === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim()) ? null : "field_invalid";
@@ -229,6 +233,8 @@ export function validateAttendees(
 
   rows.forEach((attendee, index) => {
     for (const field of normalized) {
+      // A conditional field that isn't shown is neither required nor checked.
+      if (!isFieldVisible(field, attendee.fields ?? {})) continue;
       const reason = validateFieldValue(field, attendee.fields?.[field.key]);
       if (reason) issues.push({ index, fieldKey: field.key, reason });
     }
@@ -251,6 +257,7 @@ export function validateAttendees(
 
     members.forEach((member, memberIndex) => {
       for (const field of memberSchema) {
+        if (!isFieldVisible(field, member.fields ?? {})) continue;
         const reason = validateFieldValue(field, member.fields?.[field.key]);
         if (reason) issues.push({ index, fieldKey: field.key, memberIndex, reason });
       }
@@ -268,18 +275,31 @@ export function normalizeAttendeePayload(schema: AttendeeFieldDef[], attendees: 
   const normalizeFields = (fieldDefs: AttendeeFieldDef[], rawFields: Record<string, AttendeeFieldValue> | undefined) => {
     const fields: Record<string, AttendeeFieldValue> = {};
     for (const field of fieldDefs) {
+      // Hidden conditional answers aren't stored (a city left over from
+      // ticking "bus" and then unticking it must not book a seat).
+      if (!isFieldVisible(field, rawFields ?? {})) continue;
       const raw = rawFields?.[field.key];
+      if (field.type === "checkbox") {
+        if (isCheckboxChecked(raw)) fields[field.key] = "true";
+        continue;
+      }
       if (raw == null || raw === "") continue;
       fields[field.key] = field.type === "number" ? (typeof raw === "number" ? raw : Number(raw)) : String(raw).trim();
     }
     return fields;
   };
 
+  // Keep the stable id and registration number when re-normalising an existing attendee (an edit).
+  const keepIdentity = (attendee: BookingAttendee) => ({
+    ...(attendee.id ? { id: attendee.id } : {}),
+    ...(attendee.registrationNumber ? { registrationNumber: attendee.registrationNumber } : {}),
+  });
+
   return (attendees ?? []).map((attendee) => {
     const fields = normalizeFields(normalized, attendee.fields);
-    if (normalizedMembers.length === 0) return { fields };
+    if (normalizedMembers.length === 0) return { ...keepIdentity(attendee), fields };
     const members = (attendee.members ?? []).map((member) => ({ fields: normalizeFields(normalizedMembers, member.fields) }));
-    return { fields, members };
+    return { ...keepIdentity(attendee), fields, members };
   });
 }
 

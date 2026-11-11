@@ -1,9 +1,11 @@
 import { Types } from "mongoose";
 import Stripe from "stripe";
 import { ActionError } from "@tbook/actions";
-import { bookingRepository, organizationRepository, voucherRepository, type IBooking } from "@tbook/db";
-import { assertValidBookingStatusTransition, createPendingBooking, expireBooking, type CreateBookingInput } from "./booking-service";
+import { bookingRepository, eventRepository, organizationRepository, voucherRepository, type IBooking } from "@tbook/db";
+import { assertValidBookingStatusTransition, createPendingBooking, expireBooking, type BookingPolicyOverrides, type CreateBookingInput } from "./booking-service";
 import { createPendingMultiBookings, releaseMultiBookings, type CreateMultiBookingInput } from "./multi-booking-service";
+import { extensions } from "./extensions";
+import { resolveModules } from "./module-registry";
 import { decryptOrgSecret } from "./org-secrets";
 import { issueVoucherRowsForBooking } from "./voucher-service";
 
@@ -100,9 +102,17 @@ export interface CreateBookingWithCheckoutInput extends CreateBookingInput {
 export interface CheckoutResult {
   bookingId: string;
   totalHuf: number;
+  /**
+   * Where to send the guest next: Stripe's checkout, or — for a booking
+   * confirmed without payment (free registration) — straight to the
+   * storefront's success page, so an unchanged storefront still works.
+   */
   checkoutUrl: string | null;
   stripeSessionId: string;
   expiresAt: string;
+  /** Added fields (v1 additions, never renamed): set when no payment step was needed. */
+  status?: "confirmed";
+  registrationNumber?: string | null;
 }
 
 export interface MultiCheckoutResult extends CheckoutResult {
@@ -182,8 +192,26 @@ async function openStripeCheckout(
  * already atomic against capacity), then open a Stripe Checkout Session.
  * Secrets never leave the server.
  */
-export async function createBookingWithCheckout(input: CreateBookingWithCheckoutInput, opts?: { groupId?: string; returnBaseUrl?: string }): Promise<CheckoutResult> {
-  const booking = await createPendingBooking(input, { groupId: opts?.groupId });
+export async function createBookingWithCheckout(
+  input: CreateBookingWithCheckoutInput,
+  opts?: { groupId?: string; returnBaseUrl?: string } & BookingPolicyOverrides,
+): Promise<CheckoutResult> {
+  const { returnBaseUrl: _returnBaseUrl, ...policy } = opts ?? {};
+  const booking = await createPendingBooking(input, policy);
+
+  if (await bookingBypassesCheckout(booking)) {
+    const confirmed = await confirmBookingWithoutPayment(String(booking._id));
+    const storefrontBase = (booking.checkoutReturnBaseUrl?.trim() || opts?.returnBaseUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+    return {
+      bookingId: String(booking._id),
+      totalHuf: 0,
+      checkoutUrl: `${storefrontBase}${CHECKOUT_SUCCESS_PATH}?bookingId=${String(booking._id)}&return_to=${encodeURIComponent(storefrontBase)}`,
+      stripeSessionId: "",
+      expiresAt: new Date().toISOString(),
+      status: "confirmed",
+      registrationNumber: confirmed.registrationNumber ?? null,
+    };
+  }
 
   let session: Awaited<ReturnType<typeof openStripeCheckout>>;
   try {
@@ -210,7 +238,30 @@ export async function createBookingWithCheckout(input: CreateBookingWithCheckout
  * capacity is released.
  */
 export async function createMultiBookingWithCheckout(input: CreateMultiBookingInput, opts?: { groupId?: string; returnBaseUrl?: string }): Promise<MultiCheckoutResult> {
-  const { bookings, checkoutBundleId } = await createPendingMultiBookings(input, { groupId: opts?.groupId });
+  const { bookings: allBookings, checkoutBundleId } = await createPendingMultiBookings(input, { groupId: opts?.groupId });
+
+  // Free registrations in the bundle are confirmed at once; only the rest
+  // (if any) go to payment.
+  const free: IBooking[] = [];
+  const bookings: IBooking[] = [];
+  for (const booking of allBookings) (await bookingBypassesCheckout(booking) ? free : bookings).push(booking);
+  for (const booking of free) await confirmBookingWithoutPayment(String(booking._id));
+
+  if (bookings.length === 0) {
+    const primary = allBookings[0]!;
+    const storefrontBase = (primary.checkoutReturnBaseUrl?.trim() || input.returnBaseUrl?.trim() || opts?.returnBaseUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+    return {
+      bookingId: String(primary._id),
+      bookingIds: allBookings.map((b) => String(b._id)),
+      checkoutBundleId,
+      totalHuf: 0,
+      checkoutUrl: `${storefrontBase}${CHECKOUT_SUCCESS_PATH}?bookingId=${String(primary._id)}&return_to=${encodeURIComponent(storefrontBase)}`,
+      stripeSessionId: "",
+      expiresAt: new Date().toISOString(),
+      status: "confirmed",
+      registrationNumber: (await bookingRepository.findById(String(primary._id)))?.registrationNumber ?? null,
+    };
+  }
 
   let session: Awaited<ReturnType<typeof openStripeCheckout>>;
   try {
@@ -222,7 +273,7 @@ export async function createMultiBookingWithCheckout(input: CreateMultiBookingIn
 
   return {
     bookingId: String(bookings[0]!._id),
-    bookingIds: bookings.map((b) => String(b._id)),
+    bookingIds: allBookings.map((b) => String(b._id)),
     checkoutBundleId,
     totalHuf: bookings.reduce((sum, b) => sum + b.totalHuf, 0),
     checkoutUrl: session.url,
@@ -241,6 +292,48 @@ export async function createMultiBookingWithCheckout(input: CreateMultiBookingIn
  * `.catch(console.error)` pattern for invoice issuance / tDarts sync).
  */
 export const AFTER_BOOKING_PAID_HOOKS: Array<(booking: IBooking) => Promise<void>> = [];
+
+/**
+ * True when a module says this booking needs no payment step (e.g. the
+ * free-registration module for a zero-total booking). Only zero-total
+ * bookings are ever eligible, whatever a module answers.
+ */
+export async function bookingBypassesCheckout(booking: IBooking): Promise<boolean> {
+  if (booking.totalHuf > 0) return false;
+  const bypasses = extensions.checkoutBypasses();
+  if (bypasses.length === 0) return false;
+  const eventDoc = await eventRepository.findById(String(booking.eventId));
+  if (!eventDoc) return false;
+  const organizationId = booking.organizationId ? String(booking.organizationId) : null;
+  const groupId = booking.groupId ? String(booking.groupId) : null;
+  const modules = await resolveModules({ organizationId, groupId, event: eventDoc });
+  for (const bypass of bypasses) {
+    if (await bypass(booking, { event: eventDoc, organizationId, groupId, modules })) return true;
+  }
+  return false;
+}
+
+/**
+ * Confirms a zero-total booking with no payment step: it becomes
+ * `confirmed` (recorded as a comp), and every after-payment step runs —
+ * vouchers, the confirmation email, module hooks.
+ */
+export async function confirmBookingWithoutPayment(bookingId: string): Promise<IBooking> {
+  const booking = await bookingRepository.findById(bookingId);
+  if (!booking) throw ActionError.notFound("Booking not found.");
+  if (booking.totalHuf > 0) throw ActionError.validation("Only a free booking can be confirmed without payment.");
+  if (booking.status === "confirmed") return booking;
+  if (booking.status !== "pending") throw ActionError.validation(`A ${booking.status} booking can't be confirmed.`);
+  const updated = await bookingRepository.updateById(bookingId, {
+    status: "confirmed",
+    paymentMethod: "comp",
+    paidAt: new Date(),
+    expiresAt: null,
+    invoiceStatus: "none",
+  });
+  await afterBookingPaid(updated!);
+  return updated!;
+}
 
 /**
  * Runs every after-payment side effect: voucher rows, PDF + email,
@@ -262,6 +355,15 @@ export async function afterBookingPaid(booking: IBooking): Promise<void> {
       await hook(booking);
     } catch (error) {
       console.error("[tbook] afterBookingPaid hook failed", String(booking._id), error);
+    }
+  }
+  // Module hooks run last, once vouchers (and their QR tokens) exist.
+  const fresh = (await bookingRepository.findById(String(booking._id))) ?? booking;
+  for (const hook of extensions.bookingConfirmedHooks()) {
+    try {
+      await hook(fresh);
+    } catch (error) {
+      console.error("[tbook] booking confirmed hook failed", String(booking._id), error);
     }
   }
 }

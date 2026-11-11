@@ -133,6 +133,7 @@ const OrganizationSchema = new Schema<IOrganization>(
       },
       webhooks: { type: [WebhookSchema], default: undefined },
     },
+    modules: { type: Schema.Types.Mixed, default: {} },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },

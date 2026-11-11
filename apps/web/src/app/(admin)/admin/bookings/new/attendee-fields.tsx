@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { AttendeeFieldDef } from "@tbook/schemas";
 import { Input } from "@/components/ui/input";
-import { FormField, NativeSelect } from "@/components/form-bits";
+import { Textarea } from "@/components/ui/textarea";
+import { CheckboxField, FormField, NativeSelect } from "@/components/form-bits";
 
 /**
  * Renders one entry's fields, plus its roster when the event is a team /
@@ -100,13 +101,28 @@ export function AttendeeField({
   field: AttendeeFieldDef;
   defaultValue?: string;
 }) {
-  const common = { id: name, name, required: field.required, defaultValue };
+  // A conditional question is checked on the server (it only applies when
+  // its condition holds), so the browser mustn't insist on it.
+  const label = field.showWhen ? `${field.label} (if applicable)` : field.label;
+  const common = { id: name, name, required: field.required && !field.showWhen, defaultValue };
+
+  if (field.type === "checkbox") {
+    return <CheckboxField name={name} value="true" label={field.label} defaultChecked={defaultValue === "true" || defaultValue === "on"} />;
+  }
+
+  if (field.type === "textarea") {
+    return (
+      <FormField label={label} htmlFor={name}>
+        <Textarea {...common} rows={2} />
+      </FormField>
+    );
+  }
 
   if (field.type === "select") {
     return (
-      <FormField label={field.label} htmlFor={name}>
+      <FormField label={label} htmlFor={name}>
         <NativeSelect {...common}>
-          {field.required ? null : <option value="">—</option>}
+          {field.required && !field.showWhen ? null : <option value="">—</option>}
           {/* The schema calls them `choices`, each already {value,label}. */}
           {(field.choices ?? []).map((choice) => (
             <option key={choice.value} value={choice.value}>
@@ -122,7 +138,7 @@ export function AttendeeField({
     field.type === "email" ? "email" : field.type === "number" ? "number" : field.type === "date" ? "date" : "text";
 
   return (
-    <FormField label={field.label} htmlFor={name}>
+    <FormField label={label} htmlFor={name}>
       <Input {...common} type={inputType} autoComplete="off" />
     </FormField>
   );

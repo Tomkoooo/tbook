@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { entityStatusSchema, objectIdSchema, priceBasisSchema, vatPercentSchema } from "./common";
+import { modulesMapSchema } from "./modules";
 import { attendeeFieldDefSchema } from "./value-objects";
 
 /** Ported from the legacy plugin's models/TBookEvent.ts. */
@@ -178,6 +179,8 @@ export const eventSchema = z.object({
   publicListing: publicListingSchema.default("listed"),
   tdarts: eventTDartsLinkSchema.default({ enabled: false, tournamentCode: null }),
   publicEntryList: z.boolean().default(false),
+  /** Feature modules switched on for this event (inside the org entitlement; overrides the group). */
+  modules: modulesMapSchema.default({}),
   status: entityStatusSchema.default("draft"),
   sortOrder: z.number().default(0),
   createdAt: z.date(),

@@ -60,6 +60,13 @@ export const attendeeFieldDefSchema = new Schema(
     min: { type: Number },
     max: { type: Number },
     sortOrder: { type: Number, default: 0 },
+    showWhen: {
+      type: new Schema({ fieldKey: { type: String, required: true }, values: { type: [String], default: [] } }, { _id: false }),
+      default: undefined,
+    },
+    unique: { type: Boolean },
+    identifier: { type: Boolean },
+    choicesSource: { type: String },
   },
   { _id: false },
 );
@@ -73,8 +80,11 @@ export const bookingTeamMemberSchema = new Schema(
 
 export const bookingAttendeeSchema = new Schema(
   {
+    id: { type: String },
+    registrationNumber: { type: String },
     fields: { type: Schema.Types.Mixed, default: {} },
     members: { type: [bookingTeamMemberSchema], default: undefined },
+    tags: { type: [String], default: undefined },
   },
   { _id: false },
 );

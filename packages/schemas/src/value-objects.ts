@@ -46,7 +46,11 @@ export const optionDefSchema = z.object({
 });
 export type OptionDef = z.infer<typeof optionDefSchema>;
 
-export const attendeeFieldTypes = ["text", "email", "phone", "number", "date", "select"] as const;
+/**
+ * `checkbox` stores "true" when ticked (a required checkbox must be ticked —
+ * a consent box). `textarea` is free text shown as a multi-line input.
+ */
+export const attendeeFieldTypes = ["text", "email", "phone", "number", "date", "select", "checkbox", "textarea"] as const;
 export const attendeeFieldTypeSchema = z.enum(attendeeFieldTypes);
 export type AttendeeFieldType = z.infer<typeof attendeeFieldTypeSchema>;
 
@@ -55,6 +59,13 @@ export const attendeeFieldChoiceSchema = z.object({
   label: z.string(),
 });
 export type AttendeeFieldChoice = z.infer<typeof attendeeFieldChoiceSchema>;
+
+/** Show a field only when another field has one of these values (same shape as an option's `dependsOn`). */
+export const attendeeFieldShowWhenSchema = z.object({
+  fieldKey: z.string().min(1),
+  values: z.array(z.string()).default([]),
+});
+export type AttendeeFieldShowWhen = z.infer<typeof attendeeFieldShowWhenSchema>;
 
 export const attendeeFieldDefSchema = z.object({
   key: z.string(),
@@ -66,6 +77,17 @@ export const attendeeFieldDefSchema = z.object({
   min: z.number().optional(),
   max: z.number().optional(),
   sortOrder: z.number().default(0),
+  /** Hidden (not asked, not required, not stored) unless the condition holds. */
+  showWhen: attendeeFieldShowWhenSchema.nullable().optional(),
+  /** One active registration per value within the event (e.g. an employee ID). */
+  unique: z.boolean().optional(),
+  /** Guests and staff can find a registration by this value (door search, guest lookup). */
+  identifier: z.boolean().optional(),
+  /**
+   * A select whose choices come from a module at request time instead of
+   * `choices` (e.g. "bus-transport:routes"). Null = static choices.
+   */
+  choicesSource: z.string().max(100).nullable().optional(),
 });
 export type AttendeeFieldDef = z.infer<typeof attendeeFieldDefSchema>;
 
@@ -78,7 +100,13 @@ export const bookingTeamMemberSchema = z.object({
 export type BookingTeamMember = z.infer<typeof bookingTeamMemberSchema>;
 
 export const bookingAttendeeSchema = z.object({
+  /** Stable id (absent on bookings created before it existed). Modules refer to an attendee by it. */
+  id: z.string().optional(),
+  /** Short human code printed on the confirmation and ticket, e.g. "HU7K3M9Q". */
+  registrationNumber: z.string().optional(),
   fields: z.record(z.string(), attendeeFieldValueSchema).default({}),
   members: z.array(bookingTeamMemberSchema).optional(),
+  /** Labels organizers put on a guest (e.g. "VIP"), shown at check-in. */
+  tags: z.array(z.string()).optional(),
 });
 export type BookingAttendee = z.infer<typeof bookingAttendeeSchema>;

@@ -25,7 +25,10 @@ const VoucherSchema = new Schema<IVoucher>(
     organizationId: { type: Schema.Types.ObjectId, ref: "TBookOrganization", default: null, index: true },
     eventId: { type: Schema.Types.ObjectId, ref: "TBookEvent", required: true, index: true },
     bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", required: true, index: true },
-    attendeeIndex: { type: Number, required: true, min: 0 },
+    attendeeIndex: { type: Number, required: true }, // negative = the guest left the booking (see removeAttendeeIndex)
+    attendeeId: { type: String, default: null },
+    registrationNumber: { type: String, default: null },
+    tags: { type: [String], default: [], index: true },
     validDate: { type: String, default: null },
     token: { type: String, required: true, unique: true, index: true },
     status: { type: String, enum: voucherStatuses, default: "active", index: true },
@@ -44,6 +47,7 @@ const VoucherSchema = new Schema<IVoucher>(
 
 VoucherSchema.index({ bookingId: 1, attendeeIndex: 1 }, { unique: true });
 VoucherSchema.index({ eventId: 1, status: 1 });
+VoucherSchema.index({ eventId: 1, registrationNumber: 1 });
 
 export const VoucherModel: Model<IVoucher> =
   mongoose.models.TBookVoucher ?? mongoose.model<IVoucher>("TBookVoucher", VoucherSchema, "tbookvouchers");

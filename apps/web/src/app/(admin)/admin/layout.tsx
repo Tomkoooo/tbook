@@ -55,6 +55,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           userEmail={user.email}
           isSystemAdmin={user.isSystemAdmin}
           permissions={permissions}
+          modules={Object.entries((activeOrg?.modules ?? {}) as Record<string, { enabled?: boolean }>)
+            .filter(([, state]) => state?.enabled)
+            .map(([key]) => key)}
         />
         <SidebarInset>
           <AdminHeader />

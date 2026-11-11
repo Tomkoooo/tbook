@@ -26,6 +26,18 @@ export const TBOOK_PERMISSIONS = [
   "voucher:scan",
   "voucher:manage",
   "stats:read",
+  /** Switch feature modules on/off for groups and events (inside the org entitlement). Falls back to event:write. */
+  "module:manage",
+  /** Upload spreadsheets, manage data lists. Falls back to event:write. */
+  "list:manage",
+  /** Send event emails (campaigns, reminders). Falls back to booking:manage. */
+  "email:send",
+  /** Manage bus routes, captain links and boarding. Falls back to booking:manage. */
+  "bus:manage",
+  /** See and manage an event's waitlist. Falls back to booking:manage. */
+  "waitlist:manage",
+  /** Create surveys, kiosk links, read feedback results. Falls back to event:write. */
+  "feedback:manage",
 ] as const;
 
 export const permissionSchema = z.enum(TBOOK_PERMISSIONS);

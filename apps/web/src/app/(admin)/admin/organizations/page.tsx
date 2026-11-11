@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getOrganizationStats, listAllOrganizations } from "@tbook/services";
+import { getOrganizationStats, listAllOrganizations, listModuleDefinitions } from "@tbook/services";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-state";
@@ -9,6 +9,7 @@ import { getSessionUser } from "@/lib/admin-auth";
 import { formatDate } from "@/lib/admin-page";
 import { getActiveOrganizationIdFromCookie } from "@/lib/org-cookie";
 import { CreateOrganizationForm, OrganizationRowActions } from "./organization-controls";
+import { OrganizationModulesTable } from "./organization-modules";
 
 /**
  * Platform view for system admins: every organization, plus creating one.
@@ -74,6 +75,15 @@ export default async function OrganizationsPage() {
           </Table>
         )}
       </SectionCard>
+
+      {organizations.length > 0 ? (
+        <SectionCard title="Feature modules" description="Grant modules to an organization. Its members then switch them on per event (needs the “Manage modules” permission)." flush>
+          <OrganizationModulesTable
+            organizations={organizations.map((org) => ({ id: org.id, name: org.name, modules: org.modules }))}
+            modules={listModuleDefinitions().map((definition) => ({ key: definition.key, name: definition.name, description: definition.description }))}
+          />
+        </SectionCard>
+      ) : null}
     </>
   );
 }

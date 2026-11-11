@@ -1,0 +1,519 @@
+import QRCode from "qrcode";
+import { Types } from "mongoose";
+import { ActionError } from "@tbook/actions";
+import { dataListRepository, eventRepository, organizationRepository, voucherRepository, type IBooking, type IEvent } from "@tbook/db";
+import { matchesRuleConfig, normalizeListKey, type EligibilityRulesConfig } from "@tbook/domain";
+import type { AttendeeFieldDef } from "@tbook/schemas";
+import {
+  extensions,
+  getDataListForOrg,
+  renderVoucherPdfForBooking,
+  resolveModules,
+  sanitizeRichText,
+  sendMail,
+  type EventContext,
+  type MailAttachment,
+  type MailTransporter,
+} from "@tbook/services";
+import { listEventAttendees, givenName, toEventAttendees, type EventAttendee } from "../shared/attendees";
+import { EmailDeliveryModel, EventEmailModel, idleState, type DeliveryMode, type EmailAudience, type EmailTrigger, type IEventEmail } from "./model";
+import { QR_CID, fieldValues, renderEventEmail } from "./render";
+
+export const EVENT_EMAILS = "event-emails";
+
+/** Module settings (event config of "event-emails"). */
+export interface EventEmailsConfig {
+  /** Linked from every email as {{siteUrl}}. */
+  siteUrl?: string;
+  surveyUrl?: string;
+  galleryUrl?: string;
+  /** Greeting name order; Hungarian names are family-name first. */
+  nameOrder?: "family_first" | "given_first";
+}
+
+const TIME_ZONE = "Europe/Budapest";
+/** Pause between messages of a manual send, to stay under SMTP providers' rate limits. */
+const SEND_DELAY_MS = Number(process.env.TBOOK_EMAIL_SEND_DELAY_MS ?? 250);
+/** A "running" send whose heartbeat is older than this was interrupted (e.g. a restart). */
+const STALE_AFTER_MS = 2 * 60 * 1000;
+
+/** Test seam: a transport used when a caller passes none (tests and scripts; production uses SMTP). */
+let defaultTransporter: MailTransporter | undefined;
+export function setEventEmailTransporter(transporter: MailTransporter | undefined): void {
+  defaultTransporter = transporter;
+}
+
+// ---- CRUD ------------------------------------------------------------------------
+
+export interface EventEmailInput {
+  name: string;
+  subject: string;
+  body: string;
+  trigger: EmailTrigger;
+  audience: EmailAudience;
+  listId?: string | null;
+  listMatchFieldKey?: string | null;
+  conditions?: EligibilityRulesConfig | null;
+  attachTicket?: boolean;
+  active?: boolean;
+  sortOrder?: number;
+}
+
+export function listEventEmails(eventId: string): Promise<IEventEmail[]> {
+  return EventEmailModel.find({ eventId }).sort({ sortOrder: 1, createdAt: 1 }).exec();
+}
+
+export async function getEventEmailForOrg(organizationId: string, emailId: string): Promise<IEventEmail> {
+  const email = Types.ObjectId.isValid(emailId) ? await EventEmailModel.findById(emailId).exec() : null;
+  if (!email || String(email.organizationId) !== organizationId) throw ActionError.notFound("Email not found");
+  return email;
+}
+
+async function cleanInput(organizationId: string, input: EventEmailInput) {
+  if (!input.name.trim()) throw ActionError.validation("Give the email a name.");
+  if (!input.subject.trim()) throw ActionError.validation("Write a subject line.");
+  const trigger = input.trigger;
+  // An automatic email always goes to the attendee who just registered.
+  const audience: EmailAudience = trigger === "on_registration" ? "registered" : input.audience;
+  let listId: Types.ObjectId | null = null;
+  if (audience !== "registered") {
+    if (!input.listId) throw ActionError.validation("Choose the data list to send to.");
+    const list = await getDataListForOrg(organizationId, input.listId);
+    if (!list.emailColumn) throw ActionError.validation(`The list "${list.name}" has no email column. Re-import it and pick the email column.`);
+    if (audience === "list_unregistered" && !input.listMatchFieldKey) {
+      throw ActionError.validation("Choose which registration question holds the list's key (e.g. the employee ID).");
+    }
+    listId = list._id as Types.ObjectId;
+  }
+  const conditions = input.conditions && input.conditions.rules.length > 0 ? input.conditions : null;
+  return {
+    name: input.name.trim(),
+    subject: input.subject.trim(),
+    body: sanitizeRichText(input.body ?? ""),
+    trigger,
+    audience,
+    listId,
+    listMatchFieldKey: audience === "list_unregistered" ? (input.listMatchFieldKey ?? null) : null,
+    conditions,
+    attachTicket: Boolean(input.attachTicket),
+    active: input.active ?? true,
+    sortOrder: input.sortOrder ?? 0,
+  };
+}
+
+export async function createEventEmail(organizationId: string, eventId: string, input: EventEmailInput): Promise<IEventEmail> {
+  return EventEmailModel.create({ organizationId, eventId, ...(await cleanInput(organizationId, input)), sendState: idleState() });
+}
+
+export async function updateEventEmail(organizationId: string, emailId: string, input: EventEmailInput): Promise<IEventEmail> {
+  const email = await getEventEmailForOrg(organizationId, emailId);
+  if (email.sendState?.status === "running" && !isStale(email)) throw ActionError.validation("This email is being sent right now. Stop the send before editing it.");
+  const updated = await EventEmailModel.findByIdAndUpdate(emailId, await cleanInput(organizationId, input), { returnDocument: "after" }).exec();
+  return updated!;
+}
+
+export async function deleteEventEmail(organizationId: string, emailId: string): Promise<void> {
+  const email = await getEventEmailForOrg(organizationId, emailId);
+  if (email.sendState?.status === "running" && !isStale(email)) throw ActionError.validation("This email is being sent right now. Stop the send first.");
+  await EmailDeliveryModel.deleteMany({ emailId }).exec();
+  await EventEmailModel.deleteOne({ _id: emailId }).exec();
+}
+
+// ---- Rendering ------------------------------------------------------------------
+
+function formatEventDate(event: IEvent): string {
+  return new Intl.DateTimeFormat("hu-HU", { dateStyle: "long", timeZone: TIME_ZONE }).format(event.startDate);
+}
+
+function formatEventTime(event: IEvent): string {
+  return [event.startTime, event.endTime].filter(Boolean).join("–");
+}
+
+interface RenderContext {
+  event: IEvent;
+  organizationId: string;
+  organizationName: string;
+  config: EventEmailsConfig;
+  extensionCtx: EventContext;
+}
+
+async function renderContextFor(event: IEvent): Promise<RenderContext> {
+  const organizationId = String(event.organizationId ?? "");
+  const groupId = event.groupId ? String(event.groupId) : null;
+  const modules = await resolveModules({ organizationId: organizationId || null, groupId, event });
+  const org = organizationId ? await organizationRepository.findById(organizationId) : null;
+  return {
+    event,
+    organizationId,
+    organizationName: org?.name ?? "",
+    config: modules.config<EventEmailsConfig>(EVENT_EMAILS),
+    extensionCtx: { event, organizationId: organizationId || null, groupId, modules },
+  };
+}
+
+function baseValues(ctx: RenderContext): Record<string, string> {
+  return {
+    eventName: ctx.event.name,
+    eventDate: formatEventDate(ctx.event),
+    eventTime: formatEventTime(ctx.event),
+    eventLocation: ctx.event.location?.address ?? "",
+    siteUrl: ctx.config.siteUrl ?? "",
+    surveyUrl: ctx.config.surveyUrl ?? "",
+    galleryUrl: ctx.config.galleryUrl ?? "",
+    organizationName: ctx.organizationName,
+  };
+}
+
+function attendeeEmailAddress(row: EventAttendee): string {
+  const schema = (row.booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
+  const emailField = schema.find((field) => field.type === "email");
+  const own = emailField ? String(row.fields[emailField.key] ?? "").trim() : "";
+  return own || row.booking.customer?.email || "";
+}
+
+interface OutgoingMessage {
+  recipientKey: string;
+  to: string;
+  name: string;
+  subject: string;
+  html: string;
+  attachments: MailAttachment[];
+  bookingId: string | null;
+}
+
+async function attendeeMessage(email: IEventEmail, ctx: RenderContext, row: EventAttendee): Promise<OutgoingMessage> {
+  const schema = (row.booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
+  const values: Record<string, string> = {
+    ...baseValues(ctx),
+    fullName: row.displayName,
+    firstName: givenName(row.displayName, ctx.config.nameOrder),
+    registrationNumber: row.registrationNumber ?? row.booking.registrationNumber ?? "",
+    customerName: row.booking.customer?.name ?? "",
+    customerEmail: row.booking.customer?.email ?? "",
+    ...fieldValues(schema, row.fields),
+  };
+  for (const provider of extensions.attendeePlaceholderProviders()) {
+    if (!ctx.extensionCtx.modules.isOn(provider.moduleKey)) continue;
+    Object.assign(values, await provider.values(ctx.extensionCtx, row.booking, row.index));
+  }
+
+  const vouchers = await voucherRepository.findByBookingId(String(row.booking._id));
+  const voucher = vouchers.find((v) => v.attendeeIndex === row.index && v.status !== "void");
+  const rendered = renderEventEmail(email, values, Boolean(voucher));
+  const attachments: MailAttachment[] = [];
+  if (rendered.usesQr && voucher) {
+    const png = await QRCode.toBuffer(voucher.token, { type: "png", width: 440, margin: 1, errorCorrectionLevel: "M" });
+    attachments.push({ filename: "qr.png", content: png, contentType: "image/png", cid: QR_CID });
+  }
+  if (email.attachTicket && voucher) {
+    const ticket = await renderVoucherPdfForBooking(String(row.booking._id), { attendeeIndexes: [row.index] });
+    if (ticket) attachments.push({ filename: `${ctx.event.name.replace(/[^\w.-]+/g, "_")}-${row.registrationNumber ?? row.index + 1}.pdf`, content: Buffer.from(ticket.bytes), contentType: "application/pdf" });
+  }
+  return {
+    recipientKey: row.attendeeKey,
+    to: attendeeEmailAddress(row),
+    name: row.displayName,
+    subject: rendered.subject,
+    html: rendered.html,
+    attachments,
+    bookingId: String(row.booking._id),
+  };
+}
+
+interface ListRecipient {
+  key: string;
+  to: string;
+  name: string;
+  data: Record<string, string>;
+}
+
+function listMessage(email: IEventEmail, ctx: RenderContext, recipient: ListRecipient): OutgoingMessage {
+  const values: Record<string, string> = {
+    ...baseValues(ctx),
+    fullName: recipient.name,
+    firstName: givenName(recipient.name, ctx.config.nameOrder),
+    ...Object.fromEntries(Object.entries(recipient.data).map(([key, value]) => [`list.${key}`, value])),
+  };
+  const rendered = renderEventEmail(email, values, false);
+  return { recipientKey: `list:${recipient.key}`, to: recipient.to, name: recipient.name, subject: rendered.subject, html: rendered.html, attachments: [], bookingId: null };
+}
+
+function matchesConditions(email: IEventEmail, row: EventAttendee): boolean {
+  return matchesRuleConfig(email.conditions as EligibilityRulesConfig | null, row.fields, (row.booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[]);
+}
+
+// ---- Recipients -----------------------------------------------------------------
+
+async function listRecipients(email: IEventEmail, event: IEvent): Promise<ListRecipient[]> {
+  const list = email.listId ? await dataListRepository.findById(String(email.listId)) : null;
+  if (!list || !list.emailColumn) return [];
+  let registeredKeys: Set<string> | null = null;
+  if (email.audience === "list_unregistered" && email.listMatchFieldKey) {
+    registeredKeys = new Set();
+    for (const row of await listEventAttendees(String(event._id))) {
+      const key = normalizeListKey(row.fields[email.listMatchFieldKey], list.keyNormalization);
+      if (key) registeredKeys.add(key);
+    }
+  }
+  const recipients: ListRecipient[] = [];
+  const seenEmails = new Set<string>();
+  for await (const row of dataListRepository.cursorRows(String(list._id))) {
+    if (registeredKeys?.has(row.key)) continue;
+    const data = row.data as Record<string, string>;
+    const to = String(data[list.emailColumn] ?? "").trim().toLowerCase();
+    if (!to || !to.includes("@") || seenEmails.has(to)) continue;
+    seenEmails.add(to);
+    recipients.push({ key: row.key, to, name: list.nameColumn ? String(data[list.nameColumn] ?? "") : "", data });
+  }
+  return recipients;
+}
+
+/** How many people a manual send would reach right now (before skipping those already sent). */
+export async function countEmailRecipients(organizationId: string, emailId: string): Promise<number> {
+  const email = await getEventEmailForOrg(organizationId, emailId);
+  const event = await eventRepository.findById(String(email.eventId));
+  if (!event) return 0;
+  if (email.audience === "registered") return (await listEventAttendees(String(event._id))).filter((row) => matchesConditions(email, row)).length;
+  return (await listRecipients(email, event)).length;
+}
+
+// ---- Sending --------------------------------------------------------------------
+
+async function deliver(email: IEventEmail, message: OutgoingMessage, mode: DeliveryMode, transporter?: MailTransporter): Promise<boolean> {
+  let error: string | null = null;
+  if (!message.to) error = "No email address.";
+  else {
+    try {
+      await sendMail(
+        String(email.organizationId),
+        { to: message.to, subject: message.subject, html: message.html, attachments: message.attachments },
+        transporter ?? defaultTransporter,
+      );
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+  }
+  if (mode !== "test") {
+    await EmailDeliveryModel.updateOne(
+      { emailId: email._id, recipientKey: message.recipientKey },
+      {
+        $set: {
+          organizationId: email.organizationId,
+          eventId: email.eventId,
+          to: message.to || "—",
+          name: message.name,
+          status: error ? "failed" : "sent",
+          error,
+          mode,
+          bookingId: message.bookingId ? new Types.ObjectId(message.bookingId) : null,
+          sentAt: new Date(),
+        },
+        $inc: { attempts: 1 },
+      },
+      { upsert: true },
+    ).exec();
+  }
+  return !error;
+}
+
+/**
+ * The automatic step: after a registration is confirmed, each active
+ * "on_registration" email goes to each attendee matching its conditions.
+ * An attendee already sent an email doesn't get it again.
+ */
+export async function sendAutomaticEmailsForBooking(booking: IBooking, transporter?: MailTransporter, onlyAttendeeKey?: string): Promise<void> {
+  const event = await eventRepository.findById(String(booking.eventId));
+  if (!event) return;
+  const ctx = await renderContextFor(event);
+  if (!ctx.extensionCtx.modules.isOn(EVENT_EMAILS)) return;
+  const emails = (await listEventEmails(String(event._id))).filter((email) => email.trigger === "on_registration" && email.active);
+  if (emails.length === 0) return;
+  const rows = toEventAttendees(booking).filter((row) => !onlyAttendeeKey || row.attendeeKey === onlyAttendeeKey);
+  for (const email of emails) {
+    for (const row of rows) {
+      if (!matchesConditions(email, row)) continue;
+      const already = await EmailDeliveryModel.exists({ emailId: email._id, recipientKey: row.attendeeKey, status: "sent" });
+      if (already) continue;
+      try {
+        await deliver(email, await attendeeMessage(email, ctx, row), "auto", transporter);
+      } catch (error) {
+        console.error("[tbook] automatic event email failed", String(email._id), row.attendeeKey, error);
+      }
+    }
+  }
+}
+
+/** True when the event has an active automatic email, so the default booking email is skipped. */
+export async function hasAutomaticConfirmation(booking: IBooking): Promise<boolean> {
+  const event = await eventRepository.findById(String(booking.eventId));
+  if (!event) return false;
+  const modules = await resolveModules({ organizationId: booking.organizationId ? String(booking.organizationId) : null, event });
+  if (!modules.isOn(EVENT_EMAILS)) return false;
+  return Boolean(await EventEmailModel.exists({ eventId: event._id, trigger: "on_registration", active: true }));
+}
+
+function isStale(email: IEventEmail): boolean {
+  const beat = email.sendState?.heartbeatAt ? new Date(email.sendState.heartbeatAt).getTime() : 0;
+  return Date.now() - beat > STALE_AFTER_MS;
+}
+
+export interface StartSendOptions {
+  /** Send again to people who already received it. Default: only those not yet sent (and failed ones). */
+  resendAll?: boolean;
+  transporter?: MailTransporter;
+  /** Await the whole send (tests, scripts). The console starts it in the background. */
+  wait?: boolean;
+}
+
+/**
+ * Starts a manual send. Runs in the server process in the background; the
+ * console polls the progress. Recipients already sent successfully are
+ * skipped, so pressing Send again (or after an interruption) only finishes
+ * the remainder.
+ */
+export async function startEventEmailSend(organizationId: string, emailId: string, userId: string | null, opts: StartSendOptions = {}): Promise<void> {
+  const email = await getEventEmailForOrg(organizationId, emailId);
+  if (email.trigger !== "manual") throw ActionError.validation("Automatic emails are sent on registration. Use a test send to check one.");
+  if (email.sendState?.status === "running" && !isStale(email)) throw ActionError.validation("This email is already being sent.");
+  const claimed = await EventEmailModel.findOneAndUpdate(
+    { _id: email._id, $or: [{ "sendState.status": { $ne: "running" } }, { "sendState.heartbeatAt": { $lt: new Date(Date.now() - STALE_AFTER_MS) } }] },
+    { $set: { sendState: { ...idleState(), status: "running", startedAt: new Date(), heartbeatAt: new Date(), startedBy: userId } } },
+    { returnDocument: "after" },
+  ).exec();
+  if (!claimed) throw ActionError.validation("This email is already being sent.");
+  const run = runSend(claimed, opts).catch(async (error) => {
+    console.error("[tbook] event email send failed", emailId, error);
+    await EventEmailModel.updateOne({ _id: emailId }, { $set: { "sendState.status": "stopped", "sendState.finishedAt": new Date() } }).exec();
+  });
+  if (opts.wait) await run;
+}
+
+export async function stopEventEmailSend(organizationId: string, emailId: string): Promise<void> {
+  await getEventEmailForOrg(organizationId, emailId);
+  await EventEmailModel.updateOne({ _id: emailId, "sendState.status": "running" }, { $set: { "sendState.status": "stopped", "sendState.finishedAt": new Date() } }).exec();
+}
+
+async function runSend(email: IEventEmail, opts: StartSendOptions): Promise<void> {
+  const event = await eventRepository.findById(String(email.eventId));
+  if (!event) throw new Error("Event not found");
+  const ctx = await renderContextFor(event);
+
+  const builders: Array<{ key: string; build: () => Promise<OutgoingMessage> }> = [];
+  if (email.audience === "registered") {
+    for (const row of await listEventAttendees(String(event._id))) {
+      if (matchesConditions(email, row)) builders.push({ key: row.attendeeKey, build: () => attendeeMessage(email, ctx, row) });
+    }
+  } else {
+    for (const recipient of await listRecipients(email, event)) {
+      builders.push({ key: `list:${recipient.key}`, build: async () => listMessage(email, ctx, recipient) });
+    }
+  }
+
+  const alreadySent = opts.resendAll
+    ? new Set<string>()
+    : new Set((await EmailDeliveryModel.find({ emailId: email._id, status: "sent" }, { recipientKey: 1 }).lean().exec()).map((d) => d.recipientKey));
+
+  const state = { total: builders.length, sent: 0, failed: 0, skipped: 0 };
+  await EventEmailModel.updateOne({ _id: email._id }, { $set: { "sendState.total": state.total } }).exec();
+
+  for (const [index, builder] of builders.entries()) {
+    if (alreadySent.has(builder.key)) {
+      state.skipped += 1;
+    } else {
+      const ok = await deliver(email, await builder.build(), "manual", opts.transporter).catch(() => false);
+      if (ok) state.sent += 1;
+      else state.failed += 1;
+      if (SEND_DELAY_MS > 0 && !opts.transporter && !defaultTransporter) await new Promise((resolve) => setTimeout(resolve, SEND_DELAY_MS));
+    }
+    if (index % 10 === 9 || index === builders.length - 1) {
+      const current = await EventEmailModel.findById(email._id, { sendState: 1 }).lean().exec();
+      if (current?.sendState?.status !== "running") return; // stopped by an organizer
+      await EventEmailModel.updateOne(
+        { _id: email._id },
+        { $set: { "sendState.sent": state.sent, "sendState.failed": state.failed, "sendState.skipped": state.skipped, "sendState.heartbeatAt": new Date() } },
+      ).exec();
+    }
+  }
+  await EventEmailModel.updateOne(
+    { _id: email._id },
+    { $set: { "sendState.status": "done", "sendState.sent": state.sent, "sendState.failed": state.failed, "sendState.skipped": state.skipped, "sendState.finishedAt": new Date(), "sendState.heartbeatAt": new Date() } },
+  ).exec();
+}
+
+/**
+ * Sends one copy to `to`, filled with the first real recipient's data (or
+ * sample data when there is none yet), so an organizer can check it before
+ * the real send. Not recorded in the send log.
+ */
+export async function sendEventEmailTest(organizationId: string, emailId: string, to: string, transporter?: MailTransporter): Promise<string> {
+  const email = await getEventEmailForOrg(organizationId, emailId);
+  const event = await eventRepository.findById(String(email.eventId));
+  if (!event) throw ActionError.notFound("Event not found");
+  const address = to.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw ActionError.validation("Enter a valid email address.");
+  const ctx = await renderContextFor(event);
+  let message: OutgoingMessage;
+  let basedOn = "sample data";
+  if (email.audience === "registered") {
+    const row = (await listEventAttendees(String(event._id))).find((r) => matchesConditions(email, r));
+    if (row) {
+      message = await attendeeMessage(email, ctx, row);
+      basedOn = row.displayName;
+    } else {
+      message = listMessage(email, ctx, { key: "sample", to: address, name: "Minta Vendég", data: {} });
+    }
+  } else {
+    const recipient = (await listRecipients(email, event))[0];
+    message = listMessage(email, ctx, recipient ?? { key: "sample", to: address, name: "Minta Vendég", data: {} });
+    if (recipient) basedOn = recipient.name || recipient.to;
+  }
+  const ok = await deliver(email, { ...message, to: address, subject: `[TESZT] ${message.subject}` }, "test", transporter);
+  if (!ok) throw ActionError.validation("The test email couldn't be sent. Check the SMTP settings.");
+  return basedOn;
+}
+
+export interface DeliveryRow {
+  to: string;
+  name: string;
+  status: "sent" | "failed";
+  error: string | null;
+  mode: DeliveryMode;
+  attempts: number;
+  sentAt: Date;
+}
+
+export async function listEmailDeliveries(
+  organizationId: string,
+  emailId: string,
+  opts: { status?: "sent" | "failed"; limit?: number; skip?: number } = {},
+): Promise<{ rows: DeliveryRow[]; total: number; sent: number; failed: number }> {
+  const email = await getEventEmailForOrg(organizationId, emailId);
+  const filter: Record<string, unknown> = { emailId: email._id };
+  if (opts.status) filter.status = opts.status;
+  const [rows, total, sent, failed] = await Promise.all([
+    EmailDeliveryModel.find(filter).sort({ sentAt: -1 }).skip(opts.skip ?? 0).limit(opts.limit ?? 100).lean().exec(),
+    EmailDeliveryModel.countDocuments(filter).exec(),
+    EmailDeliveryModel.countDocuments({ emailId: email._id, status: "sent" }).exec(),
+    EmailDeliveryModel.countDocuments({ emailId: email._id, status: "failed" }).exec(),
+  ]);
+  return {
+    rows: rows.map((row) => ({ to: row.to, name: row.name, status: row.status, error: row.error, mode: row.mode, attempts: row.attempts, sentAt: row.sentAt })),
+    total,
+    sent,
+    failed,
+  };
+}
+
+/** Re-sends the automatic emails of one booking (admin "resend confirmation"). */
+export async function resendAutomaticEmails(organizationId: string, booking: IBooking, transporter?: MailTransporter): Promise<void> {
+  if (String(booking.organizationId) !== organizationId) throw ActionError.notFound("Booking not found");
+  await EmailDeliveryModel.deleteMany({ bookingId: booking._id, mode: "auto" }).exec();
+  await sendAutomaticEmailsForBooking(booking, transporter);
+}
+
+
+/** Re-sends one attendee's automatic emails (after they changed their registration). */
+export async function resendAutomaticEmailsForAttendee(booking: IBooking, attendeeKey: string, transporter?: MailTransporter): Promise<void> {
+  await EmailDeliveryModel.deleteMany({ bookingId: booking._id, recipientKey: attendeeKey, mode: "auto" }).exec();
+  await sendAutomaticEmailsForBooking(booking, transporter, attendeeKey);
+}

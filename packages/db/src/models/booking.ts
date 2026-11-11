@@ -167,6 +167,37 @@ const BookingSchema = new Schema<IBooking>(
     delivery: { type: String, enum: bookingDeliveries, default: "email" },
     receipt: { type: ReceiptSchema, default: null },
     adminNote: { type: String, default: "" },
+    registrationNumber: { type: String, default: null },
+    cancelledAttendees: {
+      type: [
+        new Schema(
+          {
+            attendee: { type: bookingAttendeeSchema, required: true },
+            cancelledAt: { type: Date, required: true },
+            cancelledBy: { type: String, required: true },
+            reason: { type: String, default: "" },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    changeLog: {
+      type: [
+        new Schema(
+          {
+            at: { type: Date, required: true },
+            by: { type: String, required: true },
+            action: { type: String, required: true },
+            attendeeId: { type: String, default: null },
+            registrationNumber: { type: String, default: null },
+            changes: { type: [new Schema({ field: String, before: String, after: String }, { _id: false })], default: [] },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
   },
   { timestamps: true },
 );

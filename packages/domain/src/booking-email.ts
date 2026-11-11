@@ -41,7 +41,8 @@ export const DEFAULT_BOOKING_EMAIL_TEMPLATE: BookingEmailTemplate = {
     "<p>See you there,<br>{{organizationName}}</p>",
 };
 
-const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z][\w]*)\s*\}\}/g;
+/** `{{key}}`, also dotted (`{{field.employer}}`, `{{list.email}}`). */
+const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z][\w.]*)\s*\}\}/g;
 
 function escapeHtml(value: string): string {
   return value

@@ -14,6 +14,7 @@
     "@tbook/db": "*",
     "@tbook/domain": "*",
     "@tbook/schemas": "*",
+    "exceljs": "^4.4.0",
     "nodemailer": "^7.0.13",
     "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",

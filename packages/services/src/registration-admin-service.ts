@@ -241,6 +241,8 @@ export interface UpdateBookingDetailsInput {
   billing?: BillingInfo | null;
   attendees?: BookingAttendee[];
   adminNote?: string;
+  /** Who edited (user id), for the change log. */
+  editedBy?: string | null;
 }
 
 function memberSchemaOf(booking: IBooking) {
@@ -300,38 +302,24 @@ export async function updateBookingDetails(
   if (input.adminNote !== undefined) set.adminNote = input.adminNote.trim();
 
   let attendeesChanged = false;
+  let voucherChanges = { updated: 0, skipped: 0 };
   if (input.attendees) {
-    const { validateAttendees, normalizeAttendeePayload } = await import("./booking-validation");
-
-    const schema = booking.attendeeFieldSchema ?? [];
-    const memberSchema = booking.teamMemberFieldSchema ?? [];
-    const playersPerTicket = booking.playersPerTicket ?? 1;
-
-    const issues = validateAttendees(schema, booking.guests, input.attendees, memberSchema.length > 0 ? "team" : "person", {
-      teamMemberFieldSchema: memberSchema,
-      teamMemberLimit: booking.teamMemberLimit ?? null,
-      playersPerTicket: playersPerTicket > 1 ? playersPerTicket : null,
-    });
-    if (issues.length > 0) {
-      throw ActionError.validation("Please check the attendee details.", { issues });
-    }
-
-    set.attendees = normalizeAttendeePayload(schema, input.attendees, memberSchema);
-    attendeesChanged = true;
+    // Same path as a guest's own edit: live form options, unique answers and
+    // module reservations (bus seats) move with the change, and it's logged.
+    // Organizers may override the registration rules.
+    const { replaceBookingAttendees } = await import("./registration-changes");
+    const before = JSON.stringify(booking.attendees ?? []);
+    const after = await replaceBookingAttendees(bookingId, input.attendees, { by: input.editedBy ? `admin:${input.editedBy}` : "admin", skipEligibility: true, refreshVouchers: false });
+    attendeesChanged = JSON.stringify(after.attendees ?? []) !== before;
+    if (attendeesChanged) voucherChanges = await refreshVoucherNames(bookingId, after);
   }
 
-  if (Object.keys(set).length === 0) {
+  if (Object.keys(set).length === 0 && !attendeesChanged) {
     return { booking, vouchersRenamed: 0, vouchersSkipped: 0, tdartsResyncRequired: false };
   }
 
-  const updated = await BookingModel.findByIdAndUpdate(bookingId, { $set: set }, { returnDocument: "after" }).exec();
+  const updated = Object.keys(set).length > 0 ? await BookingModel.findByIdAndUpdate(bookingId, { $set: set }, { returnDocument: "after" }).exec() : await BookingModel.findById(bookingId).exec();
   if (!updated) throw ActionError.notFound("Booking not found");
-
-  // An attendee rename has to reach the voucher, or the name on the ticket
-  // no longer matches the person at the door.
-  const voucherChanges = attendeesChanged
-    ? await refreshVoucherNames(bookingId, updated)
-    : { updated: 0, skipped: 0 };
 
   // Team rosters (3+ players) are pushed to tDarts straight away; the manual
   // "resync required" warning stays for solo and pair tickets, which tDarts
@@ -371,7 +359,7 @@ export async function updateBookingDetails(
  * Only the stored name changes here. Re-issuing the PDF emails the guest,
  * so that stays a separate, explicit action ("re-send entries").
  */
-async function refreshVoucherNames(
+export async function refreshVoucherNames(
   bookingId: string,
   booking: IBooking,
 ): Promise<{ updated: number; skipped: number }> {

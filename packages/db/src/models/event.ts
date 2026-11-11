@@ -149,6 +149,7 @@ const EventSchema = new Schema<IEvent>(
       default: () => ({ enabled: false, tournamentCode: null }),
     },
     publicEntryList: { type: Boolean, default: false },
+    modules: { type: Schema.Types.Mixed, default: {} },
     status: { type: String, enum: entityStatusSchema.options, default: "draft", index: true },
     sortOrder: { type: Number, default: 0 },
   },

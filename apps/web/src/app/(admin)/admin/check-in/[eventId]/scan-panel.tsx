@@ -138,7 +138,7 @@ export function ScanPanel({
 
           <form action={action}>
             <input type="hidden" name="day" value={day} />
-            <FormField label="Entry code" htmlFor="code" hint="Scan with a handheld scanner, or type the code and press Enter.">
+            <FormField label="Entry code" htmlFor="code" hint="Scan the QR code with a handheld scanner, or type the registration number and press Enter.">
               <div className="relative">
                 <ScanLine className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2" />
                 <Input
@@ -165,6 +165,7 @@ export function ScanPanel({
               title={state.result ? (RESULT_TITLES[state.result] ?? "Result") : null}
               name={state.attendeeName}
               validDate={state.validDate}
+              tags={state.tags}
               message={state.message}
             />
           ) : (
@@ -285,12 +286,14 @@ function ScanResult({
   title,
   name,
   validDate,
+  tags,
   message,
 }: {
   tone: Tone;
   title: string | null;
   name?: string | null;
   validDate?: string | null;
+  tags?: string[];
   message?: string | null;
 }) {
   const { box, Icon } = TONE_STYLES[tone];
@@ -305,6 +308,7 @@ function ScanResult({
         {title ? <p className="text-xl font-bold">{title}</p> : null}
         {name ? <p className="text-base font-medium">{name}</p> : null}
         {validDate ? <p className="text-sm tabular-nums">Pass for {validDate}</p> : null}
+        {tags && tags.length > 0 ? <p className="text-base font-bold uppercase tracking-wide">{tags.join(" · ")}</p> : null}
         {message ? <p className="text-sm">{message}</p> : null}
       </div>
     </div>

@@ -51,4 +51,15 @@ export const PERMISSION_GROUPS: Array<{ label: string; permissions: Array<{ key:
       { key: "voucher:manage", label: "Undo check-ins, re-send tickets" },
     ],
   },
+  {
+    label: "Modules and data",
+    permissions: [
+      { key: "module:manage", label: "Switch modules on for groups and events" },
+      { key: "list:manage", label: "Import spreadsheets, manage data lists" },
+      { key: "email:send", label: "Send event emails" },
+      { key: "bus:manage", label: "Manage buses, captain links and boarding" },
+      { key: "waitlist:manage", label: "Manage the waitlist" },
+      { key: "feedback:manage", label: "Surveys, kiosk ratings and their results" },
+    ],
+  },
 ];

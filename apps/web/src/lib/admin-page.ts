@@ -4,6 +4,7 @@ import { resolveMembershipPermissions } from "@tbook/services";
 import type { Permission } from "@tbook/schemas";
 import { getSessionUser, type SessionUser } from "./admin-auth";
 import { getActiveOrganizationIdFromCookie } from "./org-cookie";
+import { hasPermissionOrFallback } from "./permission-fallbacks";
 
 /**
  * Page-level counterpart to admin-auth's requireOrgPermission. Server
@@ -60,7 +61,7 @@ export async function requireAdminPage(permission?: Permission): Promise<AdminPa
   const access = await resolveOrgAccess(user, organizationId);
   if (!access) redirect("/admin/select-org?error=no-access");
 
-  if (permission && !access.permissions.has(permission)) {
+  if (permission && !hasPermissionOrFallback(access.permissions, permission)) {
     redirect(`/admin?error=missing-permission&permission=${encodeURIComponent(permission)}`);
   }
 

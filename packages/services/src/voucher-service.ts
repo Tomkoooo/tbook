@@ -127,6 +127,9 @@ export async function issueVoucherRowsForBooking(bookingId: string): Promise<IVo
     eventId: booking.eventId,
     bookingId: booking._id,
     attendeeIndex,
+    attendeeId: booking.attendees?.[attendeeIndex]?.id ?? null,
+    registrationNumber: booking.attendees?.[attendeeIndex]?.registrationNumber ?? null,
+    tags: booking.attendees?.[attendeeIndex]?.tags ?? [],
     token: randomUUID(),
     status: "active" as const,
     displayName: resolveAttendeeDisplayName(

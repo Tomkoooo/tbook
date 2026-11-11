@@ -351,7 +351,7 @@ export async function getInvitePreview(tokenHash: string): Promise<{ organizatio
   };
 }
 
-export async function listAllOrganizations(): Promise<Array<{ id: string; name: string; slug: string; status: string; createdAt: Date | null }>> {
+export async function listAllOrganizations(): Promise<Array<{ id: string; name: string; slug: string; status: string; createdAt: Date | null; modules: string[] }>> {
   const orgs = await organizationRepository.listAll();
   return orgs
     .map((org) => ({
@@ -360,6 +360,9 @@ export async function listAllOrganizations(): Promise<Array<{ id: string; name: 
       slug: org.slug,
       status: org.status,
       createdAt: (org as unknown as { createdAt?: Date }).createdAt ?? null,
+      modules: Object.entries((org.modules ?? {}) as Record<string, { enabled?: boolean }>)
+        .filter(([, state]) => state?.enabled)
+        .map(([key]) => key),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

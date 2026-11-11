@@ -15,6 +15,8 @@ export interface MailAttachment {
   filename: string;
   content: Buffer;
   contentType?: string;
+  /** Content-ID for an inline image referenced as <img src="cid:…"> in the HTML. */
+  cid?: string;
 }
 
 export interface SendMailInput {
@@ -99,6 +101,6 @@ export async function sendMail(organizationId: string | null | undefined, input:
     to: input.to,
     subject: input.subject,
     html: input.html,
-    attachments: input.attachments?.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+    attachments: input.attachments?.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType, ...(a.cid ? { cid: a.cid } : {}) })),
   });
 }

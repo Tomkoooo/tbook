@@ -2,6 +2,7 @@ import { ActionError } from "@tbook/actions";
 import { runBookingCommand } from "./commands/booking";
 import { runEventCommand } from "./commands/event";
 import { runGroupCommand } from "./commands/group";
+import { runSetupCommand } from "./commands/setup";
 import { dbDisconnectAll } from "./lib/env";
 import { CliError } from "./lib/errors";
 
@@ -31,6 +32,7 @@ Entities and actions:
   event     list | show | create | edit | archive | undo | groups
   group     list | edit
   booking   list | show | resend-voucher
+  setup     apply --plan <file.json>   (modules, data lists from spreadsheets, group, event, emails)
 
 Every command needs --org <idOrSlug>. Every write defaults to a dry run —
 pass --apply --prod-ack to actually write (this CLI always treats the
@@ -73,6 +75,10 @@ async function main(): Promise<void> {
   }
   if (entity === "group") {
     await runGroupCommand(action, rest);
+    return;
+  }
+  if (entity === "setup") {
+    await runSetupCommand(action, rest);
     return;
   }
   if (entity === "booking") {

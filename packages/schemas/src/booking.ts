@@ -174,6 +174,25 @@ export const bookingReceiptSchema = z.object({
 });
 export type BookingReceipt = z.infer<typeof bookingReceiptSchema>;
 
+export const cancelledAttendeeSchema = z.object({
+  attendee: bookingAttendeeSchema,
+  cancelledAt: z.date(),
+  /** "guest", "admin:<userId>", "system". */
+  cancelledBy: z.string(),
+  reason: z.string().default(""),
+});
+export type CancelledAttendee = z.infer<typeof cancelledAttendeeSchema>;
+
+export const bookingChangeSchema = z.object({
+  at: z.date(),
+  by: z.string(),
+  action: z.enum(["edited", "attendee_cancelled", "booking_cancelled"]),
+  attendeeId: z.string().nullable().default(null),
+  registrationNumber: z.string().nullable().default(null),
+  changes: z.array(z.object({ field: z.string(), before: z.string(), after: z.string() })).default([]),
+});
+export type BookingChange = z.infer<typeof bookingChangeSchema>;
+
 export const bookingSchema = z.object({
   id: objectIdSchema,
   organizationId: objectIdSchema.nullable().default(null),
@@ -236,6 +255,12 @@ export const bookingSchema = z.object({
   receipt: bookingReceiptSchema.nullable().default(null),
   /** Free-form admin note, separate from the guest's own checkout note. */
   adminNote: z.string().default(""),
+  /** Booking-level registration number (the group leader's code); attendees carry their own. */
+  registrationNumber: z.string().nullable().default(null),
+  /** Guests removed from a group registration — kept, listed as cancelled. */
+  cancelledAttendees: z.array(cancelledAttendeeSchema).default([]),
+  /** Edits and per-guest cancellations, newest last. */
+  changeLog: z.array(bookingChangeSchema).default([]),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
