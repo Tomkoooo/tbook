@@ -177,7 +177,7 @@ describe("configured free registration with ID list, bus seats and event emails"
   it("refuses an ID that isn't on the list, with the rule's own message", async () => {
     await expect(
       createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: "12345678", transfer: "nem" })] }, { groupId }),
-    ).rejects.toThrow(/eligibility/);
+    ).rejects.toThrow(/Ismeretlen törzsszám/);
     expect(await BookingModel.countDocuments({})).toBe(0);
   });
 
@@ -185,7 +185,7 @@ describe("configured free registration with ID list, bus seats and event emails"
     const first = await createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: "60000001", transfer: "nem" })] }, { groupId });
     await expect(
       createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: " 6000-0001 ", transfer: "nem" })] }, { groupId }),
-    ).rejects.toThrow(/already registered/);
+    ).rejects.toThrow(/már van regisztráció/);
 
     await cancelBooking(first.bookingId);
     const again = await createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: "60000001", transfer: "nem" })] }, { groupId });
@@ -195,17 +195,17 @@ describe("configured free registration with ID list, bus seats and event emails"
   it("requires the consent checkbox and the bus only when a transfer is wanted", async () => {
     await expect(
       createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [{ fields: { name: "X", employee_id: "60000004", transfer: "nem" } }] }, { groupId }),
-    ).rejects.toThrow(/attendee details/);
+    ).rejects.toThrow(/ellenőrizd az adatokat/);
     await expect(
       createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: "60000004", transfer: "igen" })] }, { groupId }),
-    ).rejects.toThrow(/attendee details/);
+    ).rejects.toThrow(/ellenőrizd az adatokat/);
   });
 
   it("stops at the bus's seat limit and releases the seat (and the ID) when the registration fails or is cancelled", async () => {
     const first = await createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: "60000001", transfer: "igen", bus: routeId })] }, { groupId });
     await expect(
       createBookingWithCheckout({ eventId, guests: 1, customer, attendees: [attendee({ employee_id: "60000003", transfer: "igen", bus: routeId })] }, { groupId }),
-    ).rejects.toThrow(/attendee details|full/);
+    ).rejects.toThrow(/ellenőrizd az adatokat|megtelt/);
     // The refused registration must not keep 60000003 claimed.
     expect(await FieldClaimModel.countDocuments({ value: "60000003" })).toBe(0);
 

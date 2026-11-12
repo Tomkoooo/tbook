@@ -29,7 +29,32 @@ proxies browser calls through its own `/api/plugins/t-book/*` (env
 
 Errors: `{ "error": "message" }` with an HTTP status. 401 means a missing or
 bad key, 404 an unknown or inactive event, 429 a rate limit (quote: 120/min,
-bookings: 20/min per client).
+bookings: 20/min per client). Added: `code`, a machine-readable reason when
+there is one — e.g. `capacity_full`, `sales_closed`, `on_waitlist`,
+`bus_full`, `not_full`, `duplicate`, `duplicate_field`, `validation_error`.
+Messages that reach guests (registration, waitlist, guest self-service,
+surveys) are Hungarian, informal ("te"); a failed form rule returns the
+organizer's own rule message.
+
+**Preview mode (for site developers).** Send the group's preview key in
+`X-TBook-Preview: tbp_…` next to the API key (console: **Catalog → Event
+groups → (group) → Preview key**, or `tbook-cli group keys`). With a valid
+key:
+
+- `GET /events/{id}` and `POST /events/{id}/prefill` also work on a
+  **draft** event and outside the sales window; `GET /events/{id}` adds
+  `preview: true`.
+- `POST /bookings` runs every check (fields, rules, `in_list`, unique IDs,
+  waitlisted IDs, capacity, bus seats) but saves, reserves and sends
+  nothing: `{ ok, preview: true, status: "confirmed", registrationNumber:
+  "PREVIEW-7K3M", bookingId: null, totalHuf }` (`status` is `"payment"` for
+  a paid booking). Multi-event `entries` aren't supported in preview (400).
+- `POST /waitlist/join` runs every check and returns `{ ok, preview: true,
+  entryId: null, position }`, the position it would get. The event must
+  still be full (409 `not_full` otherwise).
+
+A missing or wrong preview key is not an error: the request is handled
+normally (a draft event is a 404).
 
 ## Endpoints
 
@@ -50,7 +75,9 @@ bookings: 20/min per client).
 | POST | `/guest/lookup` | group | Guest self-service (module `guest-portal`): find a registration by `{ eventId, code }`, where `code` is the registration number or the identifying answer (e.g. employee ID). See below |
 | POST | `/guest/update` | group | `{ eventId, code, fields }`: change the guest's own answers |
 | POST | `/guest/cancel` | group | `{ eventId, code, reason? }`: cancel this guest (free registrations only) |
-| POST | `/waitlist/join` | group | Module `waitlist`: `{ eventId, guests?, customer, attendees, returnBaseUrl? }` with the same answers as a booking: `{ entryId, position }`. 409 `not_full` while places are left |
+| POST | `/waitlist/join` | group | Module `waitlist`: `{ eventId, guests?, customer, attendees, returnBaseUrl? }` with the same answers as a booking: `{ entryId, position }`, and emails the "joined" notice with the position. 409 `not_full` while places are left, 409 `duplicate` when the email or an ID is already waiting, 409 `duplicate_field` when an ID is already registered |
+| POST | `/waitlist/status` | group | `{ eventId, code }` (any identifying answer, e.g. employee ID, of anyone in an open entry) → `{ entry: { status, position, guests, names, createdAt, offerExpiresAt } }`; 404 when none. 20/min |
+| POST | `/waitlist/leave` | group | `{ eventId, code }` → `{ left: true }`: the entry is removed, a held place goes to the next in line. 404 when none. 10/min |
 | GET | `/surveys?eventId=` | group | Module `feedback`: the event's open surveys `{ surveys: [{ id, title, intro, questions, ratingMax }] }` |
 | POST | `/surveys/{surveyId}/responses` | group | `{ code \| token, answers: { questionId: value } }`: once per guest (409 `already_answered`), stored without identity |
 
@@ -58,6 +85,28 @@ bookings: 20/min per client).
 
 - `waitlistOpen`: the event is full and takes waitlist entries.
 - `registrationPrefill`: `{ fieldKey, label, helpText }` when the form starts with an ID lookup, otherwise `null`.
+- `remainingPlaces`: `capacity − places taken − places held` (held = unpaid checkouts and open waitlist offers), never below 0; `null` when the event has no cap.
+- `salesState`: `"not_started"`, `"on_sale"` or `"closed"` (the sales window, as booking checks it).
+- `preview: true`: only in preview mode.
+
+### Waitlist (module `waitlist`)
+
+- **When:** `waitlistOpen` is true, or a booking failed with `code: "capacity_full"` (a group bigger than `remainingPlaces` is refused for booking and can join instead). Join with the same body as a booking.
+- **Position** everywhere = the entry's rank among `waiting` entries in joining order, `1` = next in line. A group entry counts once. While a place is offered to an entry (offer mode) its `status` is `offered`, `position` is `null` and `offerExpiresAt` is set.
+- **Statuses:** `waiting`, `offered` (open); `registered`, `expired`, `declined`, `failed`, `removed` (closed — `status`/`leave` then 404).
+- **IDs are held:** while an entry is open, its identifying answers (employee ID) can't book (`POST /bookings` → 409 `on_waitlist`) or join again; `prefill` returns `{ found: true, alreadyRegistered: false, onWaitlist: true, fields: {} }`. Send those guests to the waitlist status page.
+- **Promotion:** when a place frees up (guest or console cancel, expired checkout), the first entry that fits moves up. Auto mode (free events): registered at once; they get the "Bekerültél" email and the event's normal confirmation with the QR code. If their chosen bus has filled up meanwhile they are registered with `busz = "waitlist"` (see below) and the email says so. Offer mode: an email link holds the place for `offerHours`.
+- **Cancellation email:** with module `guest-portal` on, a cancelled guest (by themselves or by an organizer) gets a short confirmation email (settings `cancelSubject` / `cancelMessage`).
+
+### Bus waitlist ("értesítést kérek")
+
+A select fed by the bus module (`choicesSource: "bus-transport:routes"`) always accepts the value `"waitlist"`, listed last in both `attendeeFieldSchema[].choices` and `fieldChoiceDetails`:
+
+```json
+{ "value": "waitlist", "label": "Nincs szabad hely – értesítést kérek, ha felszabadul", "remaining": null, "disabled": false, "meta": { "waitlist": true } }
+```
+
+It holds no seat and satisfies "required". Those guests wait in line (first come first served by when they chose it). When seats free up (a cancellation, an edit or expiry releasing a seat, a new or re-activated bus, more seats) everyone in line gets one email (bus module settings `busWaitlistSubject` / `busWaitlistMessage`, with `{{name}}`, `{{event}}`, `{{siteUrl}}`); again only after new seats free up, or 6 hours later. They pick a real bus with `POST /guest/update` (`fields: { busz: "<routeId>" }`); a full bus is a 400 `bus_full`. They're not on passenger lists or captain views; the console's Buses page and the bus export list them. In emails `{{bus.transfer}}` reads "Várólistán (értesítünk)".
 
 ### Start with the ID (prefill)
 
@@ -68,6 +117,7 @@ When `registrationPrefill` is set, the form's first step asks only for that ques
    - `found: true`: show the whole form, filled with `fields`. Every answer stays editable, and the identifying answer is in `fields` too.
    - `found: false`: the ID isn't on the list, so the guest can't continue (the registration rule would refuse it anyway).
    - `alreadyRegistered: true`: no data comes back. Send the guest to self-service (`/guest/lookup`).
+   - `onWaitlist: true` (added): the ID waits on the waitlist; `fields` is empty. Send the guest to the waitlist status (`/waitlist/status`).
 3. Register with `POST /bookings` as usual. Every check runs again on the server.
 
 Organizers set this up in the form builder. They mark the ID question "Identifies the guest", put an "is in list" rule on it, and choose a "Prefill from data list column" for each other question. A list cell fills a dropdown only when it matches an option's value or label.
@@ -82,6 +132,7 @@ Rate-limited per client. The lookup returns `{ guest }`:
 - `form`: every question with live options and `editable` (identifying questions and the module's locked questions are never editable; nothing is editable once the event has started);
 - `bus`: `{ code, city, pickupPoint, departure, returnInfo, captainName, captainPhone }`, or `null`;
 - `transferRules`: the bus module's rules text (e.g. the 15-minute wait rule);
+- `busWaitlist`: `{ position }` (1 = next) when the guest asked to be notified about a bus seat, otherwise `null`;
 - `canEdit`, `canCancel`.
 
 An update is checked like a registration (required answers, rules, unique ID, bus seats). The guest's automatic confirmation email is sent again. In a group registration, cancel removes only that guest; the record is kept and listed as cancelled.

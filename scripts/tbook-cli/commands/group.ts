@@ -1,15 +1,23 @@
 import { adminEventGroupInputSchema, type AdminEventGroupInput } from "@tbook/schemas";
-import { getGroupForOrg, listGroupsForOrg, updateEventGroup } from "@tbook/services";
+import {
+  getGroupForOrg,
+  listGroupsForOrg,
+  revealEventGroupPreviewKey,
+  rotateEventGroupApiKey,
+  rotateEventGroupPreviewKey,
+  updateEventGroup,
+} from "@tbook/services";
 import { parseArgs, type Flags, requireFlag } from "../lib/args";
 import { type AuditEntry, checkApplyGate, diffFields, resolveOperator, writeRestorePoint } from "../lib/change";
 import { connectDb, resolveOrganization, type ResolvedOrg } from "../lib/env";
 import { CliError } from "../lib/errors";
 import { table } from "../lib/format";
-import { confirmFieldChanges, printFieldChanges } from "../lib/interact";
+import { confirmFieldChanges, confirmPhrase, printFieldChanges } from "../lib/interact";
 
 /**
- * Event group CRUD — scalar fields only (an API key is never shown or
- * editable here; use the admin console's "Rotate key"). Same safety model
+ * Event group CRUD — scalar fields only; keys have their own actions
+ * (`group keys`: hints, reveal the preview key, rotate either key — a new
+ * key is printed once). Same safety model
  * as `event edit`: dry run by default, one restore point per write. No
  * `undo` yet — groups change rarely enough that this hasn't been needed.
  */
@@ -137,6 +145,75 @@ async function groupEdit(flags: Flags): Promise<void> {
   console.log(`\nSaved. Restore point: ${dir}`);
 }
 
+/**
+ * `group keys --org <org> --id <group>`: the API key hint and the preview
+ * key (revealed with --reveal-preview). The API key itself is stored only
+ * as a hash, so it can't be shown again: --rotate-api-key issues a new one
+ * (the old stops working at once), --rotate-preview a new preview key.
+ * Rotations are writes: --apply --prod-ack and the ROTATE phrase.
+ */
+async function groupKeys(flags: Flags): Promise<void> {
+  await connectDb(flags.get("uri"));
+  const org = await resolveOrganization(requireFlag(flags, "org"));
+  const id = requireFlag(flags, "id");
+  const group = await getGroupForOrg(org.id, id);
+  console.log(`Group "${group.name}" (${id}) in "${org.name}":`);
+  console.log(`  API key:     ${group.apiKeyHint} (created ${group.apiKeyCreatedAt?.toISOString?.() ?? "?"}; stored as a hash — rotate to get a new one)`);
+  console.log(`  Preview key: ${group.previewKeyHint || "(none)"}${group.previewKeyCreatedAt ? ` (created ${group.previewKeyCreatedAt.toISOString()})` : ""}`);
+
+  const rotateApi = flags.bool("rotate-api-key");
+  const rotatePreview = flags.bool("rotate-preview");
+  if (flags.bool("reveal-preview") && !rotatePreview) {
+    const key = await revealEventGroupPreviewKey(org.id, id);
+    console.log(key ? `  Preview key (X-TBook-Preview): ${key}` : "  No readable preview key — create one with --rotate-preview.");
+  }
+  if (!rotateApi && !rotatePreview) return;
+
+  const what = [rotateApi ? "a new API key (the current one stops working immediately)" : null, rotatePreview ? "a new preview key" : null].filter(Boolean).join(" and ");
+  console.log(`\nWill issue ${what}.`);
+  if (checkApplyGate(flags) === "dry-run") {
+    console.log("DRY RUN — nothing written. Re-run with --apply --prod-ack to write.");
+    return;
+  }
+  await confirmPhrase("ROTATE", flags, "confirm", `Issue ${what} for "${group.name}"`);
+  const before = { apiKeyHint: group.apiKeyHint, previewKeyHint: group.previewKeyHint ?? "" };
+  const printed: string[] = [];
+  if (rotateApi) {
+    const { apiKey } = await rotateEventGroupApiKey(org.id, id);
+    printed.push(`  API key (shown once — put it in the site's config): ${apiKey}`);
+  }
+  if (rotatePreview) {
+    const { previewKey } = await rotateEventGroupPreviewKey(org.id, id);
+    printed.push(`  Preview key (X-TBook-Preview): ${previewKey}`);
+  }
+  const after = await getGroupForOrg(org.id, id);
+  // The restore point records hints only, never the keys.
+  const dir = writeRestorePoint({
+    entity: "group",
+    action: "keys",
+    recordId: id,
+    before,
+    after: { apiKeyHint: after.apiKeyHint, previewKeyHint: after.previewKeyHint ?? "" },
+    audit: {
+      timestamp: new Date().toISOString(),
+      operator: resolveOperator(flags),
+      command: process.argv.slice(2),
+      entity: "group",
+      action: "keys",
+      organizationId: org.id,
+      recordId: id,
+      changes: [
+        ...(rotateApi ? [{ field: "apiKey", before: before.apiKeyHint, after: after.apiKeyHint }] : []),
+        ...(rotatePreview ? [{ field: "previewKey", before: before.previewKeyHint, after: after.previewKeyHint ?? "" }] : []),
+      ],
+      reversible: false,
+      note: "Key rotation; the old key can't be restored.",
+    },
+  });
+  for (const line of printed) console.log(line);
+  console.log(`\nSaved. Restore point (hints only): ${dir}`);
+}
+
 export async function runGroupCommand(action: string | undefined, argv: string[]): Promise<void> {
   const flags = parseArgs(argv);
   switch (action) {
@@ -144,7 +221,9 @@ export async function runGroupCommand(action: string | undefined, argv: string[]
       return groupList(flags);
     case "edit":
       return groupEdit(flags);
+    case "keys":
+      return groupKeys(flags);
     default:
-      throw new CliError(`Unknown "group" action "${action ?? ""}". Try: list, edit.`);
+      throw new CliError(`Unknown "group" action "${action ?? ""}". Try: list, edit, keys.`);
   }
 }

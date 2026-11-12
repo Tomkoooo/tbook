@@ -44,7 +44,9 @@ import {
 } from "@tbook/schemas";
 import {
   accommodationGuestCount,
+  attendeeIssuesMessage,
   countRosterPlayers,
+  eligibilityIssuesMessage,
   getEventSalesState,
   mergeRegistrationFieldSchemas,
   normalizeAttendeePayload,
@@ -57,6 +59,7 @@ import { loadDataListMembership } from "./data-list-service";
 import { resolveModules } from "./module-registry";
 import {
   assignAttendeeIdentity,
+  checkUniqueFieldValues,
   claimUniqueFieldValues,
   newRegistrationNumber,
   releaseBookingExtensions,
@@ -153,6 +156,11 @@ export interface BookingPolicyOverrides {
   skipEligibility?: boolean;
 }
 
+/** Thrown when the event (or the overall cap) has no room for the requested guests. */
+export function capacityFullError(): ActionError {
+  return new ActionError(400, "capacity_full", "Sajnos elfogytak a szabad helyek erre az eseményre.");
+}
+
 export type QuoteOptions = { groupId?: string } & BookingPolicyOverrides;
 
 export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<BookingQuoteContext> {
@@ -163,7 +171,7 @@ export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<B
 
   const salesState = getEventSalesState(event);
   if (salesState !== "on_sale" && !opts?.allowClosedSales) {
-    throw ActionError.validation(salesState === "upcoming" ? "Ticket sales have not opened yet." : "Ticket sales are closed.", { salesState });
+    throw new ActionError(400, "sales_closed", salesState === "upcoming" ? "A regisztráció még nem indult el." : "A regisztráció lezárult.", { salesState });
   }
 
   const group = event.groupId ? await eventGroupRepository.findById(String(event.groupId)) : null;
@@ -410,18 +418,52 @@ export interface CreateBookingInput {
  * is the chosen alternative to a single all-or-nothing transaction.
  */
 export async function createPendingBooking(input: CreateBookingInput, opts?: QuoteOptions): Promise<IBooking> {
+  return (await buildPendingBooking(input, opts, false))!;
+}
+
+export interface BookingPreview {
+  totalHuf: number;
+  guests: number;
+  /** The organization/group/event context, for a caller that decides the confirmation path. */
+  event: IEvent;
+}
+
+/**
+ * Preview mode (dry run): every check createPendingBooking makes — form,
+ * rules, `unique` answers and module holds, capacity, module reservations
+ * such as bus seats — without reserving or saving anything.
+ */
+export async function previewPendingBooking(input: CreateBookingInput, opts?: QuoteOptions): Promise<BookingPreview> {
+  const ctx = await quote(
+    {
+      ...input,
+      teamMemberCount:
+        input.attendees && input.attendees.length > 0
+          ? countRosterPlayers(input.attendees, { registrationUnit: "team", teamMemberLimit: 100 }, input.guests)
+          : (input.teamMemberCount ?? undefined),
+    },
+    opts,
+  );
+  await buildPendingBooking(input, opts, true, ctx);
+  return { totalHuf: ctx.quote.totalHuf, guests: ctx.guests, event: ctx.event };
+}
+
+async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions | undefined, dryRun: boolean, quoted?: BookingQuoteContext): Promise<IBooking | null> {
   const inferredTeamMemberCount =
     input.attendees && input.attendees.length > 0
       ? countRosterPlayers(input.attendees, { registrationUnit: "team", teamMemberLimit: 100 }, input.guests)
       : (input.teamMemberCount ?? undefined);
 
-  const ctx = await quote({ ...input, teamMemberCount: inferredTeamMemberCount }, opts);
+  const ctx = quoted ?? (await quote({ ...input, teamMemberCount: inferredTeamMemberCount }, opts));
   const { event, quote: priceQuote, hotelName, nights, selections, discountCode, currency, registrationFieldSchema, teamMemberFieldSchema, guests } = ctx;
 
   // Per-day passes are reserved first: it is the stricter, multi-counter
   // reservation, and if the optional overall cap then fails we release it.
   let dayReserved: DayTickets | null = null;
-  if (ctx.dayTickets && event.dayPass) {
+  if (dryRun) {
+    // Day baskets were checked against live availability in quote(); only the overall cap is left.
+    if (event.capacity != null && !opts?.allowOverCapacity && event.capacity - (event.soldGuestCount ?? 0) < guests) throw capacityFullError();
+  } else if (ctx.dayTickets && event.dayPass) {
     const dayConfig = event.dayPass;
     const reservedDays = opts?.allowOverCapacity
       ? await eventRepository.reserveDayCapacityUnchecked(String(event._id), ctx.dayTickets)
@@ -435,7 +477,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
   }
 
   let capacityReserved = false;
-  if (event.capacity != null) {
+  if (event.capacity != null && !dryRun) {
     // The unchecked variant is a separate repository method, so an
     // over-capacity write can only happen when a caller explicitly asks.
     const reserved = opts?.allowOverCapacity
@@ -443,7 +485,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       : await eventRepository.reserveCapacity(String(event._id), guests);
     if (!reserved) {
       if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
-      throw ActionError.validation("Not enough capacity left for this event.");
+      throw capacityFullError();
     }
     capacityReserved = true;
   }
@@ -476,7 +518,7 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       teamMemberLimit: event.teamMemberLimit ?? null,
       playersPerTicket: playersPerTicket > 1 ? playersPerTicket : null,
     });
-    if (attendeeIssues.length > 0) throw ActionError.validation("Please check the attendee details.", { issues: attendeeIssues });
+    if (attendeeIssues.length > 0) throw ActionError.validation(attendeeIssuesMessage(attendeeIssues, fieldSchema), { issues: attendeeIssues });
 
     // @tbook/schemas types eligibilityFormRules.rules[].op as a plain string (persistence-layer,
     // matches the legacy Mongoose shape); @tbook/domain narrows it to EligibilityMatchOp for its
@@ -492,10 +534,15 @@ export async function createPendingBooking(input: CreateBookingInput, opts?: Quo
       : validateEligibility(eligibilityEvent, input.attendees, fieldSchema, teamMemberFieldSchema, playersPerTicket > 1 ? playersPerTicket : null, {
           listMembership: await loadDataListMembership(extensionCtx.organizationId, collectListLookups(eligibilityEvent, input.attendees)),
         });
-    if (eligibilityIssues.length > 0) throw ActionError.validation("This event has eligibility requirements that are not met.", { issues: eligibilityIssues });
+    if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
 
     const attendees = assignAttendeeIdentity(normalizeAttendeePayload(fieldSchema, input.attendees, teamMemberFieldSchema));
     const bookingId = new Types.ObjectId();
+    if (dryRun) {
+      await checkUniqueFieldValues(extensionCtx, attendees, fieldSchema);
+      await runRegistrationReservers(extensionCtx, String(bookingId), attendees, fieldSchema, { dryRun: true });
+      return null;
+    }
     releaseClaims = await claimUniqueFieldValues(extensionCtx, String(bookingId), attendees, fieldSchema);
     releaseReservations = await runRegistrationReservers(extensionCtx, String(bookingId), attendees, fieldSchema);
 

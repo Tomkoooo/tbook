@@ -48,6 +48,7 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
   const eventId = String(event._id);
   const routes = await busTransport.listRoutes(eventId);
   const passengers = await Promise.all(routes.map((route) => busTransport.listPassengers(route)));
+  const waitlist = await busTransport.listBusWaitlist(eventId);
   const totals = routes.reduce((sum, route) => ({ seats: sum.seats + route.capacity, taken: sum.taken + route.seatsTaken }), { seats: 0, taken: 0 });
 
   return (
@@ -73,7 +74,7 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
       />
       <SectionCard
         title={`${event.name} — ${routes.length} buses`}
-        description={`${totals.taken} of ${totals.seats} seats taken. Bulk-add buses from a spreadsheet on the Data page.`}
+        description={`${totals.taken} of ${totals.seats} seats taken · ${waitlist.length} on the bus waitlist. Bulk-add buses from a spreadsheet on the Data page.`}
         actions={canManage ? <RecountSeatsButton eventId={eventId} /> : undefined}
         flush
       >
@@ -157,6 +158,44 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
                   </TableRow>
                 );
               })}
+            </TableBody>
+          </Table>
+        )}
+      </SectionCard>
+      <SectionCard
+        title={`Bus waitlist — ${waitlist.length}`}
+        description="Guests who chose “notify me” because their bus was full. They hold no seat and aren't on any passenger list. When seats free up they get an email (at most once per new free seats, or every 6 hours) and pick a bus on the site."
+        flush
+      >
+        {waitlist.length === 0 ? (
+          <EmptyState title="Nobody is waiting for a bus" />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-right">#</TableHead>
+                <TableHead>Guest</TableHead>
+                <TableHead>Contact</TableHead>
+                <TableHead>Waiting since</TableHead>
+                <TableHead>Last notified</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {waitlist.map((row) => (
+                <TableRow key={`${row.position}-${row.registrationNumber ?? row.name}`}>
+                  <TableCell className="text-right tabular-nums">{row.position}</TableCell>
+                  <TableCell>
+                    {row.name}
+                    <div className="text-muted-foreground text-xs">{row.registrationNumber ?? ""}</div>
+                  </TableCell>
+                  <TableCell>
+                    {row.email || "—"}
+                    <div className="text-muted-foreground text-xs">{row.phone}</div>
+                  </TableCell>
+                  <TableCell>{busTransport.formatDeparture(row.joinedAt)}</TableCell>
+                  <TableCell>{row.notifiedAt ? busTransport.formatDeparture(row.notifiedAt) : "—"}</TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         )}

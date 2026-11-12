@@ -5,6 +5,7 @@ import { parseInput } from "@tbook/actions";
 import { eventEmails } from "@tbook/modules";
 import { adminEventGroupInputSchema, adminEventInputSchema, dataListKeyNormalizations } from "@tbook/schemas";
 import {
+  cleanModuleConfig,
   createEvent,
   createEventGroup,
   getModuleDefinition,
@@ -15,6 +16,7 @@ import {
   prepareSheetAsDataList,
   previewDataListRows,
   resolveModules,
+  sanitizeRichText,
   setEventModule,
   setOrganizationModule,
   sheetAsDataList,
@@ -38,6 +40,14 @@ import { confirmPhrase } from "../lib/interact";
  *
  * Inside the plan, "$list:<ref>" stands for the id of the data list with
  * that `ref` (in registration rules and email audiences).
+ *
+ * `--update` is for an event the plan already created: it brings the
+ * module grants, the event's module switches and settings, and the emails
+ * (matched by name; `--email <name>` limits it to some) in line with the
+ * plan. It never touches the event's own fields (status, dates, form),
+ * the group or the data lists. Plan settings left empty ("") don't erase
+ * a value set in the console. Dry run first, then --apply --prod-ack and
+ * the UPDATE phrase; the restore point holds everything it changed.
  */
 
 const listRefPattern = /^\$list:(.+)$/;
@@ -114,6 +124,7 @@ async function setupApply(flags: Flags): Promise<void> {
   const org = await resolveOrganization(requireFlag(flags, "org"));
   const plan = readPlan(requireFlag(flags, "plan"));
   const dryRun = checkApplyGate(flags) === "dry-run";
+  if (flags.bool("update")) return setupUpdate(flags, plan, org, db.dbName, dryRun);
 
   console.log(`Database: ${db.dbName}   Organization: ${org.name} (${org.slug})`);
   if (plan.description) console.log(plan.description);
@@ -250,8 +261,183 @@ async function setupApply(flags: Flags): Promise<void> {
   }
 }
 
+// ---- --update ------------------------------------------------------------------------
+
+type ModuleMap = Record<string, { enabled?: boolean; config?: Record<string, unknown> } | undefined>;
+
+function plainObject<T>(value: T): T {
+  return value == null ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+/** Plan config over the stored one; an empty plan value keeps what is stored. */
+function mergedConfig(key: string, stored: Record<string, unknown> | undefined, planned: Record<string, unknown> | undefined): Record<string, string> {
+  const merged: Record<string, unknown> = { ...(stored ?? {}) };
+  for (const [field, value] of Object.entries(planned ?? {})) {
+    if (value === "" || value == null) continue;
+    merged[field] = value;
+  }
+  return cleanModuleConfig(key, merged);
+}
+
+const EMAIL_FIELDS = ["subject", "body", "trigger", "audience", "listId", "listMatchFieldKey", "conditions", "attachTicket", "active", "sortOrder"] as const;
+
+function emailComparable(email: Record<string, unknown>): Record<string, unknown> {
+  return {
+    subject: String(email.subject ?? "").trim(),
+    body: String(email.body ?? ""),
+    trigger: email.trigger,
+    audience: email.trigger === "on_registration" ? "registered" : (email.audience ?? "registered"),
+    listId: email.listId ? String(email.listId) : null,
+    listMatchFieldKey: email.listMatchFieldKey ?? null,
+    conditions: email.conditions && (email.conditions as { rules?: unknown[] }).rules?.length ? plainObject(email.conditions) : null,
+    attachTicket: Boolean(email.attachTicket),
+    active: email.active ?? true,
+    sortOrder: Number(email.sortOrder ?? 0),
+  };
+}
+
+function short(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+}
+
+async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: string; slug: string }, dbName: string, dryRun: boolean): Promise<void> {
+  console.log(`Database: ${dbName}   Organization: ${org.name} (${org.slug})   Mode: update an existing event`);
+  for (const key of [...plan.organizationModules, ...Object.keys(plan.eventModules)]) {
+    if (!getModuleDefinition(key)) throw new CliError(`Unknown module "${key}".`);
+  }
+  const group = (await listGroupsForOrg(org.id)).find((g) => g.name === plan.group.name);
+  if (!group) throw new CliError(`No event group named "${plan.group.name}". Run without --update to create it.`);
+  const eventName = String(plan.event.name ?? "");
+  const event = (await listEventsForOrg(org.id)).find((e) => e.name === eventName && String(e.groupId) === String(group._id));
+  if (!event) throw new CliError(`No event named "${eventName}" in that group. Run without --update to create it.`);
+  const eventId = String(event._id);
+
+  // Lists are referenced, never re-imported here.
+  const lists = await listDataListsForOrg(org.id);
+  const listIds = new Map<string, string>();
+  for (const entry of plan.dataLists) {
+    const list = lists.find((l) => l.name === entry.name);
+    if (list) listIds.set(entry.ref, String(list._id));
+  }
+
+  const entitled = await resolveModules({ organizationId: org.id });
+  const grants = plan.organizationModules.filter((key) => !entitled.isOn(key));
+
+  const storedModules = plainObject((event.modules ?? {}) as ModuleMap);
+  const moduleChanges: Array<{ key: string; enabled: boolean; config: Record<string, string>; before: unknown }> = [];
+  for (const [key, state] of Object.entries(plan.eventModules)) {
+    const current = storedModules[key];
+    const config = mergedConfig(key, current?.config, state.config);
+    const currentConfig = current ? cleanModuleConfig(key, current.config ?? {}) : null;
+    if (current?.enabled === state.enabled && JSON.stringify(currentConfig) === JSON.stringify(config)) continue;
+    moduleChanges.push({ key, enabled: state.enabled, config, before: current ?? null });
+  }
+
+  const only = new Set(flags.getAll("email"));
+  const storedEmails = await eventEmails.listEventEmails(eventId);
+  const emailChanges: Array<{ name: string; id: string | null; input: Record<string, unknown>; fields: string[]; before: unknown }> = [];
+  for (const raw of plan.emails) {
+    const name = String(raw.name ?? "");
+    if (only.size > 0 && !only.has(name)) continue;
+    const resolved = resolveRefs(raw, listIds) as Record<string, unknown>;
+    const desired = emailComparable({ ...resolved, body: sanitizeRichText(String(resolved.body ?? "")) });
+    const existing = storedEmails.find((e) => e.name === name);
+    if (!existing) {
+      emailChanges.push({ name, id: null, input: resolved, fields: ["(new email)"], before: null });
+      continue;
+    }
+    const current = emailComparable(existing.toObject() as unknown as Record<string, unknown>);
+    const fields = EMAIL_FIELDS.filter((field) => JSON.stringify(current[field]) !== JSON.stringify(desired[field]));
+    if (fields.length > 0) emailChanges.push({ name, id: String(existing._id), input: { ...resolved, name }, fields: [...fields], before: existing.toObject() });
+  }
+  if (only.size > 0) for (const name of only) if (!plan.emails.some((e) => e.name === name)) throw new CliError(`The plan has no email named "${name}".`);
+
+  console.log(`\nEvent "${event.name}" ${eventId} [${event.status}] — its own fields are left as they are.`);
+  console.log("Changes:");
+  console.log(`  Grant modules: ${grants.length ? grants.join(", ") : "(none)"}`);
+  for (const change of moduleChanges) {
+    const before = change.before as { enabled?: boolean; config?: Record<string, unknown> } | null;
+    console.log(`  Event module ${change.key}: ${before ? (before.enabled ? "on" : "off") : "not set"} -> ${change.enabled ? "on" : "off"}`);
+    const oldConfig = before ? cleanModuleConfig(change.key, before.config ?? {}) : {};
+    for (const [field, value] of Object.entries(change.config)) {
+      if ((oldConfig as Record<string, string>)[field] !== value) console.log(`      ${field}: ${short((oldConfig as Record<string, string>)[field] ?? "")} -> ${short(value)}`);
+    }
+  }
+  for (const change of emailChanges) {
+    console.log(`  Email "${change.name}": ${change.id ? `update ${change.fields.join(", ")}` : "create"}`);
+    if (change.id && change.fields.includes("body")) {
+      const before = String((change.before as { body?: string }).body ?? "");
+      const after = sanitizeRichText(String(change.input.body ?? ""));
+      let i = 0;
+      while (i < before.length && before[i] === after[i]) i += 1;
+      console.log(`      body changes at char ${i}: …${short(before.slice(Math.max(0, i - 40), i + 120))}`);
+      console.log(`                         -> …${short(after.slice(Math.max(0, i - 40), i + 200))}`);
+    }
+  }
+  if (grants.length === 0 && moduleChanges.length === 0 && emailChanges.length === 0) {
+    console.log("\nNothing to change — the event already matches the plan.");
+    return;
+  }
+  if (dryRun) {
+    console.log("\nDRY RUN — nothing written. Re-run with --apply --prod-ack to update.");
+    return;
+  }
+  await confirmPhrase("UPDATE", flags, "confirm", `Write the changes above to "${dbName}"`);
+
+  const before = { organizationModules: entitled.enabledKeys(), eventModules: storedModules, emails: emailChanges.map((c) => c.before) };
+  const done: Record<string, unknown> = { grantedModules: [] as string[], eventModules: [] as string[], emails: [] as string[] };
+  try {
+    for (const key of grants) {
+      await setOrganizationModule(org.id, key, { enabled: true }, null);
+      (done.grantedModules as string[]).push(key);
+    }
+    for (const change of moduleChanges) {
+      await setEventModule(org.id, eventId, change.key, { enabled: change.enabled, config: change.config }, null);
+      (done.eventModules as string[]).push(change.key);
+      console.log(`  ✓ module ${change.key}`);
+    }
+    for (const change of emailChanges) {
+      const input = change.input as unknown as eventEmails.EventEmailInput;
+      const email = change.id ? await eventEmails.updateEventEmail(org.id, change.id, input) : await eventEmails.createEventEmail(org.id, eventId, input);
+      (done.emails as string[]).push(String(email._id));
+      console.log(`  ✓ email "${email.name}"`);
+    }
+  } finally {
+    const after = {
+      ...done,
+      eventModules: plainObject(((await listEventsForOrg(org.id)).find((e) => String(e._id) === eventId)?.modules ?? {}) as ModuleMap),
+      emails: (await eventEmails.listEventEmails(eventId)).filter((e) => (done.emails as string[]).includes(String(e._id))).map((e) => e.toObject()),
+    };
+    const dir = writeRestorePoint({
+      entity: "setup",
+      action: "update",
+      recordId: eventId,
+      before,
+      after,
+      audit: {
+        timestamp: new Date().toISOString(),
+        operator: resolveOperator(flags),
+        command: process.argv.slice(2),
+        entity: "setup",
+        action: "update",
+        organizationId: org.id,
+        recordId: eventId,
+        changes: [
+          ...grants.map((key) => ({ field: `org module ${key}`, before: false, after: true })),
+          ...moduleChanges.map((c) => ({ field: `event module ${c.key}`, before: c.before, after: { enabled: c.enabled, config: c.config } })),
+          ...emailChanges.map((c) => ({ field: `email ${c.name}`, before: c.fields, after: "updated" })),
+        ],
+        reversible: false,
+        note: "before.json holds the event modules and the emails as they were; restore them from the console if needed.",
+      },
+    });
+    console.log(`\nRestore point: ${dir}`);
+  }
+}
+
 export async function runSetupCommand(action: string | undefined, argv: string[]): Promise<void> {
   const flags = parseArgs(argv);
   if (action === "apply") return setupApply(flags);
-  throw new CliError(`Unknown setup action "${action ?? ""}". Use: setup apply --org <slug> --plan <file.json> [--replace-lists] [--hide-api-key]`);
+  throw new CliError(`Unknown setup action "${action ?? ""}". Use: setup apply --org <slug> --plan <file.json> [--replace-lists] [--hide-api-key] [--update [--email <name>]]`);
 }

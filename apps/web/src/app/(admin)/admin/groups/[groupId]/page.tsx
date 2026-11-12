@@ -40,6 +40,7 @@ export default async function GroupPage({ params }: { params: Promise<{ groupId:
         groupId={groupId}
         canManageKey={canManageKey}
         apiKeyHint={group.apiKeyHint}
+        previewKeyHint={group.previewKeyHint ?? ""}
         initial={{
           name: group.name,
           description: group.description ?? "",

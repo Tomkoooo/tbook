@@ -65,7 +65,12 @@ shape in `@tbook/schemas`' `dayPassConfigSchema`) as one JSON file, since a
 day-pass event is unusable without it. `group list`/`group edit` cover an
 event group's own scalar fields (e.g. `--set status=active` to publish a
 draft group — a group must be `active` for its API key to authenticate v1
-requests).
+requests). `group keys` shows the API key hint and the dev preview key
+(`--reveal-preview`), and issues new keys (`--rotate-preview`,
+`--rotate-api-key`; printed once, `--confirm ROTATE`). The API key is stored
+only as a hash, so it can't be shown again. `setup apply --update` brings an
+existing event's module grants, module settings and emails in line with its
+plan file without touching the event's own fields (`--confirm UPDATE`).
 
 Safety model, enforced the same way for every command and every entity
 added later:

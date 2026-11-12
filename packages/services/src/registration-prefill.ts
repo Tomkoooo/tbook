@@ -3,6 +3,8 @@ import { eventRepository, fieldClaimRepository, type IEvent } from "@tbook/db";
 import { normalizeUniqueValue, resolveEligibilityRules, type EligibilityRulesConfig } from "@tbook/domain";
 import type { AttendeeFieldDef, AttendeeFieldValue } from "@tbook/schemas";
 import { findDataListRow } from "./data-list-service";
+import { resolveModules } from "./module-registry";
+import { findHeldIdentifier } from "./registration-pipeline";
 
 /**
  * "Start with your ID": the guest types their identifying answer (e.g.
@@ -32,6 +34,8 @@ export interface RegistrationPrefillResult {
   alreadyRegistered: boolean;
   /** Answers to start the form with (only when found and not yet registered). */
   fields: Record<string, AttendeeFieldValue>;
+  /** Added: the ID waits on the event's waitlist (no data comes back; the guest checks their place instead). */
+  onWaitlist?: boolean;
 }
 
 type EventLike = Pick<IEvent, "attendeeFieldSchema" | "eligibilityPreset" | "eligibilityFormRules"> & Record<string, unknown>;
@@ -93,7 +97,7 @@ export async function prefillRegistration(eventId: string, rawCode: string): Pro
   const setup = registrationPrefillSetup(event as unknown as EventLike);
   if (!setup) throw ActionError.validation("This event's form doesn't start with an ID lookup.");
   const code = String(rawCode ?? "").trim().slice(0, 100);
-  if (!code) throw ActionError.validation("Enter your ID.");
+  if (!code) throw ActionError.validation("Add meg az azonosítódat.");
 
   const fields = plainFields(event as unknown as EventLike);
   const identifier = fields.find((f) => f.key === setup.fieldKey)!;
@@ -103,6 +107,11 @@ export async function prefillRegistration(eventId: string, rawCode: string): Pro
   }
 
   const organizationId = event.organizationId ? String(event.organizationId) : null;
+  const groupId = event.groupId ? String(event.groupId) : null;
+  const modules = await resolveModules({ organizationId, groupId, event });
+  const held = await findHeldIdentifier({ event, organizationId, groupId, modules }, [{ fieldKey: setup.fieldKey, value: normalizeUniqueValue(code) }]);
+  if (held?.reason === "waitlist") return { found: true, alreadyRegistered: false, onWaitlist: true, fields: {} };
+
   const row = organizationId ? await findDataListRow(organizationId, setup.listId, code).catch(() => null) : null;
   if (!row) return { found: false, alreadyRegistered: false, fields: {} };
 

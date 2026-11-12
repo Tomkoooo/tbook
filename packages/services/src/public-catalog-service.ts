@@ -327,9 +327,11 @@ export interface PublicEventDetail {
   hotels: PublicHotelListing[];
 }
 
-export async function getPublicEventDetail(groupId: string, eventId: string): Promise<PublicEventDetail | null> {
+export async function getPublicEventDetail(groupId: string, eventId: string, opts: { allowDraft?: boolean } = {}): Promise<PublicEventDetail | null> {
   const event = await eventRepository.findById(eventId);
-  if (!event || String(event.groupId) !== groupId || event.status !== "active") return null;
+  // Preview mode (a valid X-TBook-Preview key) also shows draft events.
+  const visible = event?.status === "active" || (opts.allowDraft && event?.status === "draft");
+  if (!event || String(event.groupId) !== groupId || !visible) return null;
 
   const group = await eventGroupRepository.findById(groupId);
   const org = group?.organizationId ? await organizationRepository.findById(String(group.organizationId)) : null;

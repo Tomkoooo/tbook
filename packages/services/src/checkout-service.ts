@@ -2,7 +2,15 @@ import { Types } from "mongoose";
 import Stripe from "stripe";
 import { ActionError } from "@tbook/actions";
 import { bookingRepository, eventRepository, organizationRepository, voucherRepository, type IBooking } from "@tbook/db";
-import { assertValidBookingStatusTransition, createPendingBooking, expireBooking, type BookingPolicyOverrides, type CreateBookingInput } from "./booking-service";
+import { randomBytes } from "node:crypto";
+import {
+  assertValidBookingStatusTransition,
+  createPendingBooking,
+  expireBooking,
+  previewPendingBooking,
+  type BookingPolicyOverrides,
+  type CreateBookingInput,
+} from "./booking-service";
 import { createPendingMultiBookings, releaseMultiBookings, type CreateMultiBookingInput } from "./multi-booking-service";
 import { extensions } from "./extensions";
 import { resolveModules } from "./module-registry";
@@ -229,6 +237,27 @@ export async function createBookingWithCheckout(
     stripeSessionId: session.sessionId,
     expiresAt: session.expiresAt.toISOString(),
   };
+}
+
+export interface PreviewCheckoutResult {
+  preview: true;
+  /** "confirmed" when the booking would be confirmed at once (free registration), else "payment". */
+  status: "confirmed" | "payment";
+  registrationNumber: string;
+  bookingId: null;
+  totalHuf: number;
+}
+
+/**
+ * Preview mode of POST /bookings (header `X-TBook-Preview`): the same
+ * checks as a real booking — draft events and a closed sales window are
+ * allowed — but nothing is saved, reserved or sent.
+ */
+export async function previewBookingWithCheckout(input: CreateBookingWithCheckoutInput, opts?: { groupId?: string }): Promise<PreviewCheckoutResult> {
+  const { totalHuf, event } = await previewPendingBooking(input, { groupId: opts?.groupId, allowInactiveEvent: true, allowClosedSales: true });
+  const free = await bookingBypassesCheckout({ totalHuf, eventId: event._id, organizationId: event.organizationId, groupId: event.groupId } as unknown as IBooking);
+  const code = randomBytes(4).toString("hex").slice(0, 4).toUpperCase();
+  return { preview: true, status: free ? "confirmed" : "payment", registrationNumber: `PREVIEW-${code}`, bookingId: null, totalHuf };
 }
 
 /**

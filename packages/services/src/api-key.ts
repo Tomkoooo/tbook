@@ -56,3 +56,25 @@ export function extractApiKeyFromRequest(request: Request): string | null {
   }
   return null;
 }
+
+// ---- Dev preview key ----------------------------------------------------------
+
+export const TBOOK_PREVIEW_KEY_PREFIX = "tbp_";
+export const TBOOK_PREVIEW_HEADER = "x-tbook-preview";
+
+/** A new preview key (plaintext; stored as a hash plus an encrypted copy). */
+export function generatePreviewKey(): string {
+  return `${TBOOK_PREVIEW_KEY_PREFIX}${randomBytes(18).toString("hex")}`;
+}
+
+/** The `X-TBook-Preview` header value, normalized like an API key; null when absent. */
+export function extractPreviewKeyFromRequest(request: Request): string | null {
+  const value = normalizeTBookApiKey(request.headers.get(TBOOK_PREVIEW_HEADER));
+  return value || null;
+}
+
+/** True when `plaintext` is the group's current preview key (constant-time). */
+export function verifyPreviewKey(plaintext: string | null | undefined, group: { previewKeyHash?: string | null } | null | undefined): boolean {
+  if (!plaintext || !group?.previewKeyHash) return false;
+  return verifyApiKey(plaintext, group.previewKeyHash);
+}

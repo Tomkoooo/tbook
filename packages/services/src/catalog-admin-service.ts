@@ -11,7 +11,8 @@ import {
 } from "@tbook/db";
 import { dayAvailability } from "@tbook/domain";
 import type { AdminEventGroupInput, AdminEventInput, AdminHotelInput } from "@tbook/schemas";
-import { apiKeyHint, generateApiKey, hashApiKey } from "./api-key";
+import { apiKeyHint, generateApiKey, generatePreviewKey, hashApiKey } from "./api-key";
+import { decryptOrgSecret, encryptOrgSecret } from "./org-secrets";
 import { assertEventInOrg } from "./voucher-admin-service";
 
 /**
@@ -80,6 +81,38 @@ export async function rotateEventGroupApiKey(organizationId: string, groupId: st
     apiKeyCreatedAt: new Date(),
   });
   return { apiKey };
+}
+
+/**
+ * Creates (or replaces) the group's dev preview key. With it in the
+ * `X-TBook-Preview` header, the v1 API reads draft events and runs
+ * bookings / waitlist joins as dry runs (nothing saved, nothing sent).
+ * Stored hashed for checking plus encrypted, so an admin can reveal it.
+ */
+export async function rotateEventGroupPreviewKey(organizationId: string, groupId: string): Promise<{ previewKey: string }> {
+  await getGroupForOrg(organizationId, groupId);
+  const previewKey = generatePreviewKey();
+  await eventGroupRepository.updateById(groupId, {
+    previewKeyHash: hashApiKey(previewKey),
+    previewKeyEnc: encryptOrgSecret(previewKey),
+    previewKeyHint: apiKeyHint(previewKey),
+    previewKeyCreatedAt: new Date(),
+  } as never);
+  return { previewKey };
+}
+
+/** The current preview key in plaintext; null when none is set (or it can't be decrypted — rotate it then). */
+export async function revealEventGroupPreviewKey(organizationId: string, groupId: string): Promise<string | null> {
+  const group = await getGroupForOrg(organizationId, groupId);
+  if (!group.previewKeyHash) return null;
+  const plain = decryptOrgSecret(group.previewKeyEnc);
+  return plain && hashApiKey(plain) === group.previewKeyHash ? plain : null;
+}
+
+/** Switches preview mode off for the group. */
+export async function revokeEventGroupPreviewKey(organizationId: string, groupId: string): Promise<void> {
+  await getGroupForOrg(organizationId, groupId);
+  await eventGroupRepository.updateById(groupId, { previewKeyHash: null, previewKeyEnc: "", previewKeyHint: "", previewKeyCreatedAt: null } as never);
 }
 
 /* ---- Events ---------------------------------------------------------- */

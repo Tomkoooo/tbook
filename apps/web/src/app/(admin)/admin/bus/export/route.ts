@@ -3,7 +3,7 @@ import { busTransport } from "@tbook/modules";
 import { getEventForOrg } from "@tbook/services";
 import { requireOrgPermission } from "@/lib/admin-auth";
 
-/** Passenger lists as .xlsx: a summary sheet plus one sheet per bus (or a single bus with ?routeId). */
+/** Passenger lists as .xlsx: a summary sheet plus one sheet per bus and the bus waitlist (or a single bus with ?routeId). */
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const eventId = url.searchParams.get("eventId") ?? "";
@@ -12,7 +12,9 @@ export async function GET(request: Request) {
     const { organizationId } = await requireOrgPermission("bus:manage");
     const event = await getEventForOrg(organizationId, eventId);
     const routes = (await busTransport.listRoutes(eventId)).filter((route) => !routeId || String(route._id) === routeId);
-    const bytes = await busTransport.exportPassengersXlsx(routes);
+    // The whole-event export also lists the bus waitlist on its own sheet.
+    const waitlist = routeId ? undefined : await busTransport.listBusWaitlist(String(event._id));
+    const bytes = await busTransport.exportPassengersXlsx(routes, waitlist);
     const name = `${event.name}-buszok${routeId && routes[0] ? `-${routes[0].code}` : ""}`.replace(/[^\w.-]+/g, "_");
     return new Response(new Uint8Array(bytes), {
       headers: {

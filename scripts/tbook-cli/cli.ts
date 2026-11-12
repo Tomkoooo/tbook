@@ -30,9 +30,10 @@ Usage:
 
 Entities and actions:
   event     list | show | create | edit | archive | undo | groups
-  group     list | edit
+  group     list | edit | keys   (keys: API key hint, --reveal-preview, --rotate-preview, --rotate-api-key)
   booking   list | show | resend-voucher
-  setup     apply --plan <file.json>   (modules, data lists from spreadsheets, group, event, emails)
+  setup     apply --plan <file.json> [--update]   (modules, data lists from spreadsheets, group, event, emails;
+            --update brings an existing event's modules, module settings and emails in line with the plan)
 
 Every command needs --org <idOrSlug>. Every write defaults to a dry run —
 pass --apply --prod-ack to actually write (this CLI always treats the
@@ -57,6 +58,9 @@ Examples:
       --apply --prod-ack
   npx tsx scripts/tbook-cli/cli.ts group edit --org horror-weeks --id <groupId> --set status=active \\
       --apply --prod-ack
+  npx tsx scripts/tbook-cli/cli.ts group keys --org horror-weeks --id <groupId> --reveal-preview
+  npx tsx scripts/tbook-cli/cli.ts group keys --org horror-weeks --id <groupId> --rotate-preview \\
+      --apply --prod-ack --confirm ROTATE
   npx tsx scripts/tbook-cli/cli.ts booking list --org horror-weeks --status paid --q jane@example.com
   npx tsx scripts/tbook-cli/cli.ts booking resend-voucher --org horror-weeks --id <bookingId> \\
       --apply --prod-ack

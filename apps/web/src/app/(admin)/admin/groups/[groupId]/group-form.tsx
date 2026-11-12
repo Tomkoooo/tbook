@@ -9,7 +9,14 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField, NativeSelect, ResultNotice, SecretNotice, StatusSelect } from "@/components/form-bits";
 import { StickyFormFooter, UnsavedBadge } from "@/components/sticky-form-footer";
-import { rotateGroupKeyAction, saveGroupAction, type CatalogActionResult } from "../../catalog-actions";
+import {
+  revealGroupPreviewKeyAction,
+  revokeGroupPreviewKeyAction,
+  rotateGroupKeyAction,
+  rotateGroupPreviewKeyAction,
+  saveGroupAction,
+  type CatalogActionResult,
+} from "../../catalog-actions";
 
 export interface GroupFormValues {
   name: string;
@@ -37,11 +44,13 @@ export function GroupForm({
   groupId,
   initial,
   apiKeyHint,
+  previewKeyHint,
   canManageKey,
 }: {
   groupId: string | null;
   initial: GroupFormValues;
   apiKeyHint?: string;
+  previewKeyHint?: string;
   canManageKey: boolean;
 }) {
   const router = useRouter();
@@ -58,6 +67,14 @@ export function GroupForm({
     async (_prev: CatalogActionResult | null) => (groupId ? rotateGroupKeyAction(groupId) : null),
     null,
   );
+
+  const [previewState, previewAction, previewPending] = useActionState(async (_prev: CatalogActionResult | null, formData: FormData) => {
+    if (!groupId) return null;
+    const intent = formData.get("intent");
+    if (intent === "reveal") return revealGroupPreviewKeyAction(groupId);
+    if (intent === "revoke") return revokeGroupPreviewKeyAction(groupId);
+    return rotateGroupPreviewKeyAction(groupId);
+  }, null);
 
   const secret = keyState?.apiKey ?? state?.apiKey;
 
@@ -140,6 +157,43 @@ export function GroupForm({
                 </Button>
               </form>
               <p className="text-muted-foreground text-xs">The old key stops working immediately — update the storefront right after.</p>
+            </CardContent>
+          </Card>
+        ) : null}
+        {groupId && canManageKey ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Preview key</CardTitle>
+              <CardDescription>
+                For the site developer. Sent as <code>X-TBook-Preview</code> next to the API key, it shows draft events and runs registrations and
+                waitlist joins as dry runs: everything is checked, nothing is saved or emailed.{" "}
+                {previewKeyHint ? (
+                  <>
+                    Current key: <code>{previewKeyHint}</code>
+                  </>
+                ) : (
+                  "No preview key yet."
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              {previewState?.previewKey ? <SecretNotice label="Preview key:" value={previewState.previewKey} /> : null}
+              <ResultNotice result={previewState && !previewState.previewKey ? previewState : null} />
+              <form action={previewAction} className="flex flex-wrap gap-2">
+                <Button type="submit" name="intent" value="rotate" variant="outline" disabled={previewPending}>
+                  {previewKeyHint ? "New preview key" : "Generate preview key"}
+                </Button>
+                {previewKeyHint ? (
+                  <>
+                    <Button type="submit" name="intent" value="reveal" variant="ghost" disabled={previewPending}>
+                      Show
+                    </Button>
+                    <Button type="submit" name="intent" value="revoke" variant="ghost" disabled={previewPending}>
+                      Switch off
+                    </Button>
+                  </>
+                ) : null}
+              </form>
             </CardContent>
           </Card>
         ) : null}

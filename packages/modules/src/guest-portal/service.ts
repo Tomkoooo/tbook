@@ -5,8 +5,10 @@ import { bookingEventContext, cancelBookingAttendee, editBookingAttendee, editab
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
 import { BUS_TRANSPORT } from "../bus-transport";
 import { formatDeparture, routeForAttendee } from "../bus-transport/service";
+import { busWaitlistPosition } from "../bus-transport/waitlist";
 import { EVENT_EMAILS, resendAutomaticEmailsForAttendee } from "../event-emails/service";
 import { attendeeKeyOf, findAttendeeByCode, toEventAttendees } from "../shared/attendees";
+import { eventSiteUrl, fillTemplate, sendModuleMail } from "../shared/mail";
 
 export const GUEST_PORTAL = "guest-portal";
 
@@ -23,7 +25,15 @@ export interface GuestPortalConfig {
   allowCancel?: "yes" | "no";
   /** Comma-separated question keys guests may not change (identifying/unique ones never can). */
   lockedFields?: string;
+  cancelSubject?: string;
+  cancelMessage?: string;
 }
+
+export const GUEST_PORTAL_DEFAULTS = {
+  cancelSubject: "Regisztráció lemondva – {{event}}",
+  cancelMessage:
+    "Szia {{name}}!\n\nA(z) {{event}} eseményre szóló regisztrációdat ({{registrationNumber}}) lemondtuk, a QR-kódod már nem érvényes.\n\nHa meggondolod magad, amíg van szabad hely, a weboldalon újra jelentkezhetsz: {{siteUrl}}\n\nÜdv,\nA szervezők",
+};
 
 
 interface Found {
@@ -39,9 +49,9 @@ function plain<T>(value: T): T {
 
 async function portalEvent(eventId: string, groupId: string | null): Promise<{ event: IEvent; config: GuestPortalConfig }> {
   const event = await eventRepository.findById(eventId);
-  if (!event || (groupId && String(event.groupId) !== groupId)) throw ActionError.notFound("Event not found");
+  if (!event || (groupId && String(event.groupId) !== groupId)) throw ActionError.notFound("Az esemény nem található.");
   const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
-  if (!modules.isOn(GUEST_PORTAL)) throw ActionError.notFound("Self-service isn't available for this event.");
+  if (!modules.isOn(GUEST_PORTAL)) throw ActionError.notFound("Ennél az eseménynél nem érhető el az önkiszolgálás.");
   return { event, config: modules.config<GuestPortalConfig>(GUEST_PORTAL) };
 }
 
@@ -52,9 +62,9 @@ function identifyingKeys(schema: AttendeeFieldDef[]): string[] {
 /** Finds the guest a code belongs to: a registration number, or an identifying answer. */
 export async function findGuest(eventId: string, code: string, groupId: string | null = null): Promise<Found> {
   const { event, config } = await portalEvent(eventId, groupId);
-  if (!code.trim()) throw ActionError.validation("Enter your registration number or ID.");
+  if (!code.trim()) throw ActionError.validation("Add meg a regisztrációs számodat vagy az azonosítódat.");
   const hit = await findAttendeeByCode(event, code);
-  if (!hit) throw ActionError.notFound("No registration found with this code.");
+  if (!hit) throw ActionError.notFound("Ezzel a kóddal nem találtunk regisztrációt.");
   return { ...hit, event, config };
 }
 
@@ -101,6 +111,8 @@ export interface GuestView {
     captainName: string;
     captainPhone: string;
   } | null;
+  /** Added: on the bus waitlist ("értesítést kérek"): 1 = next in line; null otherwise. */
+  busWaitlist: { position: number } | null;
   /** The bus module's transfer rules text (e.g. the 15-minute wait rule). */
   transferRules: string;
   canEdit: boolean;
@@ -123,6 +135,7 @@ export async function guestView(found: Found): Promise<GuestView> {
   }
   const route = await routeForAttendee(booking, attendeeIndex);
   const busOn = ctx.modules.isOn(BUS_TRANSPORT);
+  const waitPosition = busOn ? await busWaitlistPosition(String(event._id), attendeeKeyOf(booking, attendee, attendeeIndex)) : null;
   return {
     eventId: String(event._id),
     eventName: event.name,
@@ -143,6 +156,7 @@ export async function guestView(found: Found): Promise<GuestView> {
             captainPhone: route.captainPhone,
           }
         : null,
+    busWaitlist: waitPosition != null ? { position: waitPosition } : null,
     transferRules: busOn ? (ctx.modules.config<{ transferRules?: string }>(BUS_TRANSPORT).transferRules ?? "") : "",
     canEdit: open && config.allowEdit !== "no",
     canCancel: open && config.allowCancel !== "no" && booking.totalHuf <= 0,
@@ -157,7 +171,7 @@ export async function lookupGuest(eventId: string, code: string, groupId: string
 export async function updateGuest(eventId: string, code: string, input: Record<string, unknown>, groupId: string | null = null): Promise<GuestView> {
   const found = await findGuest(eventId, code, groupId);
   const view = await guestView(found);
-  if (!view.canEdit) throw ActionError.forbidden("Changes are closed for this registration.");
+  if (!view.canEdit) throw ActionError.forbidden("Ezt a regisztrációt már nem lehet módosítani.");
   const fields: Record<string, AttendeeFieldValue> = {};
   for (const field of view.form) {
     if (!field.editable || !(field.key in input)) continue;
@@ -185,7 +199,35 @@ export async function updateGuest(eventId: string, code: string, input: Record<s
 export async function cancelGuest(eventId: string, code: string, reason: string, groupId: string | null = null): Promise<{ cancelled: true; registrationNumber: string | null }> {
   const found = await findGuest(eventId, code, groupId);
   const view = await guestView(found);
-  if (!view.canCancel) throw ActionError.forbidden("This registration can't be cancelled here. Please contact the organizer.");
+  if (!view.canCancel) throw ActionError.forbidden("Ezt a regisztrációt itt nem lehet lemondani. Kérjük, keresd a szervezőket.");
   await cancelBookingAttendee(String(found.booking._id), found.attendeeIndex, { by: "guest", reason: reason.slice(0, 500) });
   return { cancelled: true, registrationNumber: view.registrationNumber };
+}
+
+/**
+ * Release hook: a cancelled guest (by themselves on the site, or by an
+ * organizer) gets a short confirmation email. One per cancelled attendee.
+ */
+export async function sendCancellationEmails(booking: IBooking): Promise<void> {
+  const event = await eventRepository.findById(String(booking.eventId));
+  if (!event) return;
+  const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
+  if (!modules.isOn(GUEST_PORTAL)) return;
+  const config = modules.config<GuestPortalConfig>(GUEST_PORTAL);
+  const siteUrl = await eventSiteUrl(event);
+  const schema = (booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
+  const emailField = schema.find((field) => field.type === "email");
+  for (const row of toEventAttendees(booking)) {
+    const to = (emailField ? String(row.fields[emailField.key] ?? "").trim() : "") || booking.customer?.email || "";
+    const values = { name: row.displayName, event: event.name, registrationNumber: row.registrationNumber ?? booking.registrationNumber ?? "", siteUrl };
+    try {
+      await sendModuleMail(event, {
+        to,
+        subject: fillTemplate(config.cancelSubject?.trim() || GUEST_PORTAL_DEFAULTS.cancelSubject, values),
+        text: fillTemplate(config.cancelMessage?.trim() || GUEST_PORTAL_DEFAULTS.cancelMessage, values),
+      });
+    } catch (error) {
+      console.error("[tbook] cancellation email failed", String(booking._id), row.attendeeKey, error);
+    }
+  }
 }

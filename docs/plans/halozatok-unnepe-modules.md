@@ -293,3 +293,13 @@ Built after that (same day):
 - **Multi-event bookings** confirm free entries without Stripe.
 
 Still open: bus route data (none received), site/survey/gallery URLs and the transfer rules text, switching on `guest-portal`/`waitlist`/`feedback` for the event, deploy.
+
+### 2026-11-12: contract for the event site (plain PHP, server-side v1 calls)
+
+- **Preview mode:** a per-group preview key (console next to the API key; `tbook-cli group keys --rotate-preview / --reveal-preview`). Header `X-TBook-Preview` makes draft events readable (GET event, prefill) and turns `POST /bookings` and `POST /waitlist/join` into dry runs: every check, nothing saved or sent (`registrationNumber: "PREVIEW-XXXX"`, `bookingId: null` / `entryId: null` + would-be position). A wrong key = normal request.
+- **GET /events/{id}:** `remainingPlaces`, `salesState` (`not_started` / `on_sale` / `closed`), `preview`.
+- **Errors** carry a `code` (e.g. `capacity_full`, `on_waitlist`, `bus_full`); guest-facing messages are Hungarian ("te"), a failed form rule returns its own message.
+- **Event waitlist:** "joined" email with the position (`joinedSubject` / `joinedMessage`); `POST /waitlist/status` and `/waitlist/leave` by employee ID; an ID on the waitlist can't book (409 `on_waitlist`) and prefill says `onWaitlist: true`. Position = rank among waiting entries, 1 = next. Auto promotion claims the entry atomically (no double promotion across concurrent cancellations) and falls back to the bus waitlist when the stored bus is full (noted in the email). A cancelled guest gets a cancellation email (guest-portal `cancelSubject` / `cancelMessage`).
+- **Bus waitlist:** the bus select always offers `"waitlist"` ("Nincs szabad hely – értesítést kérek, ha felszabadul"): no seat, FIFO line, one email per newly freed seats (or after 6 h) with the bus module's `busWaitlistSubject` / `busWaitlistMessage`; the guest then picks a bus with `POST /guest/update`. Lookup returns `busWaitlist: { position }`; `{{bus.transfer}}` = "Várólistán (értesítünk)". Not on passenger lists; listed on the Buses page and in the export.
+- **Setup:** `setup apply --update` syncs an existing event's module grants, module switches/settings and emails with the plan (never its own fields). The plan now switches on `guest-portal`, `waitlist` (auto) and `feedback`, sets `siteUrl`, and email 1 carries the site password.
+- Tests: `apps/web/src/app/api/v1/capacity-waitlist.integration.test.ts` (1,300 through real bookings, waitlist, promotion, bus waitlist, preview, held IDs) and the CLI `setup --update` / `group keys` cases.

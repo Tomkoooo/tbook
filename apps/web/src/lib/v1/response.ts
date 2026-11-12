@@ -39,7 +39,7 @@ export function v1CorsHeaders(request?: Request): HeadersInit | undefined {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-TBook-Api-Key, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, X-TBook-Api-Key, X-TBook-Preview, Authorization",
     Vary: "Origin",
   };
 }
@@ -71,7 +71,9 @@ export function v1ErrorResponse(error: unknown, request?: Request, fallback = "S
   if (!(error instanceof V1HttpError || error instanceof ActionError)) {
     console.error("[tbook v1]", error);
   }
-  return v1Json({ error: messageOf(error, fallback) }, statusOf(error), request);
+  // Added (never renamed): `code`, a machine-readable reason (e.g. "capacity_full", "on_waitlist", "not_full").
+  const code = error instanceof ActionError ? error.code : undefined;
+  return v1Json(code ? { error: messageOf(error, fallback), code } : { error: messageOf(error, fallback) }, statusOf(error), request);
 }
 
 /**

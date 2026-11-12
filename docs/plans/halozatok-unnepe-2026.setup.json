@@ -1,6 +1,6 @@
 {
   "description": "MVM Hálózatok Ünnepe 2026 (Eventstructure) — free registration checked against the DSO staff list, bus transfer with seat limits, per-attendee emails. Apply with: npx tsx scripts/tbook-cli/cli.ts setup apply --org eventstructure --plan docs/plans/halozatok-unnepe-2026.setup.json",
-  "organizationModules": ["free-registration", "bus-transport", "event-emails"],
+  "organizationModules": ["free-registration", "bus-transport", "event-emails", "guest-portal", "waitlist", "feedback"],
   "dataLists": [
     {
       "ref": "dso",
@@ -168,14 +168,17 @@
     "bus-transport": { "enabled": true },
     "event-emails": {
       "enabled": true,
-      "config": { "siteUrl": "", "surveyUrl": "", "galleryUrl": "", "nameOrder": "family_first" }
-    }
+      "config": { "siteUrl": "https://halozatokunnepe2026.hu", "surveyUrl": "", "galleryUrl": "", "nameOrder": "family_first" }
+    },
+    "guest-portal": { "enabled": true },
+    "waitlist": { "enabled": true, "config": { "mode": "auto" } },
+    "feedback": { "enabled": true }
   },
   "emails": [
     {
       "name": "1. Regisztráció megnyitása (nov. 16.)",
       "subject": "MVM Hálózatok Ünnepe 2026 – Elindult a regisztráció!",
-      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>A jelentkezés során kiválaszthatod a számodra megfelelő buszjáratot, amennyiben transzfert igényelsz, valamint jelezheted esetleges ételérzékenységedet is.</p><p>Várunk szeretettel!</p>",
+      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>A weboldal jelszóval védett. Belépéshez használd ezt a jelszót: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során kiválaszthatod a számodra megfelelő buszjáratot, amennyiben transzfert igényelsz, valamint jelezheted esetleges ételérzékenységedet is.</p><p>Várunk szeretettel!</p>",
       "trigger": "manual",
       "audience": "list_all",
       "listId": "$list:dso",

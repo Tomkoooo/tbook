@@ -1,5 +1,5 @@
 import { extensions, registerModule } from "@tbook/services";
-import { processWaitlist, WAITLIST } from "./service";
+import { processWaitlist, WAITLIST, WAITLIST_DEFAULTS, waitlistHeldIdentifier } from "./service";
 
 export * from "./service";
 export * from "./model";
@@ -26,8 +26,18 @@ export function registerWaitlistModule(): void {
       { key: "offerMessage", label: "Offer email text", type: "text", hint: "Must contain {{link}}. Also {{name}}, {{event}}, {{hours}}." },
       { key: "registeredSubject", label: "Auto-registered email subject", type: "text" },
       { key: "registeredMessage", label: "Auto-registered email text", type: "text", hint: "The usual confirmation with the QR code is sent as well." },
+      { key: "joinedSubject", label: "Joined-the-waitlist email subject", type: "text", hint: `Placeholders {{name}}, {{event}}, {{position}}, {{siteUrl}}. Default: ${WAITLIST_DEFAULTS.joinedSubject}` },
+      {
+        key: "joinedMessage",
+        label: "Joined-the-waitlist email text",
+        type: "text",
+        hint: "Sent when someone joins. Placeholders {{name}}, {{event}}, {{position}} (1 = next in line), {{siteUrl}}. Empty = the built-in Hungarian text.",
+      },
     ],
   });
+
+  // An ID waiting on the list can't also register (or join twice).
+  extensions.registerIdentifierHolder(WAITLIST, waitlistHeldIdentifier);
 
   // A freed place moves the line, whether or not someone is waiting (cheap when nobody is).
   extensions.onBookingReleased(WAITLIST, async (booking, reason) => {

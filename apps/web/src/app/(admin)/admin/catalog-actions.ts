@@ -6,7 +6,10 @@ import {
   createEvent,
   createEventGroup,
   createHotel,
+  revealEventGroupPreviewKey,
+  revokeEventGroupPreviewKey,
   rotateEventGroupApiKey,
+  rotateEventGroupPreviewKey,
   updateEvent,
   updateEventGroup,
   updateHotel,
@@ -27,6 +30,8 @@ export interface CatalogActionResult {
   id?: string;
   /** Shown once, when a group key is created or rotated. */
   apiKey?: string;
+  /** The group's dev preview key, when generated or revealed. */
+  previewKey?: string;
 }
 
 function fail(error: unknown, label: string): CatalogActionResult {
@@ -122,6 +127,40 @@ export async function rotateGroupKeyAction(groupId: string): Promise<CatalogActi
     return { ok: true, apiKey, message: "New API key issued. The previous key no longer works." };
   } catch (error) {
     return fail(error, "rotate group key");
+  }
+}
+
+/** Creates or replaces the group's dev preview key (X-TBook-Preview). */
+export async function rotateGroupPreviewKeyAction(groupId: string): Promise<CatalogActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("group:apiKey");
+    const { previewKey } = await rotateEventGroupPreviewKey(organizationId, groupId);
+    revalidatePath(`/admin/groups/${groupId}`);
+    return { ok: true, previewKey, message: "New preview key issued. The previous preview key no longer works." };
+  } catch (error) {
+    return fail(error, "rotate preview key");
+  }
+}
+
+export async function revealGroupPreviewKeyAction(groupId: string): Promise<CatalogActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("group:apiKey");
+    const previewKey = await revealEventGroupPreviewKey(organizationId, groupId);
+    if (!previewKey) return { ok: false, message: "No readable preview key. Generate a new one." };
+    return { ok: true, previewKey };
+  } catch (error) {
+    return fail(error, "reveal preview key");
+  }
+}
+
+export async function revokeGroupPreviewKeyAction(groupId: string): Promise<CatalogActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("group:apiKey");
+    await revokeEventGroupPreviewKey(organizationId, groupId);
+    revalidatePath(`/admin/groups/${groupId}`);
+    return { ok: true, message: "Preview mode switched off for this group." };
+  } catch (error) {
+    return fail(error, "revoke preview key");
   }
 }
 

@@ -197,7 +197,7 @@ describe("guest features", () => {
     expect(byId.transferRules).toBe("A busz legfeljebb 15 percet vár.");
     expect(byId.fields.email).toBe("1***@example.com");
     expect(byId.form.find((f) => f.key === "employee_id")?.editable).toBe(false);
-    await expect(lookupGuest(eventId, "9999", groupId)).rejects.toThrow(/No registration/);
+    await expect(lookupGuest(eventId, "9999", groupId)).rejects.toThrow(/nem találtunk regisztrációt/);
     await expect(lookupGuest(eventId, "1001", "000000000000000000000000")).rejects.toThrow();
 
     sent.length = 0;
@@ -223,7 +223,7 @@ describe("guest features", () => {
   it("guest self-service is off unless the module is on", async () => {
     await EventModel.updateOne({ _id: eventId }, { $set: { "modules.guest-portal": { enabled: false } } });
     await register([guest("1001")]);
-    await expect(lookupGuest(eventId, "1001")).rejects.toThrow(/Self-service/);
+    await expect(lookupGuest(eventId, "1001")).rejects.toThrow(/önkiszolgálás/);
   });
 
   it("tags imported by ID reach registered guests now and later registrations on confirm", async () => {
@@ -249,11 +249,11 @@ describe("guest features", () => {
   it("waitlist (offer): a freed place is held and offered, accepted once, and an expired offer moves on", async () => {
     const small = await makeEvent({ capacity: 1 });
     const first = await register([guest("1001")], small);
-    await expect(joinWaitlist(small, { customer: { name: "A", email: "a@example.com", phone: "+36301" }, attendees: [guest("1001")] }, groupId)).rejects.toThrow(/already registered/);
+    await expect(joinWaitlist(small, { customer: { name: "A", email: "a@example.com", phone: "+36301" }, attendees: [guest("1001")] }, groupId)).rejects.toThrow(/már van regisztráció/);
     const a = await joinWaitlist(small, { customer: { name: "A", email: "a@example.com", phone: "+36301" }, attendees: [guest("2001")] }, groupId);
     const b = await joinWaitlist(small, { customer: { name: "B", email: "b@example.com", phone: "+36302" }, attendees: [guest("2002")] }, groupId);
     expect([a.position, b.position]).toEqual([1, 2]);
-    await expect(joinWaitlist(small, { customer: { name: "A", email: "a@example.com", phone: "+36301" }, attendees: [guest("2003")] }, groupId)).rejects.toThrow(/already on the waitlist/);
+    await expect(joinWaitlist(small, { customer: { name: "A", email: "a@example.com", phone: "+36301" }, attendees: [guest("2003")] }, groupId)).rejects.toThrow(/már várólistán vagy/);
 
     sent.length = 0;
     await cancelBookingAttendee(first.bookingId, 0, { by: "guest" });
@@ -264,11 +264,11 @@ describe("guest features", () => {
     expect((await getOffer(link))?.status).toBe("offered");
 
     // Nobody else can take the held place.
-    await expect(register([guest("3001")], small)).rejects.toThrow(/capacity/);
+    await expect(register([guest("3001")], small)).rejects.toThrow(/elfogytak a szabad helyek/);
 
     const accepted = await acceptOffer(link);
     expect(accepted.status).toBe("confirmed");
-    await expect(acceptOffer(link)).rejects.toThrow(/already registered/);
+    await expect(acceptOffer(link)).rejects.toThrow(/Már regisztráltál/);
     expect((await EventModel.findById(small))!.soldGuestCount).toBe(1);
     const entry = (await WaitlistEntryModel.findById(a.entryId))!;
     expect(entry.status).toBe("registered");
@@ -310,15 +310,15 @@ describe("guest features", () => {
     });
     const [q1, q2, q3] = survey.questions;
     await submitSurvey(String(survey._id), { code: "1001", answers: { [q1!.id]: 5, [q2!.id]: "Igen", [q3!.id]: "Szuper volt" } });
-    await expect(submitSurvey(String(survey._id), { code: "1001", answers: { [q1!.id]: 1 } })).rejects.toThrow(/already/);
-    await expect(submitSurvey(String(survey._id), { code: "nope", answers: { [q1!.id]: 1 } })).rejects.toThrow(/couldn't find/);
+    await expect(submitSurvey(String(survey._id), { code: "1001", answers: { [q1!.id]: 1 } })).rejects.toThrow(/már kitöltötted/);
+    await expect(submitSurvey(String(survey._id), { code: "nope", answers: { [q1!.id]: 1 } })).rejects.toThrow(/Nem találjuk/);
     await expect(submitSurvey(String(survey._id), { code: "1002", answers: { [q1!.id]: 9 } })).rejects.toThrow(/1–5/);
 
     const url = await personalFeedbackUrl((await BookingModel.findById(bookingId))!, 1);
     const token = new URL(url).searchParams.get("t")!;
     await submitSurvey(String(survey._id), { token, answers: { [q1!.id]: 3 } });
-    await expect(submitSurvey(String(survey._id), { code: "1002", answers: { [q1!.id]: 3 } })).rejects.toThrow(/already/);
-    await expect(submitSurvey(String(survey._id), { token: token.slice(0, -2) + "xx", answers: { [q1!.id]: 3 } })).rejects.toThrow(/couldn't find/);
+    await expect(submitSurvey(String(survey._id), { code: "1002", answers: { [q1!.id]: 3 } })).rejects.toThrow(/már kitöltötted/);
+    await expect(submitSurvey(String(survey._id), { token: token.slice(0, -2) + "xx", answers: { [q1!.id]: 3 } })).rejects.toThrow(/Nem találjuk/);
 
     const response = await SurveyResponseModel.findOne({}).lean();
     expect(Object.keys(response!)).not.toContain("bookingId");

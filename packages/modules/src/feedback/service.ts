@@ -197,21 +197,21 @@ function cleanAnswers(survey: ISurvey, raw: Record<string, unknown>): Record<str
     const value = raw[question.id];
     const empty = value == null || String(value).trim() === "";
     if (empty) {
-      if (question.required) throw ActionError.validation(`Please answer: ${question.label}`);
+      if (question.required) throw ActionError.validation(`Kérjük, válaszolj erre: ${question.label}`);
       continue;
     }
     if (question.type === "rating") {
       const n = Number(value);
-      if (!Number.isInteger(n) || n < 1 || n > RATING_MAX) throw ActionError.validation(`Choose 1–${RATING_MAX} for: ${question.label}`);
+      if (!Number.isInteger(n) || n < 1 || n > RATING_MAX) throw ActionError.validation(`Válassz 1–${RATING_MAX} közötti értéket: ${question.label}`);
       answers[question.id] = n;
     } else if (question.type === "choice") {
-      if (!question.choices.includes(String(value))) throw ActionError.validation(`Choose an option for: ${question.label}`);
+      if (!question.choices.includes(String(value))) throw ActionError.validation(`Válassz egy lehetőséget: ${question.label}`);
       answers[question.id] = String(value);
     } else {
       answers[question.id] = String(value).trim().slice(0, 3000);
     }
   }
-  if (Object.keys(answers).length === 0) throw ActionError.validation("Answer at least one question.");
+  if (Object.keys(answers).length === 0) throw ActionError.validation("Legalább egy kérdésre válaszolj.");
   return answers;
 }
 
@@ -232,7 +232,7 @@ export async function submitSurvey(
   groupId: string | null = null,
 ): Promise<{ thankYou: string }> {
   const open = /^[a-f0-9]{24}$/i.test(surveyId) ? await openSurvey(await SurveyModel.findById(surveyId).exec()) : null;
-  if (!open || open.survey.kind !== "survey" || (groupId && String(open.event.groupId) !== groupId)) throw ActionError.notFound("This survey isn't open.");
+  if (!open || open.survey.kind !== "survey" || (groupId && String(open.event.groupId) !== groupId)) throw ActionError.notFound("Ez a kérdőív most nem elérhető.");
   const { survey, event } = open;
 
   let attendeeKey: string | null = null;
@@ -241,14 +241,14 @@ export async function submitSurvey(
     const hit = await findAttendeeByCode(event, input.code);
     if (hit) attendeeKey = attendeeKeyOf(hit.booking, (hit.booking.attendees ?? [])[hit.attendeeIndex] as BookingAttendee | undefined, hit.attendeeIndex);
   }
-  if (!attendeeKey) throw ActionError.validation("We couldn't find your registration. Check your registration number or ID.");
+  if (!attendeeKey) throw ActionError.validation("Nem találjuk a regisztrációdat. Ellenőrizd a regisztrációs számodat vagy az azonosítódat.");
 
   const answers = cleanAnswers(survey, input.answers ?? {});
   await SurveyRespondentModel.init();
   try {
     await SurveyRespondentModel.create({ surveyId: survey._id, hash: hash(`${String(survey._id)}:${attendeeKey}`) });
   } catch (error) {
-    if ((error as { code?: number }).code === 11000) throw ActionError.conflict("You've already filled in this survey. Thank you!", "already_answered");
+    if ((error as { code?: number }).code === 11000) throw ActionError.conflict("Ezt a kérdőívet már kitöltötted. Köszönjük!", "already_answered");
     throw error;
   }
   await record(survey, answers, source);

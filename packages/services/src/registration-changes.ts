@@ -3,7 +3,7 @@ import { BookingModel, eventRepository, fieldClaimRepository, voucherRepository,
 import { collectListLookups, isCheckboxChecked, isFieldVisible, normalizeUniqueValue, validateEligibility, type EligibilityRulesConfig } from "@tbook/domain";
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee, BookingChange } from "@tbook/schemas";
 import { cancelBooking } from "./booking-service";
-import { normalizeAttendeePayload, validateAttendees } from "./booking-validation";
+import { attendeeIssuesMessage, eligibilityIssuesMessage, normalizeAttendeePayload, validateAttendees } from "./booking-validation";
 import { loadDataListMembership } from "./data-list-service";
 import type { EventContext } from "./extensions";
 import { resolveModules } from "./module-registry";
@@ -114,7 +114,7 @@ export async function replaceBookingAttendees(bookingId: string, incoming: Booki
     teamMemberLimit: booking.teamMemberLimit ?? null,
     playersPerTicket: (booking.playersPerTicket ?? 1) > 1 ? booking.playersPerTicket : null,
   });
-  if (issues.length > 0) throw ActionError.validation("Please check the attendee details.", { issues });
+  if (issues.length > 0) throw ActionError.validation(attendeeIssuesMessage(issues, schema), { issues });
 
   const next = normalizeAttendeePayload(schema, incoming, memberSchema).map((attendee, index) => {
     const old = previous[index];
@@ -126,7 +126,7 @@ export async function replaceBookingAttendees(bookingId: string, incoming: Booki
     const eligibilityIssues = validateEligibility(eligibilityEvent, next, schema, memberSchema, null, {
       listMembership: await loadDataListMembership(ctx.organizationId, collectListLookups(eligibilityEvent, next)),
     });
-    if (eligibilityIssues.length > 0) throw ActionError.validation("This event has eligibility requirements that are not met.", { issues: eligibilityIssues });
+    if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
   }
 
   const changeLog: BookingChange[] = [];
@@ -290,17 +290,17 @@ export async function checkRegistrationAnswers(eventId: string, guests: number, 
   const fullSchema = schema.map((field) => (details[field.key] ? { ...field, choices: details[field.key]!.map((c) => ({ value: c.value, label: c.label })) } : field));
   const memberSchema = (event.teamMemberFieldSchema ?? []).map((f) => plain(f) as AttendeeFieldDef);
   const issues = validateAttendees(fullSchema, guests, attendees, memberSchema.length > 0 ? "team" : "person", { teamMemberFieldSchema: memberSchema });
-  if (issues.length > 0) throw ActionError.validation("Please check the attendee details.", { issues });
+  if (issues.length > 0) throw ActionError.validation(attendeeIssuesMessage(issues, fullSchema), { issues });
   const normalized = normalizeAttendeePayload(fullSchema, attendees, memberSchema);
   const eligibilityEvent = { ...plain(event), eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null };
   const eligibilityIssues = validateEligibility(eligibilityEvent, normalized, fullSchema, memberSchema, null, {
     listMembership: await loadDataListMembership(organizationId, collectListLookups(eligibilityEvent, normalized)),
   });
-  if (eligibilityIssues.length > 0) throw ActionError.validation("This event has eligibility requirements that are not met.", { issues: eligibilityIssues });
+  if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
   for (const claim of uniqueClaimsOf(fullSchema, normalized)) {
     if (await fieldClaimRepository.findForEvent(eventId, claim.fieldKey, claim.value)) {
       const label = fullSchema.find((f) => f.key === claim.fieldKey)?.label ?? claim.fieldKey;
-      throw ActionError.conflict(`Someone is already registered with this ${label}.`, "duplicate_field");
+      throw ActionError.conflict(`Ezzel a(z) ${label} értékkel már van regisztráció erre az eseményre.`, "duplicate_field");
     }
   }
   return normalized;

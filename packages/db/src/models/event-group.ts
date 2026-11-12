@@ -27,6 +27,10 @@ const EventGroupSchema = new Schema<IEventGroup>(
     apiKeyHash: { type: String, required: true, index: true },
     apiKeyHint: { type: String, required: true },
     apiKeyCreatedAt: { type: Date, required: true },
+    previewKeyHash: { type: String, default: null, index: true },
+    previewKeyEnc: { type: String, default: "" },
+    previewKeyHint: { type: String, default: "" },
+    previewKeyCreatedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

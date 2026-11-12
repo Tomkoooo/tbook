@@ -2,6 +2,9 @@ import { eventRepository } from "@tbook/db";
 import { extensions, registerImportTarget, registerModule } from "@tbook/services";
 import {
   BUS_ROUTES_SOURCE,
+  BUS_WAITLIST_LABEL,
+  BUS_WAITLIST_VALUE,
+  attendeeOnBusWaitlist,
   busRouteFields,
   formatDeparture,
   listRoutes,
@@ -12,6 +15,14 @@ import {
   seatsByRoute,
   upsertRoutesByCode,
 } from "./service";
+import { BUS_WAITLIST_DEFAULTS, removeFromBusWaitlist, seatsFreed, syncBusWaitlist } from "./waitlist";
+
+/**
+ * Seats an edit gave back, per booking, until the edit's new reservation
+ * runs: only the net change counts as "seats freed" (a guest who keeps
+ * their bus while changing another answer frees nothing).
+ */
+const editReleases = new Map<string, Map<string, number>>();
 
 /**
  * Bus transport: routes with seats, chosen in the registration form through
@@ -35,6 +46,18 @@ export function registerBusTransportModule(): void {
         type: "text",
         hint: "e.g. A busz az indulási időponthoz képest legfeljebb 15 percet vár. Available in emails as {{bus.rules}} and in the guest API.",
       },
+      {
+        key: "busWaitlistSubject",
+        label: "Bus waitlist email subject (a seat freed up)",
+        type: "text",
+        hint: `Placeholders {{name}}, {{event}}, {{siteUrl}}. Default: ${BUS_WAITLIST_DEFAULTS.subject}`,
+      },
+      {
+        key: "busWaitlistMessage",
+        label: "Bus waitlist email text",
+        type: "text",
+        hint: "Sent to guests who asked to be notified (bus answer “waitlist”). Placeholders {{name}}, {{event}}, {{siteUrl}}. Empty = the built-in Hungarian text.",
+      },
     ],
   });
 
@@ -44,7 +67,7 @@ export function registerBusTransportModule(): void {
     label: "Buses (Bus transport)",
     async list(ctx) {
       const routes = await listRoutes(String(ctx.event._id));
-      return routes
+      const choices = routes
         .filter((route) => route.active)
         .map((route) => {
           const remaining = Math.max(route.capacity - route.seatsTaken, 0);
@@ -64,22 +87,43 @@ export function registerBusTransportModule(): void {
             },
           };
         });
+      // Always offered: no seat, the guest waits for one and is emailed when one frees up.
+      return [...choices, { value: BUS_WAITLIST_VALUE, label: BUS_WAITLIST_LABEL, remaining: null, disabled: false, meta: { waitlist: true } }];
     },
   });
 
   extensions.registerRegistrationReserver(BUS_TRANSPORT, async (ctx) => {
     if (!ctx.modules.isOn(BUS_TRANSPORT)) return null;
     if (busRouteFields(ctx.fieldSchema).length === 0) return null;
-    return reserveSeats(String(ctx.event._id), seatsByRoute(ctx.attendees, ctx.fieldSchema));
+    const eventId = String(ctx.event._id);
+    const wanted = seatsByRoute(ctx.attendees, ctx.fieldSchema);
+    if (ctx.dryRun) return reserveSeats(eventId, wanted, { dryRun: true });
+    const reservation = await reserveSeats(eventId, wanted);
+    await syncBusWaitlist({ organizationId: ctx.organizationId, eventId }, ctx.bookingId, ctx.attendees, ctx.fieldSchema);
+    const released = editReleases.get(ctx.bookingId);
+    if (released) {
+      editReleases.delete(ctx.bookingId);
+      if ([...released].some(([routeId, count]) => count > (wanted.get(routeId) ?? 0))) await seatsFreed(eventId);
+    }
+    return reservation;
   });
 
   // Seats are released whether or not the module is still on: they were taken while it was.
-  extensions.onBookingReleased(BUS_TRANSPORT, async (booking) => releaseSeatsForBooking(booking));
+  extensions.onBookingReleased(BUS_TRANSPORT, async (booking, reason) => {
+    const released = await releaseSeatsForBooking(booking);
+    if (reason === "edited") {
+      // The edit reserves its new answers next; decide there whether seats were really freed.
+      if (released.size > 0) editReleases.set(String(booking._id), released);
+      return;
+    }
+    await removeFromBusWaitlist(booking);
+    if (released.size > 0) await seatsFreed(String(booking.eventId));
+  });
 
   extensions.registerAttendeePlaceholders({
     moduleKey: BUS_TRANSPORT,
     placeholders: [
-      { key: "bus.transfer", label: "Transfer (Igényelt / Nem igényelt)", sample: "Igényelt" },
+      { key: "bus.transfer", label: "Transfer (Igényelt / Nem igényelt / Várólistán)", sample: "Igényelt" },
       { key: "bus.city", label: "Bus: departure city", sample: "Szeged" },
       { key: "bus.pickupPoint", label: "Bus: pickup point", sample: "Mars tér, buszpályaudvar" },
       { key: "bus.code", label: "Bus: identifier", sample: "B03" },
@@ -94,7 +138,7 @@ export function registerBusTransportModule(): void {
       const rules = route ? (ctx.modules.config<{ transferRules?: string }>(BUS_TRANSPORT).transferRules ?? "") : "";
       if (!route) {
         return {
-          "bus.transfer": "Nem igényelt",
+          "bus.transfer": attendeeOnBusWaitlist(booking, attendeeIndex) ? "Várólistán (értesítünk)" : "Nem igényelt",
           "bus.city": "",
           "bus.pickupPoint": "",
           "bus.code": "",
@@ -199,3 +243,4 @@ export function budapestToUtc(year: number, month: number, day: number, hour: nu
 
 export * from "./service";
 export * from "./model";
+export * from "./waitlist";

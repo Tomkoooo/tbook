@@ -48,7 +48,7 @@ describe("booking-service", () => {
 
   it("rejects a quote for an event outside its sales window", async () => {
     const event = await createEvent({ salesClosesAt: new Date(Date.now() - 60_000) });
-    await expect(quote({ eventId: String(event._id), guests: 1 })).rejects.toMatchObject({ code: "validation_error" });
+    await expect(quote({ eventId: String(event._id), guests: 1 })).rejects.toMatchObject({ status: 400, code: "sales_closed" });
   });
 
   it("creates a pending booking with a server-recomputed quote", async () => {
@@ -70,7 +70,8 @@ describe("booking-service", () => {
     expect(first.status).toBe("pending");
 
     await expect(createPendingBooking({ eventId: String(event._id), guests: 2, customer: baseCustomer() })).rejects.toMatchObject({
-      code: "validation_error",
+      status: 400,
+      code: "capacity_full",
     });
 
     const reloaded = await EventModel.findById(event._id).exec();

@@ -314,3 +314,40 @@ export function getEventSalesState(event: { salesOpensAt?: Date | null; salesClo
   if (closes && !Number.isNaN(closes.getTime()) && now > closes) return "closed";
   return "on_sale";
 }
+
+// ---- Guest-facing messages ---------------------------------------------------
+// The v1 API returns only `{ error: message }`, so the message itself must
+// tell the guest what to fix (Hungarian, informal "te"). Details stay in
+// the error's `details.issues` for callers that read them.
+
+/** "Kérjük, ellenőrizd az adatokat: 2. vendég – Törzsszám (kötelező)." */
+export function attendeeIssuesMessage(issues: AttendeeValidationIssue[], schema: AttendeeFieldDef[]): string {
+  const parts: string[] = [];
+  for (const issue of issues.slice(0, 5)) {
+    if (issue.reason === "count_mismatch") {
+      parts.push("a vendégek száma nem egyezik a megadott adatokkal");
+      continue;
+    }
+    const label = schema.find((field) => field.key === issue.fieldKey)?.label ?? issue.fieldKey;
+    const who = issue.index >= 0 ? `${issue.index + 1}. vendég – ` : "";
+    const what = issue.reason === "field_required" ? "kötelező" : issue.reason === "field_invalid" ? "hibás érték" : "hiányos csapat";
+    parts.push(label ? `${who}${label} (${what})` : `${who}${what}`);
+  }
+  return parts.length > 0 ? `Kérjük, ellenőrizd az adatokat: ${parts.join("; ")}.` : "Kérjük, ellenőrizd az adatokat.";
+}
+
+/** The organizer's own rule messages (e.g. "Ez a törzsszám nem szerepel a listán."), else a generic line. */
+export function eligibilityIssuesMessage(issues: Array<{ reason: string; details?: Record<string, unknown> }>): string {
+  const messages = new Set<string>();
+  for (const issue of issues) {
+    const failed = (issue.details?.failedRules ?? []) as Array<{ message?: string }>;
+    for (const rule of failed) if (rule.message?.trim()) messages.add(rule.message.trim());
+  }
+  return messages.size > 0 ? [...messages].join(" ") : "Nem felelsz meg a regisztráció feltételeinek.";
+}
+
+/** v1 `salesState`: the booking window as the storefront sees it. */
+export function publicSalesState(event: { salesOpensAt?: Date | null; salesClosesAt?: Date | null }, now = new Date()): "not_started" | "on_sale" | "closed" {
+  const state = getEventSalesState(event, now);
+  return state === "upcoming" ? "not_started" : state;
+}

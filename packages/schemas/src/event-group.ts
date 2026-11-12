@@ -26,6 +26,15 @@ export const eventGroupSchema = z.object({
   apiKeyHash: z.string().min(1),
   apiKeyHint: z.string().min(1),
   apiKeyCreatedAt: z.date(),
+  /**
+   * Dev preview key (header `X-TBook-Preview`): with it, v1 reads draft events
+   * and runs bookings/waitlist joins as dry runs. SHA-256 hash for checking,
+   * an encrypted copy so an admin can reveal it again, and a hint.
+   */
+  previewKeyHash: z.string().nullable().default(null),
+  previewKeyEnc: z.string().default(""),
+  previewKeyHint: z.string().default(""),
+  previewKeyCreatedAt: z.date().nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

@@ -44,7 +44,7 @@ describe("eligibility rules on booking creation", () => {
   });
 
   it("refuses an attendee who fails a form rule", async () => {
-    await expect(createPendingBooking({ eventId, guests: 1, customer, attendees: [{ fields: { code: "B123" } }] }, { groupId })).rejects.toThrow(/eligibility/);
+    await expect(createPendingBooking({ eventId, guests: 1, customer, attendees: [{ fields: { code: "B123" } }] }, { groupId })).rejects.toThrow(/Bad code/);
     expect(await BookingModel.countDocuments({})).toBe(0);
   });
 

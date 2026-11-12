@@ -29,7 +29,7 @@ export interface DynamicChoice {
   /** Shown but not selectable (e.g. full). */
   disabled?: boolean;
   /** Extra details for the storefront (address, time, contact), all display-only. */
-  meta?: Record<string, string | number | null>;
+  meta?: Record<string, string | number | boolean | null>;
 }
 
 export interface ChoiceProvider {
@@ -48,8 +48,30 @@ export interface ChoiceProvider {
  * returned release() undoes the reservation if a later step fails.
  */
 export type RegistrationReserver = (
-  ctx: EventContext & { bookingId: string; attendees: BookingAttendee[]; fieldSchema: AttendeeFieldDef[] },
+  ctx: EventContext & {
+    bookingId: string;
+    attendees: BookingAttendee[];
+    fieldSchema: AttendeeFieldDef[];
+    /** Check only (preview mode): refuse exactly as a real reservation would, but change nothing. */
+    dryRun?: boolean;
+  },
 ) => Promise<{ release: () => Promise<void> } | null>;
+
+/**
+ * A module that holds identifying answers outside bookings (e.g. a
+ * waitlist entry holding an employee ID). Asked before `unique` values
+ * are claimed and by the ID-first prefill: return the first held value,
+ * with a guest-facing message, or null.
+ */
+export interface HeldIdentifier {
+  fieldKey: string;
+  value: string;
+  /** Machine-readable reason, e.g. "waitlist". */
+  reason: string;
+  /** Guest-facing (the event's language). */
+  message: string;
+}
+export type IdentifierHolder = (ctx: EventContext, values: Array<{ fieldKey: string; value: string }>) => Promise<HeldIdentifier | null>;
 
 /** A booking stopped holding its place (cancelled or expired). */
 /**
@@ -88,6 +110,7 @@ interface ExtensionState {
   bookingEmailSuppressors: Map<string, BookingEmailSuppressor>;
   checkoutBypasses: Map<string, CheckoutBypass>;
   attendeePlaceholders: Map<string, AttendeePlaceholderProvider>;
+  identifierHolders: Map<string, IdentifierHolder>;
 }
 
 const STATE_KEY = Symbol.for("tbook.extensions");
@@ -103,8 +126,11 @@ function state(): ExtensionState {
       bookingEmailSuppressors: new Map(),
       checkoutBypasses: new Map(),
       attendeePlaceholders: new Map(),
+      identifierHolders: new Map(),
     };
   }
+  // A registry created by an older bundle may lack newer maps.
+  holder[STATE_KEY]!.identifierHolders ??= new Map();
   return holder[STATE_KEY]!;
 }
 
@@ -132,6 +158,12 @@ export const extensions = {
   },
   registerAttendeePlaceholders(provider: AttendeePlaceholderProvider): void {
     state().attendeePlaceholders.set(provider.moduleKey, provider);
+  },
+  registerIdentifierHolder(key: string, holder: IdentifierHolder): void {
+    state().identifierHolders.set(key, holder);
+  },
+  identifierHolders(): IdentifierHolder[] {
+    return [...state().identifierHolders.values()];
   },
   attendeePlaceholderProviders(): AttendeePlaceholderProvider[] {
     return [...state().attendeePlaceholders.values()];

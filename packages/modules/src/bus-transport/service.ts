@@ -6,9 +6,18 @@ import { BookingModel, type IBooking } from "@tbook/db";
 import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
 import { ACTIVE_BOOKING_STATUSES, toEventAttendees, type EventAttendee } from "../shared/attendees";
 import { BusBoardingModel, BusRouteModel, type BoardingStatus, type BusLeg, type IBusRoute } from "./model";
+import { notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
 
 /** The `choicesSource` that turns a select field into "pick your bus". */
 export const BUS_ROUTES_SOURCE = "bus-transport:routes";
+
+/** The extra bus answer "no free seat — notify me": holds no seat, puts the guest on the bus waitlist. */
+export const BUS_WAITLIST_VALUE = "waitlist";
+export const BUS_WAITLIST_LABEL = "Nincs szabad hely – értesítést kérek, ha felszabadul";
+
+export function isBusWaitlistValue(value: unknown): boolean {
+  return String(value ?? "") === BUS_WAITLIST_VALUE;
+}
 
 const TIME_ZONE = "Europe/Budapest";
 
@@ -40,7 +49,7 @@ export function seatsByRoute(attendees: BookingAttendee[], schema: AttendeeField
   for (const attendee of attendees) {
     for (const field of fields) {
       const value = attendee.fields?.[field.key];
-      if (value == null || value === "") continue;
+      if (value == null || value === "" || isBusWaitlistValue(value)) continue;
       const routeId = String(value);
       counts.set(routeId, (counts.get(routeId) ?? 0) + 1);
     }
@@ -97,7 +106,9 @@ function cleanInput(input: BusRouteInput) {
 
 export async function createRoute(organizationId: string, eventId: string, input: BusRouteInput): Promise<IBusRoute> {
   try {
-    return await BusRouteModel.create({ organizationId, eventId, ...cleanInput(input), seatsTaken: 0 });
+    const route = await BusRouteModel.create({ organizationId, eventId, ...cleanInput(input), seatsTaken: 0 });
+    if (route.active && route.capacity > 0) await seatsFreed(eventId);
+    return route;
   } catch (error) {
     if ((error as { code?: number }).code === 11000) throw ActionError.validation(`A bus with identifier "${input.code.trim()}" already exists for this event.`);
     throw error;
@@ -112,6 +123,9 @@ export async function updateRoute(organizationId: string, routeId: string, input
   }
   try {
     const updated = await BusRouteModel.findByIdAndUpdate(routeId, clean, { returnDocument: "after" }).exec();
+    const freeBefore = route.active ? route.capacity - route.seatsTaken : 0;
+    const freeAfter = updated!.active ? updated!.capacity - updated!.seatsTaken : 0;
+    if (freeAfter > freeBefore) await seatsFreed(String(route.eventId));
     return updated!;
   } catch (error) {
     if ((error as { code?: number }).code === 11000) throw ActionError.validation(`A bus with identifier "${clean.code}" already exists for this event.`);
@@ -157,9 +171,22 @@ export async function upsertRoutesByCode(
 
 // ---- Seats ----------------------------------------------------------------------
 
-/** Atomically takes seats on each route, all or nothing. */
-export async function reserveSeats(eventId: string, wanted: Map<string, number>): Promise<{ release: () => Promise<void> } | null> {
+/** The error a full bus raises (its code lets the waitlist fall back to the bus waitlist). */
+export function busFullError(route: Pick<IBusRoute, "city" | "code">, routeId: string): ActionError {
+  return new ActionError(400, "bus_full", `A(z) ${route.city} (${route.code}) busz megtelt. Válassz másik járatot, vagy kérj értesítést, ha felszabadul hely.`, { routeId });
+}
+
+/** Atomically takes seats on each route, all or nothing. `dryRun` only checks (preview mode). */
+export async function reserveSeats(eventId: string, wanted: Map<string, number>, opts: { dryRun?: boolean } = {}): Promise<{ release: () => Promise<void> } | null> {
   if (wanted.size === 0) return null;
+  if (opts.dryRun) {
+    for (const [routeId, count] of wanted) {
+      const route = Types.ObjectId.isValid(routeId) ? await BusRouteModel.findOne({ _id: routeId, eventId }).exec() : null;
+      if (!route || !route.active) throw ActionError.validation("A választott busz nem elérhető. Válassz másikat.");
+      if (route.seatsTaken + count > route.capacity) throw busFullError(route, routeId);
+    }
+    return null;
+  }
   const taken: Array<[string, number]> = [];
   const release = async () => {
     for (const [routeId, count] of taken) await BusRouteModel.updateOne({ _id: routeId }, { $inc: { seatsTaken: -count } }).exec();
@@ -168,7 +195,7 @@ export async function reserveSeats(eventId: string, wanted: Map<string, number>)
     const route = Types.ObjectId.isValid(routeId) ? await BusRouteModel.findOne({ _id: routeId, eventId }).exec() : null;
     if (!route || !route.active) {
       await release();
-      throw ActionError.validation("The chosen bus isn't available. Please pick another.");
+      throw ActionError.validation("A választott busz nem elérhető. Válassz másikat.");
     }
     const result = await BusRouteModel.updateOne(
       { _id: routeId, eventId, active: true, $expr: { $lte: [{ $add: ["$seatsTaken", count] }, "$capacity"] } },
@@ -176,14 +203,15 @@ export async function reserveSeats(eventId: string, wanted: Map<string, number>)
     ).exec();
     if (result.modifiedCount !== 1) {
       await release();
-      throw ActionError.validation(`The bus from ${route.city} (${route.code}) is full. Please pick another.`);
+      throw busFullError(route, routeId);
     }
     taken.push([routeId, count]);
   }
   return { release };
 }
 
-export async function releaseSeatsForBooking(booking: IBooking): Promise<void> {
+/** Gives a booking's seats back; returns routeId → seats released. */
+export async function releaseSeatsForBooking(booking: IBooking): Promise<Map<string, number>> {
   const wanted = seatsByRoute((booking.attendees ?? []) as BookingAttendee[], booking.attendeeFieldSchema as AttendeeFieldDef[]);
   for (const [routeId, count] of wanted) {
     if (!Types.ObjectId.isValid(routeId)) continue;
@@ -191,6 +219,7 @@ export async function releaseSeatsForBooking(booking: IBooking): Promise<void> {
     // Never below zero (a recount may already have corrected it).
     if (result.modifiedCount === 0) await BusRouteModel.updateOne({ _id: routeId, eventId: booking.eventId }, { seatsTaken: 0 }).exec();
   }
+  return wanted;
 }
 
 /**
@@ -206,10 +235,15 @@ export async function recountSeats(organizationId: string, eventId: string): Pro
       counts.set(routeId, (counts.get(routeId) ?? 0) + count);
     }
   }
+  let freed = false;
   for (const route of routes) {
     if (String(route.organizationId) !== organizationId) continue;
-    await BusRouteModel.updateOne({ _id: route._id }, { seatsTaken: counts.get(String(route._id)) ?? 0 }).exec();
+    const next = counts.get(String(route._id)) ?? 0;
+    if (next < route.seatsTaken) freed = true;
+    await BusRouteModel.updateOne({ _id: route._id }, { seatsTaken: next }).exec();
   }
+  if (freed) await seatsFreed(eventId);
+  else await notifyBusWaitlist(eventId);
   return routes.length;
 }
 
@@ -344,6 +378,12 @@ export async function findRouteByCaptainToken(token: string): Promise<IBusRoute 
 
 // ---- Guest-facing details -----------------------------------------------------------
 
+/** True when the attendee chose "értesítést kérek" (bus waitlist) for a bus question. */
+export function attendeeOnBusWaitlist(booking: Pick<IBooking, "attendees" | "attendeeFieldSchema">, attendeeIndex: number): boolean {
+  const attendee = ((booking.attendees ?? []) as BookingAttendee[])[attendeeIndex];
+  return busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[]).some((field) => isBusWaitlistValue(attendee?.fields?.[field.key]));
+}
+
 export async function routeForAttendee(booking: IBooking, attendeeIndex: number): Promise<IBusRoute | null> {
   const attendee = ((booking.attendees ?? []) as BookingAttendee[])[attendeeIndex];
   for (const field of busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[])) {
@@ -360,8 +400,11 @@ export async function routeForAttendee(booking: IBooking, attendeeIndex: number)
 
 const STATUS_LABELS: Record<BoardingStatus, string> = { boarded: "Felszállt", not_boarded: "Nem szállt fel" };
 
-/** One sheet per bus: passenger list with both legs' boarding status. */
-export async function exportPassengersXlsx(routes: IBusRoute[]): Promise<Buffer> {
+/**
+ * One sheet per bus: passenger list with both legs' boarding status. With
+ * `waitlist`, a last sheet lists the bus waitlist (they are not passengers).
+ */
+export async function exportPassengersXlsx(routes: IBusRoute[], waitlist?: BusWaitlistRow[]): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const summary = workbook.addWorksheet("Összesítő");
   summary.columns = [
@@ -412,5 +455,21 @@ export async function exportPassengersXlsx(routes: IBusRoute[]): Promise<Buffer>
     sheet.getRow(1).font = { bold: true };
   }
   summary.getRow(1).font = { bold: true };
+  if (waitlist && waitlist.length > 0) {
+    const sheet = workbook.addWorksheet("Busz-várólista");
+    sheet.columns = [
+      { header: "Sorszám", key: "position", width: 10 },
+      { header: "Név", key: "name", width: 28 },
+      { header: "Regisztrációs azonosító", key: "reg", width: 22 },
+      { header: "Telefon", key: "phone", width: 16 },
+      { header: "E-mail", key: "email", width: 28 },
+      { header: "Várólistára került", key: "joined", width: 22 },
+      { header: "Utolsó értesítés", key: "notified", width: 22 },
+    ];
+    for (const row of waitlist) {
+      sheet.addRow({ position: row.position, name: row.name, reg: row.registrationNumber ?? "", phone: row.phone, email: row.email, joined: formatDeparture(row.joinedAt), notified: formatDeparture(row.notifiedAt) });
+    }
+    sheet.getRow(1).font = { bold: true };
+  }
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }

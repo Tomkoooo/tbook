@@ -95,3 +95,54 @@ BusBoardingSchema.index({ eventId: 1, attendeeKey: 1, leg: 1 }, { unique: true }
 
 export const BusBoardingModel: Model<IBusBoarding> =
   mongoose.models.TBookBusBoarding ?? mongoose.model<IBusBoarding>("TBookBusBoarding", BusBoardingSchema, "tbookbusboardings");
+
+/**
+ * A guest who chose "értesítést kérek" (bus value "waitlist") instead of a
+ * full bus: no seat is held, they wait in line (FIFO by `joinedAt`, the
+ * time they chose it) and get an email when seats free up.
+ */
+export interface IBusWaitlistEntry extends Document {
+  organizationId: Types.ObjectId | null;
+  eventId: Types.ObjectId;
+  bookingId: Types.ObjectId;
+  /** The attendee's stable id, or "<bookingId>:<index>". */
+  attendeeKey: string;
+  joinedAt: Date;
+  /** Last "a seat is free" email. */
+  notifiedAt: Date | null;
+}
+
+const BusWaitlistEntrySchema = new Schema<IBusWaitlistEntry>(
+  {
+    organizationId: { type: Schema.Types.ObjectId, ref: "TBookOrganization", default: null },
+    eventId: { type: Schema.Types.ObjectId, ref: "TBookEvent", required: true },
+    bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", required: true },
+    attendeeKey: { type: String, required: true },
+    joinedAt: { type: Date, required: true },
+    notifiedAt: { type: Date, default: null },
+  },
+  { timestamps: false },
+);
+BusWaitlistEntrySchema.index({ eventId: 1, attendeeKey: 1 }, { unique: true });
+BusWaitlistEntrySchema.index({ eventId: 1, joinedAt: 1 });
+
+export const BusWaitlistEntryModel: Model<IBusWaitlistEntry> =
+  mongoose.models.TBookBusWaitlistEntry ??
+  mongoose.model<IBusWaitlistEntry>("TBookBusWaitlistEntry", BusWaitlistEntrySchema, "tbookbuswaitlistentries");
+
+/** Per event: when seats last became free (a release, more capacity, a new or re-activated bus). */
+export interface IBusSeatState extends Document {
+  eventId: Types.ObjectId;
+  lastFreedAt: Date | null;
+}
+
+const BusSeatStateSchema = new Schema<IBusSeatState>(
+  {
+    eventId: { type: Schema.Types.ObjectId, ref: "TBookEvent", required: true, unique: true },
+    lastFreedAt: { type: Date, default: null },
+  },
+  { timestamps: false },
+);
+
+export const BusSeatStateModel: Model<IBusSeatState> =
+  mongoose.models.TBookBusSeatState ?? mongoose.model<IBusSeatState>("TBookBusSeatState", BusSeatStateSchema, "tbookbusseatstates");
