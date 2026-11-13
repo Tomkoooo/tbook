@@ -24,6 +24,16 @@ export interface SendMailInput {
   subject: string;
   html: string;
   attachments?: MailAttachment[];
+  /** About a test record (v1 X-TBook-Test): the subject gets the "[TESZT] " prefix. */
+  test?: boolean;
+}
+
+export const TEST_SUBJECT_PREFIX = "[TESZT] ";
+
+/** "[TESZT] " + subject for a test record's email (never doubled). */
+export function testSubject(subject: string, test: boolean | null | undefined): string {
+  if (!test || subject.startsWith(TEST_SUBJECT_PREFIX)) return subject;
+  return `${TEST_SUBJECT_PREFIX}${subject}`;
 }
 
 interface ResolvedSmtpConfig {
@@ -99,7 +109,7 @@ export async function sendMail(organizationId: string | null | undefined, input:
   await transport.sendMail({
     from: `"${config.fromName}" <${config.fromEmail}>`,
     to: input.to,
-    subject: input.subject,
+    subject: testSubject(input.subject, input.test),
     html: input.html,
     attachments: input.attachments?.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType, ...(a.cid ? { cid: a.cid } : {}) })),
   });

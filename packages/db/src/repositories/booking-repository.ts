@@ -26,6 +26,17 @@ export interface BookingListFilter {
   search?: string;
   createdFrom?: Date;
   createdTo?: Date;
+  /**
+   * Test bookings (v1 X-TBook-Test): "include" (default: the list shows
+   * them with a TESZT badge), "exclude" or "only". Statistics and exports
+   * always leave them out unless "only" is asked for.
+   */
+  test?: "include" | "exclude" | "only";
+}
+
+/** Statistics and exports never count test bookings (unless explicitly asked for them only). */
+function withoutTests(filter: BookingListFilter): BookingListFilter {
+  return { ...filter, test: filter.test === "only" ? "only" : "exclude" };
 }
 
 export type BookingSortKey = "createdAt" | "totalHuf" | "eventName" | "customerName";
@@ -49,6 +60,8 @@ export function buildBookingQuery(scope: BookingScope, filter: BookingListFilter
   if (filter.eventId) query.eventId = new Types.ObjectId(filter.eventId);
   if (filter.groupId) query.groupId = new Types.ObjectId(filter.groupId);
   if (filter.hotelId) query.hotelId = new Types.ObjectId(filter.hotelId);
+  if (filter.test === "exclude") query.isTest = { $ne: true };
+  if (filter.test === "only") query.isTest = true;
 
   if (filter.createdFrom || filter.createdTo) {
     query.createdAt = {
@@ -129,7 +142,7 @@ export const bookingRepository = {
     // aggregate() bypasses Mongoose's automatic query casting, so the
     // ObjectId conversion has to happen explicitly here.
     const result = await BookingModel.aggregate<{ _id: null; total: number }>([
-      { $match: { eventId: new Types.ObjectId(eventId), status: { $in: statuses } } },
+      { $match: { eventId: new Types.ObjectId(eventId), status: { $in: statuses }, isTest: { $ne: true } } },
       { $group: { _id: null, total: { $sum: "$guests" } } },
     ]).exec();
     return result[0]?.total ?? 0;
@@ -179,7 +192,7 @@ export const bookingRepository = {
    * a thin data read).
    */
   async findAccommodationSummariesByHotel(hotelId: string, statuses: IBooking["status"][]): Promise<Array<{ selections: Record<string, unknown>; accommodationGuests: number }>> {
-    const rows = await BookingModel.find({ hotelId, status: { $in: statuses } })
+    const rows = await BookingModel.find({ hotelId, status: { $in: statuses }, isTest: { $ne: true } })
       .select("selections guests quote.accommodationGuests")
       .lean()
       .exec();
@@ -237,7 +250,7 @@ export const bookingRepository = {
     filter: BookingListFilter = {},
   ): Promise<Array<{ status: IBooking["status"]; currency: string; count: number; totalHuf: number; guests: number }>> {
     return BookingModel.aggregate<{ status: IBooking["status"]; currency: string; count: number; totalHuf: number; guests: number }>([
-      { $match: buildBookingQuery(scope, filter) },
+      { $match: buildBookingQuery(scope, withoutTests(filter)) },
       {
         $group: {
           _id: { status: "$status", currency: { $ifNull: ["$currency", "HUF"] } },
@@ -256,6 +269,6 @@ export const bookingRepository = {
    * server's memory on a large event.
    */
   cursorInScope(scope: BookingScope, filter: BookingListFilter = {}) {
-    return BookingModel.find(buildBookingQuery(scope, filter)).sort({ createdAt: -1 }).lean<IBooking>().cursor();
+    return BookingModel.find(buildBookingQuery(scope, withoutTests(filter))).sort({ createdAt: -1 }).lean<IBooking>().cursor();
   },
 };

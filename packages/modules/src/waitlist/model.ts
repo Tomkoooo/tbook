@@ -22,6 +22,8 @@ export interface IWaitlistEntry extends Document {
   bookingId: Types.ObjectId | null;
   lastError: string;
   notifiedAt: Date | null;
+  /** Test entry (v1 X-TBook-Test): its own queue, never mixed with live entries. */
+  isTest: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,6 +49,7 @@ const WaitlistEntrySchema = new Schema<IWaitlistEntry>(
     bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", default: null },
     lastError: { type: String, default: "" },
     notifiedAt: { type: Date, default: null },
+    isTest: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

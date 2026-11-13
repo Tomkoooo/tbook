@@ -261,6 +261,41 @@ export async function previewBookingWithCheckout(input: CreateBookingWithCheckou
 }
 
 /**
+ * Test mode of POST /bookings (preview key + `X-TBook-Test: 1`): the real
+ * booking path on an active or draft event, sales window ignored, saved
+ * with `isTest` — confirmation and module emails are really sent, with
+ * "[TESZT] " subjects. Test bookings take no event capacity or bus seats
+ * and their unique answers (employee ID) live in a test namespace, so they
+ * never affect live guests. Only free registrations: a booking that would
+ * need payment is refused (no Stripe session is ever opened for a test).
+ */
+export async function createTestBookingWithCheckout(
+  input: CreateBookingWithCheckoutInput,
+  opts: { groupId?: string; returnBaseUrl?: string } = {},
+): Promise<CheckoutResult & { test: true }> {
+  const event = input?.eventId && Types.ObjectId.isValid(String(input.eventId)) ? await eventRepository.findById(String(input.eventId)) : null;
+  const visible = event?.status === "active" || event?.status === "draft";
+  if (!event || !visible || (opts.groupId && String(event.groupId) !== opts.groupId)) throw ActionError.notFound("Event not found or inactive.");
+  const booking = await createPendingBooking(input, { groupId: opts.groupId, isTest: true, allowInactiveEvent: true, allowClosedSales: true });
+  if (!(await bookingBypassesCheckout(booking))) {
+    await expireBooking(String(booking._id));
+    throw new ActionError(400, "test_payment_unsupported", "Teszt foglalás csak ingyenes regisztrációnál lehetséges.");
+  }
+  const confirmed = await confirmBookingWithoutPayment(String(booking._id));
+  const storefrontBase = (booking.checkoutReturnBaseUrl?.trim() || opts.returnBaseUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+  return {
+    bookingId: String(booking._id),
+    totalHuf: 0,
+    checkoutUrl: `${storefrontBase}${CHECKOUT_SUCCESS_PATH}?bookingId=${String(booking._id)}&return_to=${encodeURIComponent(storefrontBase)}`,
+    stripeSessionId: "",
+    expiresAt: new Date().toISOString(),
+    status: "confirmed",
+    registrationNumber: confirmed.registrationNumber ?? null,
+    test: true,
+  };
+}
+
+/**
  * Multi-event booking: one pending booking per event (sharing a
  * checkoutBundleId) and one Stripe session with a line item per booking.
  * If the session can't be opened, the bookings are expired so their

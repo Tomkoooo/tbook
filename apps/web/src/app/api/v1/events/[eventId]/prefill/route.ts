@@ -11,11 +11,13 @@ import { runV1, V1HttpError } from "@/lib/v1/response";
  * form with (all editable). An already registered ID returns no data.
  * Tightly rate-limited: it returns a person's details for an ID.
  * Added: `onWaitlist: true` (no data) when the ID waits on the waitlist.
- * Preview mode (X-TBook-Preview) also works on a draft event.
+ * Preview mode (X-TBook-Preview) also works on a draft event. In test mode
+ * (+ `X-TBook-Test: 1`) "already registered" / "on the waitlist" refer to
+ * test registrations only.
  */
 export async function POST(request: Request, context: { params: Promise<{ eventId: string }> }) {
   return runV1(request, async () => {
-    const { groupId, preview } = await requireApiKeyGroup(request);
+    const { groupId, preview, test } = await requireApiKeyGroup(request);
     enforceV1RateLimit(request, "t-book:prefill", 30);
     const { eventId } = await context.params;
     const event = await eventRepository.findById(eventId);
@@ -24,6 +26,6 @@ export async function POST(request: Request, context: { params: Promise<{ eventI
     const body = (await request.json().catch(() => null)) as { code?: unknown } | null;
     const code = String(body?.code ?? "").trim();
     if (!code) throw new V1HttpError(400, "code is required.");
-    return prefillRegistration(eventId, code);
+    return prefillRegistration(eventId, code, { isTest: test });
   });
 }

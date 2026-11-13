@@ -150,7 +150,7 @@ export async function getOrganizationStats(organizationId: string) {
 
   const [eventCount, bookingCount, memberCount] = await Promise.all([
     EventModel.countDocuments(scoped),
-    BookingModel.countDocuments(scoped),
+    BookingModel.countDocuments({ ...scoped, isTest: { $ne: true } }),
     orgMembershipRepository.findByOrganizationId(organizationId).then((rows) => rows.filter((r) => r.status === "active").length),
   ]);
   return { groupCount: groups.length, eventCount, bookingCount, memberCount };

@@ -13,6 +13,8 @@ export interface IFieldClaim extends Document {
   /** Normalised value (see @tbook/domain normalizeUniqueValue). */
   value: string;
   bookingId: Types.ObjectId;
+  /** A test booking's claim. Its fieldKey is stored as "test:<key>", so test and live IDs never clash. */
+  isTest: boolean;
   createdAt: Date;
 }
 
@@ -23,6 +25,7 @@ const FieldClaimSchema = new Schema<IFieldClaim>(
     fieldKey: { type: String, required: true },
     value: { type: String, required: true },
     bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", required: true, index: true },
+    isTest: { type: Boolean, default: false },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

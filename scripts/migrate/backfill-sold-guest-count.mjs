@@ -60,7 +60,7 @@ export async function computeBackfillChanges(db, { allEvents = false } = {}) {
   // One grouped pass over the bookings rather than a query per event.
   const grouped = await bookings
     .aggregate([
-      { $match: { status: { $in: RESERVING_STATUSES } } },
+      { $match: { status: { $in: RESERVING_STATUSES }, isTest: { $ne: true } } }, // test bookings (v1 X-TBook-Test) hold no capacity
       { $group: { _id: "$eventId", total: { $sum: { $ifNull: ["$guests", 0] } } } },
     ])
     .toArray();

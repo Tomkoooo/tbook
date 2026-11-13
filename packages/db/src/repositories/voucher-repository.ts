@@ -14,7 +14,8 @@ function escapeRegex(value: string): string {
 }
 
 function buildVoucherQuery(eventId: string, filter: VoucherListFilter = {}): QueryFilter<IVoucher> {
-  const query: QueryFilter<IVoucher> = { eventId: new Types.ObjectId(eventId) };
+  // Test tickets (v1 X-TBook-Test) never appear in check-in lists or counts.
+  const query: QueryFilter<IVoucher> = { eventId: new Types.ObjectId(eventId), isTest: { $ne: true } };
   if (filter.status && filter.status.length > 0) query.status = { $in: filter.status };
   const search = filter.search?.trim();
   if (filter.tag) query.tags = filter.tag;
@@ -35,7 +36,7 @@ export const voucherRepository = {
     return VoucherModel.findOne({ token }).exec();
   },
   findByRegistrationNumber(eventId: string, registrationNumber: string): Promise<IVoucher | null> {
-    return VoucherModel.findOne({ eventId, registrationNumber }).exec();
+    return VoucherModel.findOne({ eventId, registrationNumber, isTest: { $ne: true } }).exec();
   },
   findByBookingId(bookingId: string): Promise<IVoucher[]> {
     return VoucherModel.find({ bookingId }).sort({ attendeeIndex: 1 }).exec();
@@ -112,7 +113,7 @@ export const voucherRepository = {
   /** Check-in progress per status for one event (admin dashboard + roster header). */
   aggregateStatusTotalsByEvent(eventId: string): Promise<Array<{ status: IVoucher["status"]; count: number }>> {
     return VoucherModel.aggregate<{ status: IVoucher["status"]; count: number }>([
-      { $match: { eventId: new Types.ObjectId(eventId) } },
+      { $match: { eventId: new Types.ObjectId(eventId), isTest: { $ne: true } } },
       { $group: { _id: "$status", count: { $sum: 1 } } },
       { $project: { _id: 0, status: "$_id", count: 1 } },
       { $sort: { status: 1 } },

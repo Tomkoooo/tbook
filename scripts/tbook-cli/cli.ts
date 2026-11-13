@@ -31,7 +31,8 @@ Usage:
 Entities and actions:
   event     list | show | create | edit | archive | undo | groups
   group     list | edit | keys   (keys: API key hint, --reveal-preview, --rotate-preview, --rotate-api-key)
-  booking   list | show | resend-voucher
+  booking   list | show | resend-voucher | purge-test   (purge-test --event <id>: delete the event's
+            X-TBook-Test bookings, waitlist entries, claims, tickets, answers; no emails)
   setup     apply --plan <file.json> [--update]   (modules, data lists from spreadsheets, group, event, emails;
             --update brings an existing event's modules, module settings and emails in line with the plan)
 
@@ -64,6 +65,9 @@ Examples:
   npx tsx scripts/tbook-cli/cli.ts booking list --org horror-weeks --status paid --q jane@example.com
   npx tsx scripts/tbook-cli/cli.ts booking resend-voucher --org horror-weeks --id <bookingId> \\
       --apply --prod-ack
+  npx tsx scripts/tbook-cli/cli.ts booking purge-test --org eventstructure --event <eventId>
+  npx tsx scripts/tbook-cli/cli.ts booking purge-test --org eventstructure --event <eventId> \\
+      --apply --prod-ack --confirm PURGE
 `;
 
 async function main(): Promise<void> {

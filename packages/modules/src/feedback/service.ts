@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import ExcelJS from "exceljs";
 import { ActionError } from "@tbook/actions";
-import { eventRepository, type IBooking, type IEvent } from "@tbook/db";
+import { BookingModel, eventRepository, type IBooking, type IEvent } from "@tbook/db";
 import { resolveModules } from "@tbook/services";
 import type { BookingAttendee } from "@tbook/schemas";
 import { attendeeKeyOf, findAttendeeByCode } from "../shared/attendees";
@@ -178,9 +178,9 @@ export async function getPublicSurvey(surveyId: string, groupId: string | null =
   return toPublic(open.survey, open.event);
 }
 
-export async function listPublicSurveys(eventId: string, groupId: string | null): Promise<PublicSurvey[]> {
+export async function listPublicSurveys(eventId: string, groupId: string | null, opts: { preview?: boolean } = {}): Promise<PublicSurvey[]> {
   const event = await eventRepository.findById(eventId);
-  if (!event || (groupId && String(event.groupId) !== groupId) || !(await moduleOn(event))) return [];
+  if (!event || (groupId && String(event.groupId) !== groupId) || (event.status === "draft" && !opts.preview) || !(await moduleOn(event))) return [];
   const surveys = await SurveyModel.find({ eventId, kind: "survey", active: true }).sort({ createdAt: 1 }).exec();
   return surveys.map((survey) => toPublic(survey, event));
 }
@@ -215,9 +215,19 @@ function cleanAnswers(survey: ISurvey, raw: Record<string, unknown>): Record<str
   return answers;
 }
 
-async function record(survey: ISurvey, answers: Record<string, string | number>, source: "survey" | "kiosk" | "api"): Promise<void> {
-  await SurveyResponseModel.create({ organizationId: survey.organizationId, eventId: survey.eventId, surveyId: survey._id, source, answers });
-  await SurveyModel.updateOne({ _id: survey._id }, { $inc: { responseCount: 1 } }).exec();
+async function record(survey: ISurvey, answers: Record<string, string | number>, source: "survey" | "kiosk" | "api", isTest = false): Promise<void> {
+  await SurveyResponseModel.create({ organizationId: survey.organizationId, eventId: survey.eventId, surveyId: survey._id, source, answers, isTest });
+  // Test answers don't count (results, exports and the delete rule ignore them).
+  if (!isTest) await SurveyModel.updateOne({ _id: survey._id }, { $inc: { responseCount: 1 } }).exec();
+}
+
+/** True when a personal-link attendee key ("<attendee id>" or "<bookingId>:<index>") belongs to a test registration. */
+async function isTestAttendeeKey(eventId: unknown, attendeeKey: string): Promise<boolean> {
+  const [bookingId, index] = attendeeKey.split(":");
+  const byIndex = index != null && /^[a-f0-9]{24}$/i.test(bookingId ?? "");
+  const filter: Record<string, unknown> = byIndex ? { _id: bookingId, eventId } : { eventId, "attendees.id": attendeeKey };
+  const booking = await BookingModel.findOne(filter, { isTest: 1 }).lean().exec();
+  return Boolean(booking?.isTest);
 }
 
 /**
@@ -230,29 +240,50 @@ export async function submitSurvey(
   input: { code?: string; token?: string; answers: Record<string, unknown> },
   source: "survey" | "api" = "survey",
   groupId: string | null = null,
-): Promise<{ thankYou: string }> {
+  /**
+   * `preview`: the API request carries the group's preview key — a draft
+   * event's survey and test registrations are accepted. Without it (API) a
+   * test registration is not found. A personal link (source "survey") of a
+   * test guest always works; its answer is stored as a test answer.
+   */
+  opts: { preview?: boolean } = {},
+): Promise<{ thankYou: string; test?: true }> {
   const open = /^[a-f0-9]{24}$/i.test(surveyId) ? await openSurvey(await SurveyModel.findById(surveyId).exec()) : null;
-  if (!open || open.survey.kind !== "survey" || (groupId && String(open.event.groupId) !== groupId)) throw ActionError.notFound("Ez a kérdőív most nem elérhető.");
+  const hidden = source === "api" && open?.event.status === "draft" && !opts.preview;
+  if (!open || hidden || open.survey.kind !== "survey" || (groupId && String(open.event.groupId) !== groupId)) throw ActionError.notFound("Ez a kérdőív most nem elérhető.");
   const { survey, event } = open;
+  // A personal link names its guest exactly; a typed code finds a test guest only with the preview key.
+  const includeTest = source !== "api" || Boolean(opts.preview);
+  const codeIncludesTest = source === "api" && Boolean(opts.preview);
 
   let attendeeKey: string | null = null;
-  if (input.token) attendeeKey = verifyPersonalToken(survey, input.token);
+  let isTest = false;
+  if (input.token) {
+    attendeeKey = verifyPersonalToken(survey, input.token);
+    if (attendeeKey) {
+      isTest = await isTestAttendeeKey(event._id, attendeeKey);
+      if (isTest && !includeTest) attendeeKey = null;
+    }
+  }
   if (!attendeeKey && input.code) {
-    const hit = await findAttendeeByCode(event, input.code);
-    if (hit) attendeeKey = attendeeKeyOf(hit.booking, (hit.booking.attendees ?? [])[hit.attendeeIndex] as BookingAttendee | undefined, hit.attendeeIndex);
+    const hit = await findAttendeeByCode(event, input.code, { includeTest: codeIncludesTest });
+    if (hit) {
+      attendeeKey = attendeeKeyOf(hit.booking, (hit.booking.attendees ?? [])[hit.attendeeIndex] as BookingAttendee | undefined, hit.attendeeIndex);
+      isTest = Boolean(hit.booking.isTest);
+    }
   }
   if (!attendeeKey) throw ActionError.validation("Nem találjuk a regisztrációdat. Ellenőrizd a regisztrációs számodat vagy az azonosítódat.");
 
   const answers = cleanAnswers(survey, input.answers ?? {});
   await SurveyRespondentModel.init();
   try {
-    await SurveyRespondentModel.create({ surveyId: survey._id, hash: hash(`${String(survey._id)}:${attendeeKey}`) });
+    await SurveyRespondentModel.create({ surveyId: survey._id, hash: hash(`${String(survey._id)}:${attendeeKey}`), isTest });
   } catch (error) {
     if ((error as { code?: number }).code === 11000) throw ActionError.conflict("Ezt a kérdőívet már kitöltötted. Köszönjük!", "already_answered");
     throw error;
   }
-  await record(survey, answers, source);
-  return { thankYou: survey.thankYou };
+  await record(survey, answers, source, isTest);
+  return isTest ? { thankYou: survey.thankYou, test: true } : { thankYou: survey.thankYou };
 }
 
 export async function submitKiosk(token: string, raw: Record<string, unknown>): Promise<void> {
@@ -274,7 +305,7 @@ export interface QuestionResult {
 
 export async function surveyResults(organizationId: string, surveyId: string): Promise<{ survey: ISurvey; total: number; bySource: Record<string, number>; questions: QuestionResult[] }> {
   const survey = await getSurveyForOrg(organizationId, surveyId);
-  const responses = await SurveyResponseModel.find({ surveyId: survey._id }).sort({ createdAt: -1 }).lean().exec();
+  const responses = await SurveyResponseModel.find({ surveyId: survey._id, isTest: { $ne: true } }).sort({ createdAt: -1 }).lean().exec();
   const bySource: Record<string, number> = {};
   for (const response of responses) bySource[response.source] = (bySource[response.source] ?? 0) + 1;
   const questions = survey.questions.map((question) => {
@@ -299,7 +330,7 @@ export async function surveyResults(organizationId: string, surveyId: string): P
 
 export async function exportSurveyXlsx(organizationId: string, surveyId: string): Promise<{ fileName: string; buffer: Buffer }> {
   const survey = await getSurveyForOrg(organizationId, surveyId);
-  const responses = await SurveyResponseModel.find({ surveyId: survey._id }).sort({ createdAt: 1 }).lean().exec();
+  const responses = await SurveyResponseModel.find({ surveyId: survey._id, isTest: { $ne: true } }).sort({ createdAt: 1 }).lean().exec();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Válaszok");
   sheet.columns = [

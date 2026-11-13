@@ -41,6 +41,7 @@ const VoucherSchema = new Schema<IVoucher>(
     lastSentToName: { type: String, default: null },
     checkedInAt: { type: Date, default: null },
     checkedInByUserId: { type: String, default: null },
+    isTest: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

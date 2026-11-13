@@ -179,6 +179,8 @@ interface OutgoingMessage {
   html: string;
   attachments: MailAttachment[];
   bookingId: string | null;
+  /** For a test booking's attendee: "[TESZT] " subject. */
+  test?: boolean;
 }
 
 async function attendeeMessage(email: IEventEmail, ctx: RenderContext, row: EventAttendee): Promise<OutgoingMessage> {
@@ -217,6 +219,7 @@ async function attendeeMessage(email: IEventEmail, ctx: RenderContext, row: Even
     html: rendered.html,
     attachments,
     bookingId: String(row.booking._id),
+    test: Boolean(row.booking.isTest),
   };
 }
 
@@ -286,7 +289,7 @@ async function deliver(email: IEventEmail, message: OutgoingMessage, mode: Deliv
     try {
       await sendMail(
         String(email.organizationId),
-        { to: message.to, subject: message.subject, html: message.html, attachments: message.attachments },
+        { to: message.to, subject: message.subject, html: message.html, attachments: message.attachments, test: message.test },
         transporter ?? defaultTransporter,
       );
     } catch (err) {

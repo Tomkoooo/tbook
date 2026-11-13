@@ -1,4 +1,5 @@
 import type { IVoucher } from "@tbook/db";
+import { testData } from "@tbook/modules";
 import { getBookingDetailForOrg, listBookingsForOrg, resendVoucherEmailAsAdmin } from "@tbook/services";
 import type { BookingStatus } from "@tbook/schemas";
 import { parseArgs, requireFlag, type Flags } from "../lib/args";
@@ -42,9 +43,10 @@ async function bookingList(flags: Flags): Promise<void> {
         email: b.customer?.email ?? "",
         guests: String(b.guests),
         total: `${b.totalHuf} ${b.currency}`,
+        test: b.isTest ? "TESZT" : "",
         createdAt: b.createdAt.toISOString().slice(0, 10),
       })),
-      ["id", "status", "event", "customer", "email", "guests", "total", "createdAt"],
+      ["id", "status", "event", "customer", "email", "guests", "total", "test", "createdAt"],
     ),
   );
 }
@@ -124,6 +126,89 @@ async function bookingResendVoucher(flags: Flags): Promise<void> {
   console.log(`\nSent to ${result.sentTo}. Audit record: ${dir}`);
 }
 
+/**
+ * `booking purge-test --org <org> --event <eventId>`: removes the event's
+ * test data (v1 preview key + X-TBook-Test) — test bookings, their tickets,
+ * test-namespace ID claims, bus waitlist places/boardings, email log rows,
+ * test waitlist entries and test survey answers. Dry run by default (lists
+ * what would go); --apply --prod-ack --confirm PURGE deletes. Sends no
+ * email and changes no live counter (test records never held capacity or
+ * seats). The restore point keeps every deleted document.
+ */
+async function bookingPurgeTest(flags: Flags): Promise<void> {
+  await connectDb(flags.get("uri"));
+  const org = await resolveOrganization(requireFlag(flags, "org"));
+  const eventId = requireFlag(flags, "event");
+  const found = await testData.findTestData(org.id, eventId);
+
+  console.log(`Organization: ${org.name} (${org.slug}) — event ${eventId}`);
+  console.log(`Test bookings (${found.bookings.length}):`);
+  if (found.bookings.length > 0) {
+    console.log(
+      table(
+        found.bookings.map((b) => ({
+          id: b.id,
+          regNo: b.registrationNumber ?? "",
+          status: b.status,
+          customer: b.customer,
+          email: b.email,
+          guests: String(b.guests),
+          createdAt: b.createdAt.toISOString().slice(0, 16),
+        })),
+        ["id", "regNo", "status", "customer", "email", "guests", "createdAt"],
+      ),
+    );
+  }
+  console.log(`Test waitlist entries (${found.waitlist.length}):`);
+  if (found.waitlist.length > 0) {
+    console.log(
+      table(
+        found.waitlist.map((e) => ({ id: e.id, status: e.status, customer: e.customer, email: e.email, guests: String(e.guests), createdAt: e.createdAt.toISOString().slice(0, 16) })),
+        ["id", "status", "customer", "email", "guests", "createdAt"],
+      ),
+    );
+  }
+  console.log("\nWould delete:");
+  printKeyValues(found.counts as unknown as Record<string, unknown>);
+  console.log("No email is sent; live capacity and bus seat counters are not touched (test records never held any).");
+
+  const total = Object.entries(found.counts).reduce((sum, [key, n]) => (key === "attendees" ? sum : sum + n), 0);
+  if (total === 0) {
+    console.log("\nNothing to purge.");
+    return;
+  }
+  if (checkApplyGate(flags) === "dry-run") {
+    console.log("\nDRY RUN — nothing deleted. Re-run with --apply --prod-ack --confirm PURGE to delete.");
+    return;
+  }
+
+  await confirmPhrase("PURGE", flags, "confirm", `About to delete the test data above for event ${eventId}`);
+  const deleted = await testData.purgeTestData(org.id, eventId);
+  const operator = resolveOperator(flags);
+  const dir = writeRestorePoint({
+    entity: "booking",
+    action: "purge-test",
+    recordId: eventId,
+    before: found.documents,
+    after: null,
+    audit: {
+      timestamp: new Date().toISOString(),
+      operator,
+      command: process.argv.slice(2),
+      entity: "booking",
+      action: "purge-test",
+      organizationId: org.id,
+      recordId: eventId,
+      changes: Object.entries(deleted).map(([field, n]) => ({ field: `deleted.${field}`, before: found.counts[field as keyof typeof found.counts], after: n })),
+      reversible: false,
+      note: "Test data purge. before.json holds every deleted document (EJSON) should anything need to be re-inserted by hand.",
+    },
+  });
+  console.log("\nDeleted:");
+  printKeyValues(deleted as unknown as Record<string, unknown>);
+  console.log(`Restore point: ${dir}`);
+}
+
 export async function runBookingCommand(action: string | undefined, argv: string[]): Promise<void> {
   const flags = parseArgs(argv);
   switch (action) {
@@ -133,7 +218,9 @@ export async function runBookingCommand(action: string | undefined, argv: string
       return bookingShow(flags);
     case "resend-voucher":
       return bookingResendVoucher(flags);
+    case "purge-test":
+      return bookingPurgeTest(flags);
     default:
-      throw new CliError(`Unknown "booking" action "${action ?? ""}". Try: list, show, resend-voucher.`);
+      throw new CliError(`Unknown "booking" action "${action ?? ""}". Try: list, show, resend-voucher, purge-test.`);
   }
 }

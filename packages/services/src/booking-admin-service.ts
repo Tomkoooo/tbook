@@ -162,7 +162,7 @@ export async function cancelBookingAsAdmin(
   // Best-effort: dispatchWebhookEvent never throws, so a broken customer
   // integration cannot make a cancellation fail. The acting org is used
   // rather than the booking's own field, which legacy rows may not have.
-  await dispatchWebhookEvent(organizationId, "booking.cancelled", bookingWebhookData(result));
+  if (!result.isTest) await dispatchWebhookEvent(organizationId, "booking.cancelled", bookingWebhookData(result));
 
   return result;
 }

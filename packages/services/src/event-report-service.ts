@@ -36,7 +36,8 @@ function plain<T>(value: T): T {
 }
 
 async function loadGuests(eventId: string, schema: AttendeeFieldDef[], filter: ReportFilter): Promise<GuestRow[]> {
-  const bookings = await BookingModel.find({ eventId, status: { $in: [...ACTIVE] } }).sort({ createdAt: 1 }).exec();
+  // Test bookings (v1 X-TBook-Test) are never part of a report.
+  const bookings = await BookingModel.find({ eventId, status: { $in: [...ACTIVE] }, isTest: { $ne: true } }).sort({ createdAt: 1 }).exec();
   const vouchers = await VoucherModel.find({ eventId, attendeeIndex: { $gte: 0 } }, { bookingId: 1, attendeeIndex: 1, checkedInAt: 1, status: 1 }).lean().exec();
   const checkIns = new Map(vouchers.map((v) => [`${String(v.bookingId)}:${v.attendeeIndex}`, v.status === "checked_in" ? (v.checkedInAt ?? null) : null]));
   const rows: GuestRow[] = [];
@@ -118,7 +119,7 @@ export async function eventReport(organizationId: string, eventId: string, filte
   for (const row of guests) for (const tag of row.tags) tagMap.set(tag, (tagMap.get(tag) ?? 0) + 1);
 
   const cancelled = await BookingModel.aggregate<{ guests: number; bookings: number }>([
-    { $match: { eventId: event._id } },
+    { $match: { eventId: event._id, isTest: { $ne: true } } },
     {
       $group: {
         _id: null,
@@ -187,7 +188,7 @@ export async function exportEventRegistrationsXlsx(organizationId: string, event
     { header: "Indok", key: "reason", width: 30 },
   ];
   cancelledSheet.getRow(1).font = { bold: true };
-  const withCancellations = await BookingModel.find({ eventId, $or: [{ status: "cancelled" }, { "cancelledAttendees.0": { $exists: true } }] }).exec();
+  const withCancellations = await BookingModel.find({ eventId, isTest: { $ne: true }, $or: [{ status: "cancelled" }, { "cancelledAttendees.0": { $exists: true } }] }).exec();
   for (const booking of withCancellations) {
     const entries =
       booking.status === "cancelled" && (booking.cancelledAttendees ?? []).length === 0

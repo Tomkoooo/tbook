@@ -212,6 +212,8 @@ export async function reserveSeats(eventId: string, wanted: Map<string, number>,
 
 /** Gives a booking's seats back; returns routeId → seats released. */
 export async function releaseSeatsForBooking(booking: IBooking): Promise<Map<string, number>> {
+  // A test booking never took seats.
+  if (booking.isTest) return new Map();
   const wanted = seatsByRoute((booking.attendees ?? []) as BookingAttendee[], booking.attendeeFieldSchema as AttendeeFieldDef[]);
   for (const [routeId, count] of wanted) {
     if (!Types.ObjectId.isValid(routeId)) continue;
@@ -229,7 +231,7 @@ export async function releaseSeatsForBooking(booking: IBooking): Promise<Map<str
 export async function recountSeats(organizationId: string, eventId: string): Promise<number> {
   const routes = await listRoutes(eventId);
   const counts = new Map<string, number>();
-  const bookings = await BookingModel.find({ eventId, status: { $in: [...ACTIVE_BOOKING_STATUSES, "pending", "checkout_started"] } }).exec();
+  const bookings = await BookingModel.find({ eventId, status: { $in: [...ACTIVE_BOOKING_STATUSES, "pending", "checkout_started"] }, isTest: { $ne: true } }).exec();
   for (const booking of bookings) {
     for (const [routeId, count] of seatsByRoute((booking.attendees ?? []) as BookingAttendee[], booking.attendeeFieldSchema as AttendeeFieldDef[])) {
       counts.set(routeId, (counts.get(routeId) ?? 0) + count);
@@ -275,7 +277,8 @@ function emailOf(row: EventAttendee): string {
 
 /** Who is booked on a route, with each leg's boarding status. */
 export async function listPassengers(route: IBusRoute): Promise<Passenger[]> {
-  const bookings = await BookingModel.find({ eventId: route.eventId, status: { $in: ACTIVE_BOOKING_STATUSES } }).sort({ createdAt: 1 }).exec();
+  // Test bookings hold no seat and never appear on a captain's list.
+  const bookings = await BookingModel.find({ eventId: route.eventId, status: { $in: ACTIVE_BOOKING_STATUSES }, isTest: { $ne: true } }).sort({ createdAt: 1 }).exec();
   const routeId = String(route._id);
   const rows: EventAttendee[] = [];
   for (const booking of bookings) {

@@ -368,7 +368,7 @@ export async function getPublicEntryList(groupId: string, eventId: string): Prom
   if (!event || String(event.groupId) !== groupId || event.status !== "active" || !event.publicEntryList) return null;
 
   const bookings = await BookingModel.find(
-    { eventId: event._id, status: { $in: ["paid", "confirmed"] } },
+    { eventId: event._id, status: { $in: ["paid", "confirmed"] }, isTest: { $ne: true } },
     { attendees: 1, attendeeFieldSchema: 1, teamMemberFieldSchema: 1, customer: 1 },
   )
     .sort({ paidAt: 1, createdAt: 1 })

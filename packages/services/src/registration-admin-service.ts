@@ -335,7 +335,7 @@ export async function updateBookingDetails(
     }
   }
 
-  await dispatchWebhookEvent(organizationId, "booking.updated", bookingWebhookData(updated));
+  if (!updated.isTest) await dispatchWebhookEvent(organizationId, "booking.updated", bookingWebhookData(updated));
 
   return {
     booking: latest,

@@ -39,7 +39,7 @@ export function v1CorsHeaders(request?: Request): HeadersInit | undefined {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-TBook-Api-Key, X-TBook-Preview, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, X-TBook-Api-Key, X-TBook-Preview, X-TBook-Test, Authorization",
     Vary: "Origin",
   };
 }

@@ -32,7 +32,7 @@ export async function bookingEventContext(booking: IBooking): Promise<{ event: I
   const organizationId = booking.organizationId ? String(booking.organizationId) : event.organizationId ? String(event.organizationId) : null;
   const groupId = event.groupId ? String(event.groupId) : null;
   const modules = await resolveModules({ organizationId, groupId, event });
-  return { event, ctx: { event, organizationId, groupId, modules } };
+  return { event, ctx: { event, organizationId, groupId, modules, isTest: Boolean(booking.isTest) } };
 }
 
 /**
@@ -165,7 +165,7 @@ async function moveHoldings(booking: IBooking, ctx: EventContext, previous: Book
   try {
     await claimUniqueFieldValues(ctx, bookingId, next, schema);
   } catch (error) {
-    await fieldClaimRepository.claimAll({ organizationId: ctx.organizationId, eventId: String(booking.eventId), bookingId }, oldClaims);
+    await fieldClaimRepository.claimAll({ organizationId: ctx.organizationId, eventId: String(booking.eventId), bookingId, isTest: ctx.isTest }, oldClaims);
     throw error;
   }
 
@@ -177,7 +177,7 @@ async function moveHoldings(booking: IBooking, ctx: EventContext, previous: Book
       console.error("[tbook] restoring reservations after a refused edit failed", bookingId, restoreError),
     );
     await fieldClaimRepository.releaseForBooking(bookingId);
-    await fieldClaimRepository.claimAll({ organizationId: ctx.organizationId, eventId: String(booking.eventId), bookingId }, oldClaims);
+    await fieldClaimRepository.claimAll({ organizationId: ctx.organizationId, eventId: String(booking.eventId), bookingId, isTest: ctx.isTest }, oldClaims);
     throw error;
   }
 }
@@ -248,7 +248,7 @@ export async function cancelBookingAttendee(bookingId: string, attendeeIndex: nu
   if (!updated) throw ActionError.conflict("The registration changed meanwhile. Please try again.");
 
   const event = await eventRepository.findById(String(booking.eventId));
-  if (event?.capacity != null) await eventRepository.releaseCapacity(String(booking.eventId), 1);
+  if (event?.capacity != null && !booking.isTest) await eventRepository.releaseCapacity(String(booking.eventId), 1);
   await voucherRepository.removeAttendeeIndex(bookingId, attendeeIndex);
   const schema = (booking.attendeeFieldSchema ?? []).map((f) => plain(f) as AttendeeFieldDef);
   await fieldClaimRepository.releaseValues(bookingId, uniqueClaimsOf(schema, [removed]));
@@ -278,13 +278,13 @@ export async function liveFieldSchemaForEvent(eventId: string, schema: AttendeeF
  * waitlist): the form with module options (full ones allowed), the
  * registration rules, and that no `unique` answer is already registered.
  */
-export async function checkRegistrationAnswers(eventId: string, guests: number, attendees: BookingAttendee[]): Promise<BookingAttendee[]> {
+export async function checkRegistrationAnswers(eventId: string, guests: number, attendees: BookingAttendee[], opts: { isTest?: boolean } = {}): Promise<BookingAttendee[]> {
   const event = await eventRepository.findById(eventId);
   if (!event) throw ActionError.notFound("Event not found");
   const organizationId = event.organizationId ? String(event.organizationId) : null;
   const groupId = event.groupId ? String(event.groupId) : null;
   const modules = await resolveModules({ organizationId, groupId, event });
-  const ctx: EventContext = { event, organizationId, groupId, modules };
+  const ctx: EventContext = { event, organizationId, groupId, modules, isTest: Boolean(opts.isTest) };
   const stored = (event.attendeeFieldSchema ?? []).map((field) => plain(field) as AttendeeFieldDef);
   const { schema, details } = await resolveFieldChoices(stored, ctx);
   const fullSchema = schema.map((field) => (details[field.key] ? { ...field, choices: details[field.key]!.map((c) => ({ value: c.value, label: c.label })) } : field));
@@ -298,7 +298,7 @@ export async function checkRegistrationAnswers(eventId: string, guests: number, 
   });
   if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
   for (const claim of uniqueClaimsOf(fullSchema, normalized)) {
-    if (await fieldClaimRepository.findForEvent(eventId, claim.fieldKey, claim.value)) {
+    if (await fieldClaimRepository.findForEvent(eventId, claim.fieldKey, claim.value, ctx.isTest)) {
       const label = fullSchema.find((f) => f.key === claim.fieldKey)?.label ?? claim.fieldKey;
       throw ActionError.conflict(`Ezzel a(z) ${label} értékkel már van regisztráció erre az eseményre.`, "duplicate_field");
     }

@@ -161,7 +161,15 @@ export function capacityFullError(): ActionError {
   return new ActionError(400, "capacity_full", "Sajnos elfogytak a szabad helyek erre az eseményre.");
 }
 
-export type QuoteOptions = { groupId?: string } & BookingPolicyOverrides;
+export type QuoteOptions = {
+  groupId?: string;
+  /**
+   * Test booking (v1 preview key + X-TBook-Test): saved with `isTest`,
+   * takes no event capacity, day passes or module seats, and claims its
+   * unique answers in the test namespace — live data is never affected.
+   */
+  isTest?: boolean;
+} & BookingPolicyOverrides;
 
 export async function quote(input: QuoteRequest, opts?: QuoteOptions): Promise<BookingQuoteContext> {
   const event = await eventRepository.findById(input.eventId);
@@ -294,7 +302,7 @@ async function quoteDayPass(
     // Selling a day that has started is a counter/console decision, tied to
     // the same override that lets a manager sell outside the sales window.
     allowPastDays: opts?.allowClosedSales,
-    allowOverCapacity: opts?.allowOverCapacity,
+    allowOverCapacity: opts?.allowOverCapacity || opts?.isTest,
   });
   if (issues.length > 0) throw ActionError.validation(issues.map((issue) => issue.message).join(" "), { issues });
 
@@ -460,7 +468,10 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
   // Per-day passes are reserved first: it is the stricter, multi-counter
   // reservation, and if the optional overall cap then fails we release it.
   let dayReserved: DayTickets | null = null;
-  if (dryRun) {
+  const isTest = Boolean(opts?.isTest);
+  if (isTest) {
+    // Test bookings stand apart from live capacity: nothing to reserve or check.
+  } else if (dryRun) {
     // Day baskets were checked against live availability in quote(); only the overall cap is left.
     if (event.capacity != null && !opts?.allowOverCapacity && event.capacity - (event.soldGuestCount ?? 0) < guests) throw capacityFullError();
   } else if (ctx.dayTickets && event.dayPass) {
@@ -477,7 +488,7 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
   }
 
   let capacityReserved = false;
-  if (event.capacity != null && !dryRun) {
+  if (event.capacity != null && !dryRun && !isTest) {
     // The unchecked variant is a separate repository method, so an
     // over-capacity write can only happen when a caller explicitly asks.
     const reserved = opts?.allowOverCapacity
@@ -502,6 +513,7 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
       organizationId: organizationId ? String(organizationId) : null,
       groupId: event.groupId ? String(event.groupId) : null,
       modules: await resolveModules({ organizationId: organizationId ? String(organizationId) : null, groupId: event.groupId ? String(event.groupId) : null, event }),
+      isTest,
     };
     // Selects whose choices come from a module (e.g. bus routes) are filled
     // before validation, so an answer outside the live choices is refused.
@@ -509,7 +521,7 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
 
     if (hasHotel && input.hotelId) {
       const hotel = await hotelRepository.findById(input.hotelId);
-      if (hotel) await assertHotelInventoryAvailable(hotel, selections, priceQuote.accommodationGuests ?? guests);
+      if (hotel && !isTest) await assertHotelInventoryAvailable(hotel, selections, priceQuote.accommodationGuests ?? guests);
     }
 
     const playersPerTicket = resolvePlayersPerTicket(event);
@@ -577,6 +589,7 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
       totalHuf: priceQuote.totalHuf,
       currency,
       status: "pending",
+      isTest,
     });
   } catch (error) {
     if (releaseReservations) await releaseReservations();
@@ -594,6 +607,8 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
  * actually reserved is released.
  */
 async function releaseBookingCapacity(booking: IBooking): Promise<void> {
+  // A test booking never reserved anything.
+  if (booking.isTest) return;
   const event = await eventRepository.findById(String(booking.eventId));
   if (!event) return;
 

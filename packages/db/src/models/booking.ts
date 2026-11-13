@@ -168,6 +168,8 @@ const BookingSchema = new Schema<IBooking>(
     receipt: { type: ReceiptSchema, default: null },
     adminNote: { type: String, default: "" },
     registrationNumber: { type: String, default: null },
+    // Test booking (v1 preview key + X-TBook-Test): kept apart from live data.
+    isTest: { type: Boolean, default: false },
     cancelledAttendees: {
       type: [
         new Schema(

@@ -18,6 +18,12 @@ export interface EventContext {
   organizationId: string | null;
   groupId: string | null;
   modules: ResolvedModules;
+  /**
+   * A test registration (v1 X-TBook-Test): modules keep it apart from live
+   * data — no seats or capacity are taken, held IDs are looked up among
+   * test records only.
+   */
+  isTest?: boolean;
 }
 
 /** One selectable answer a module supplies for a `choicesSource` select. */

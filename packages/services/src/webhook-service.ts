@@ -351,6 +351,7 @@ export async function resolveWebhookOrganizationId(booking: IBooking): Promise<s
 
 /** Registered into checkout-service's AFTER_BOOKING_PAID_HOOKS, alongside invoicing/tDarts/voucher delivery. */
 export async function webhookAfterBookingPaidHook(booking: IBooking): Promise<void> {
+  if (booking.isTest) return; // test bookings never leave tBook
   const organizationId = await resolveWebhookOrganizationId(booking);
   await dispatchWebhookEvent(organizationId, "booking.paid", bookingWebhookData(booking));
 }

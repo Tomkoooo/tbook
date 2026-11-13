@@ -37,12 +37,13 @@ export async function eventSiteUrl(event: IEvent): Promise<string> {
   return modules.config<{ siteUrl?: string }>("event-emails").siteUrl ?? "";
 }
 
-export async function sendModuleMail(event: IEvent | string, message: { to: string; subject: string; text: string }, transporter?: MailTransporter): Promise<void> {
+/** `test`: about a test record — the subject gets "[TESZT] ". */
+export async function sendModuleMail(event: IEvent | string, message: { to: string; subject: string; text: string; test?: boolean }, transporter?: MailTransporter): Promise<void> {
   const doc = typeof event === "string" ? await eventRepository.findById(event) : event;
   if (!doc || !message.to) return;
   await sendMail(
     doc.organizationId ? String(doc.organizationId) : null,
-    { to: message.to, subject: message.subject, html: textToHtml(message.text) },
+    { to: message.to, subject: message.subject, html: textToHtml(message.text), test: message.test },
     transporter ?? transporterOverride,
   );
 }

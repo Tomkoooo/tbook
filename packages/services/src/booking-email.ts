@@ -120,7 +120,7 @@ export async function sendBookingEmail(bookingId: string, opts: SendBookingEmail
   if (to === WALK_IN_CUSTOMER_EMAIL) {
     throw ActionError.validation("This was a walk-in sale with no email address. Enter the address to send it to.");
   }
-  await sendMail(organizationId, { to, subject: rendered.subject, html: rendered.body, attachments }, opts.transporter);
+  await sendMail(organizationId, { to, subject: rendered.subject, html: rendered.body, attachments, test: booking.isTest }, opts.transporter);
 
   if (ticket) await voucherRepository.markEmailedForBooking(bookingId, to, booking.customer.name);
   if (invoicePdf) await bookingRepository.updateById(bookingId, { invoiceEmailSentAt: new Date() });
@@ -148,7 +148,8 @@ export async function bookingDocumentsAfterBookingPaidHook(booking: IBooking): P
     return;
   }
   let invoicePdf: Buffer | null = null;
-  if (booking.organizationId) {
+  // A test booking (v1 X-TBook-Test) gets its emails but never an invoice.
+  if (booking.organizationId && !booking.isTest) {
     try {
       invoicePdf = await issueInvoiceForBooking(bookingId);
     } catch (error) {

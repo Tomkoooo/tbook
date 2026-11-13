@@ -261,6 +261,14 @@ export const bookingSchema = z.object({
   cancelledAttendees: z.array(cancelledAttendeeSchema).default([]),
   /** Edits and per-guest cancellations, newest last. */
   changeLog: z.array(bookingChangeSchema).default([]),
+  /**
+   * A test booking made through the v1 API with the preview key plus
+   * `X-TBook-Test: 1`: really saved and emailed ("[TESZT] " subjects), but
+   * apart from live data — no capacity, no bus seats, own ID namespace,
+   * left out of statistics, exports and check-in. Removed with
+   * `tbook-cli booking purge-test`.
+   */
+  isTest: z.boolean().default(false),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

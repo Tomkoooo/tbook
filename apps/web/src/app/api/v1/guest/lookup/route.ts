@@ -9,12 +9,16 @@ import { runV1 } from "@/lib/v1/response";
  * registration number or identifying answer. POST { eventId, code }.
  * Returns the guest's answers (contact details masked), the form with live
  * options, bus + captain details and the transfer rules.
+ * With the preview key (X-TBook-Preview) it also works on a draft event and
+ * finds test registrations (searched first); without it a draft event and
+ * test registrations are "not found". A test registration's response adds
+ * `test: true`.
  */
 export async function POST(request: Request) {
   return runV1(request, async () => {
-    const { groupId } = await requireApiKeyGroup(request);
+    const { groupId, preview } = await requireApiKeyGroup(request);
     enforceV1RateLimit(request, "t-book:guest", 20);
     const { eventId, code } = await readGuestBody(request);
-    return { guest: await guestPortal.lookupGuest(eventId, code, groupId) };
+    return { guest: await guestPortal.lookupGuest(eventId, code, groupId, { preview }) };
   });
 }

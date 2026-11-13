@@ -76,6 +76,8 @@ export interface ISurveyResponse extends Document {
   surveyId: Types.ObjectId;
   source: "survey" | "kiosk" | "api";
   answers: Record<string, string | number>;
+  /** Answered by a test registration (v1 X-TBook-Test): left out of results and exports. */
+  isTest: boolean;
   createdAt: Date;
 }
 
@@ -86,6 +88,7 @@ const SurveyResponseSchema = new Schema<ISurveyResponse>(
     surveyId: { type: Schema.Types.ObjectId, required: true, index: true },
     source: { type: String, enum: ["survey", "kiosk", "api"], required: true },
     answers: { type: Schema.Types.Mixed, default: {} },
+    isTest: { type: Boolean, default: false },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
@@ -100,12 +103,14 @@ export const SurveyResponseModel: Model<ISurveyResponse> =
 export interface ISurveyRespondent extends Document {
   surveyId: Types.ObjectId;
   hash: string;
+  isTest: boolean;
 }
 
 const SurveyRespondentSchema = new Schema<ISurveyRespondent>(
   {
     surveyId: { type: Schema.Types.ObjectId, required: true },
     hash: { type: String, required: true },
+    isTest: { type: Boolean, default: false },
   },
   { timestamps: false },
 );

@@ -91,7 +91,7 @@ function cellToAnswer(field: AttendeeFieldDef, raw: string | undefined): Attende
  * guest who is already registered gets no data back, only the flag (the
  * site then points them to the guest self-service page).
  */
-export async function prefillRegistration(eventId: string, rawCode: string): Promise<RegistrationPrefillResult> {
+export async function prefillRegistration(eventId: string, rawCode: string, opts: { isTest?: boolean } = {}): Promise<RegistrationPrefillResult> {
   const event = await eventRepository.findById(eventId);
   if (!event) throw ActionError.notFound("Event not found");
   const setup = registrationPrefillSetup(event as unknown as EventLike);
@@ -102,14 +102,14 @@ export async function prefillRegistration(eventId: string, rawCode: string): Pro
   const fields = plainFields(event as unknown as EventLike);
   const identifier = fields.find((f) => f.key === setup.fieldKey)!;
   if (identifier.unique) {
-    const claimed = await fieldClaimRepository.findForEvent(eventId, setup.fieldKey, normalizeUniqueValue(code));
+    const claimed = await fieldClaimRepository.findForEvent(eventId, setup.fieldKey, normalizeUniqueValue(code), opts.isTest);
     if (claimed) return { found: true, alreadyRegistered: true, fields: { [setup.fieldKey]: code } };
   }
 
   const organizationId = event.organizationId ? String(event.organizationId) : null;
   const groupId = event.groupId ? String(event.groupId) : null;
   const modules = await resolveModules({ organizationId, groupId, event });
-  const held = await findHeldIdentifier({ event, organizationId, groupId, modules }, [{ fieldKey: setup.fieldKey, value: normalizeUniqueValue(code) }]);
+  const held = await findHeldIdentifier({ event, organizationId, groupId, modules, isTest: Boolean(opts.isTest) }, [{ fieldKey: setup.fieldKey, value: normalizeUniqueValue(code) }]);
   if (held?.reason === "waitlist") return { found: true, alreadyRegistered: false, onWaitlist: true, fields: {} };
 
   const row = organizationId ? await findDataListRow(organizationId, setup.listId, code).catch(() => null) : null;

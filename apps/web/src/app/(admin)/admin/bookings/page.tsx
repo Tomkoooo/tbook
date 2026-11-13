@@ -208,6 +208,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                         <div className="flex gap-1">
                           <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
                           {booking.source === "admin" ? <Badge variant="info">admin</Badge> : null}
+                          {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
                         </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{booking.paymentMethod ?? "stripe"}</TableCell>

@@ -46,9 +46,14 @@ export function toEventAttendees(booking: IBooking): EventAttendee[] {
   });
 }
 
-/** Every attendee of the event's active bookings; `fieldFilter` narrows by one answer at the database. */
+/**
+ * Every attendee of the event's active (live) bookings; `fieldFilter`
+ * narrows by one answer at the database. Test bookings (v1 X-TBook-Test)
+ * are never listed: manual sends, "not registered yet" lists and other
+ * live uses must not see them.
+ */
 export async function listEventAttendees(eventId: string, fieldFilter?: { fieldKey: string; value: string }): Promise<EventAttendee[]> {
-  const query: Record<string, unknown> = { eventId, status: { $in: ACTIVE_BOOKING_STATUSES } };
+  const query: Record<string, unknown> = { eventId, status: { $in: ACTIVE_BOOKING_STATUSES }, isTest: { $ne: true } };
   if (fieldFilter) query[`attendees.fields.${fieldFilter.fieldKey}`] = fieldFilter.value;
   const bookings = await BookingModel.find(query).sort({ createdAt: 1 }).exec();
   const rows = bookings.flatMap(toEventAttendees);
@@ -68,26 +73,42 @@ export function givenName(fullName: string, order: "family_first" | "given_first
 /**
  * Finds an active registration's attendee from what a guest types: their
  * registration number, or an identifying (`identifier`/`unique`) answer
- * such as an employee ID. Null when nothing matches.
+ * such as an employee ID. Null when nothing matches. Live registrations
+ * only; with `includeTest` (a request carrying the preview key) test
+ * registrations are searched first.
  */
 export async function findAttendeeByCode(
   event: { _id: Types.ObjectId | string; attendeeFieldSchema?: unknown },
   code: string,
+  opts: { includeTest?: boolean } = {},
 ): Promise<{ booking: IBooking; attendeeIndex: number } | null> {
   const raw = code.trim();
   if (!raw) return null;
+  for (const test of opts.includeTest ? [true, false] : [false]) {
+    const hit = await findInPool(event, raw, test);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function findInPool(
+  event: { _id: Types.ObjectId | string; attendeeFieldSchema?: unknown },
+  raw: string,
+  test: boolean,
+): Promise<{ booking: IBooking; attendeeIndex: number } | null> {
+  const pool = test ? { isTest: true } : { isTest: { $ne: true } };
   const asNumber = normalizeRegistrationNumber(raw);
   if (asNumber) {
-    const booking = await BookingModel.findOne({ eventId: event._id, status: { $in: [...ACTIVE_BOOKING_STATUSES] }, "attendees.registrationNumber": asNumber }).exec();
+    const booking = await BookingModel.findOne({ eventId: event._id, status: { $in: [...ACTIVE_BOOKING_STATUSES] }, "attendees.registrationNumber": asNumber, ...pool }).exec();
     const attendeeIndex = booking?.attendees?.findIndex((attendee) => attendee.registrationNumber === asNumber) ?? -1;
     if (booking && attendeeIndex >= 0) return { booking, attendeeIndex };
   }
   const value = normalizeUniqueValue(raw);
   const keys = ((event.attendeeFieldSchema ?? []) as AttendeeFieldDef[]).filter((field) => field.identifier || field.unique).map((field) => field.key);
   for (const key of keys) {
-    const claim = await fieldClaimRepository.findForEvent(String(event._id), key, value);
+    const claim = await fieldClaimRepository.findForEvent(String(event._id), key, value, test);
     if (!claim) continue;
-    const booking = await BookingModel.findOne({ _id: claim.bookingId, status: { $in: [...ACTIVE_BOOKING_STATUSES] } }).exec();
+    const booking = await BookingModel.findOne({ _id: claim.bookingId, status: { $in: [...ACTIVE_BOOKING_STATUSES] }, ...pool }).exec();
     const attendeeIndex = booking?.attendees?.findIndex((attendee) => normalizeUniqueValue(attendee.fields?.[key]) === value) ?? -1;
     if (booking && attendeeIndex >= 0) return { booking, attendeeIndex };
   }

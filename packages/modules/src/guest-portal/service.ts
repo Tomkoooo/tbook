@@ -47,9 +47,14 @@ function plain<T>(value: T): T {
   return typeof (value as { toObject?: () => T }).toObject === "function" ? (value as unknown as { toObject: () => T }).toObject() : value;
 }
 
-async function portalEvent(eventId: string, groupId: string | null): Promise<{ event: IEvent; config: GuestPortalConfig }> {
+/** `preview`: the request carries the group's preview key — draft events and test registrations are visible. */
+export interface GuestPortalOptions {
+  preview?: boolean;
+}
+
+async function portalEvent(eventId: string, groupId: string | null, opts: GuestPortalOptions = {}): Promise<{ event: IEvent; config: GuestPortalConfig }> {
   const event = await eventRepository.findById(eventId);
-  if (!event || (groupId && String(event.groupId) !== groupId)) throw ActionError.notFound("Az esemény nem található.");
+  if (!event || (groupId && String(event.groupId) !== groupId) || (event.status === "draft" && !opts.preview)) throw ActionError.notFound("Az esemény nem található.");
   const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
   if (!modules.isOn(GUEST_PORTAL)) throw ActionError.notFound("Ennél az eseménynél nem érhető el az önkiszolgálás.");
   return { event, config: modules.config<GuestPortalConfig>(GUEST_PORTAL) };
@@ -60,10 +65,11 @@ function identifyingKeys(schema: AttendeeFieldDef[]): string[] {
 }
 
 /** Finds the guest a code belongs to: a registration number, or an identifying answer. */
-export async function findGuest(eventId: string, code: string, groupId: string | null = null): Promise<Found> {
-  const { event, config } = await portalEvent(eventId, groupId);
+export async function findGuest(eventId: string, code: string, groupId: string | null = null, opts: GuestPortalOptions = {}): Promise<Found> {
+  const { event, config } = await portalEvent(eventId, groupId, opts);
   if (!code.trim()) throw ActionError.validation("Add meg a regisztrációs számodat vagy az azonosítódat.");
-  const hit = await findAttendeeByCode(event, code);
+  // Test registrations only for a request with the preview key (searched first).
+  const hit = await findAttendeeByCode(event, code, { includeTest: opts.preview });
   if (!hit) throw ActionError.notFound("Ezzel a kóddal nem találtunk regisztrációt.");
   return { ...hit, event, config };
 }
@@ -117,6 +123,8 @@ export interface GuestView {
   transferRules: string;
   canEdit: boolean;
   canCancel: boolean;
+  /** Added: present (true) only for a test registration. */
+  test?: true;
 }
 
 export async function guestView(found: Found): Promise<GuestView> {
@@ -135,7 +143,7 @@ export async function guestView(found: Found): Promise<GuestView> {
   }
   const route = await routeForAttendee(booking, attendeeIndex);
   const busOn = ctx.modules.isOn(BUS_TRANSPORT);
-  const waitPosition = busOn ? await busWaitlistPosition(String(event._id), attendeeKeyOf(booking, attendee, attendeeIndex)) : null;
+  const waitPosition = busOn ? await busWaitlistPosition(String(event._id), attendeeKeyOf(booking, attendee, attendeeIndex), Boolean(booking.isTest)) : null;
   return {
     eventId: String(event._id),
     eventName: event.name,
@@ -160,16 +168,17 @@ export async function guestView(found: Found): Promise<GuestView> {
     transferRules: busOn ? (ctx.modules.config<{ transferRules?: string }>(BUS_TRANSPORT).transferRules ?? "") : "",
     canEdit: open && config.allowEdit !== "no",
     canCancel: open && config.allowCancel !== "no" && booking.totalHuf <= 0,
+    ...(booking.isTest ? { test: true as const } : {}),
   };
 }
 
-export async function lookupGuest(eventId: string, code: string, groupId: string | null = null): Promise<GuestView> {
-  return guestView(await findGuest(eventId, code, groupId));
+export async function lookupGuest(eventId: string, code: string, groupId: string | null = null, opts: GuestPortalOptions = {}): Promise<GuestView> {
+  return guestView(await findGuest(eventId, code, groupId, opts));
 }
 
 /** Changes the guest's own answers; locked and masked-but-unchanged answers keep their stored value. */
-export async function updateGuest(eventId: string, code: string, input: Record<string, unknown>, groupId: string | null = null): Promise<GuestView> {
-  const found = await findGuest(eventId, code, groupId);
+export async function updateGuest(eventId: string, code: string, input: Record<string, unknown>, groupId: string | null = null, opts: GuestPortalOptions = {}): Promise<GuestView> {
+  const found = await findGuest(eventId, code, groupId, opts);
   const view = await guestView(found);
   if (!view.canEdit) throw ActionError.forbidden("Ezt a regisztrációt már nem lehet módosítani.");
   const fields: Record<string, AttendeeFieldValue> = {};
@@ -196,12 +205,18 @@ export async function updateGuest(eventId: string, code: string, input: Record<s
   return guestView({ ...found, booking: updated });
 }
 
-export async function cancelGuest(eventId: string, code: string, reason: string, groupId: string | null = null): Promise<{ cancelled: true; registrationNumber: string | null }> {
-  const found = await findGuest(eventId, code, groupId);
+export async function cancelGuest(
+  eventId: string,
+  code: string,
+  reason: string,
+  groupId: string | null = null,
+  opts: GuestPortalOptions = {},
+): Promise<{ cancelled: true; registrationNumber: string | null; test?: true }> {
+  const found = await findGuest(eventId, code, groupId, opts);
   const view = await guestView(found);
   if (!view.canCancel) throw ActionError.forbidden("Ezt a regisztrációt itt nem lehet lemondani. Kérjük, keresd a szervezőket.");
   await cancelBookingAttendee(String(found.booking._id), found.attendeeIndex, { by: "guest", reason: reason.slice(0, 500) });
-  return { cancelled: true, registrationNumber: view.registrationNumber };
+  return { cancelled: true, registrationNumber: view.registrationNumber, ...(found.booking.isTest ? { test: true as const } : {}) };
 }
 
 /**
@@ -225,6 +240,7 @@ export async function sendCancellationEmails(booking: IBooking): Promise<void> {
         to,
         subject: fillTemplate(config.cancelSubject?.trim() || GUEST_PORTAL_DEFAULTS.cancelSubject, values),
         text: fillTemplate(config.cancelMessage?.trim() || GUEST_PORTAL_DEFAULTS.cancelMessage, values),
+        test: Boolean(booking.isTest),
       });
     } catch (error) {
       console.error("[tbook] cancellation email failed", String(booking._id), row.attendeeKey, error);

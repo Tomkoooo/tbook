@@ -58,6 +58,7 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
           <div className="flex items-center gap-1">
             <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
             <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>invoice: {booking.invoiceStatus}</Badge>
+            {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
           </div>
         }
       />

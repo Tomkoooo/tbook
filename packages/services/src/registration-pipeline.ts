@@ -116,7 +116,7 @@ export async function claimUniqueFieldValues(
   await assertNotHeld(ctx, claims);
 
   const clash = await fieldClaimRepository.claimAll(
-    { organizationId: ctx.organizationId, eventId: String(ctx.event._id), bookingId },
+    { organizationId: ctx.organizationId, eventId: String(ctx.event._id), bookingId, isTest: ctx.isTest },
     claims.map(({ fieldKey, value }) => ({ fieldKey, value })),
   );
   if (clash) throw takenError(claims.find((c) => c.fieldKey === clash.fieldKey && c.value === clash.value)!);
@@ -128,7 +128,7 @@ export async function checkUniqueFieldValues(ctx: EventContext, attendees: Booki
   const claims = collectUniqueClaims(attendees, schema);
   await assertNotHeld(ctx, claims);
   for (const claim of claims) {
-    if (await fieldClaimRepository.findForEvent(String(ctx.event._id), claim.fieldKey, claim.value)) throw takenError(claim);
+    if (await fieldClaimRepository.findForEvent(String(ctx.event._id), claim.fieldKey, claim.value, ctx.isTest)) throw takenError(claim);
   }
 }
 

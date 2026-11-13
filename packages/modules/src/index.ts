@@ -34,3 +34,4 @@ export { GUEST_PORTAL } from "./guest-portal";
 export { WAITLIST } from "./waitlist";
 export { FEEDBACK } from "./feedback";
 export { setModuleMailTransporter } from "./shared/mail";
+export * as testData from "./test-data";

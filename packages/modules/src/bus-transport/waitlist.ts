@@ -18,6 +18,11 @@ import { busRouteFields, isBusWaitlistValue } from "./service";
  * Not spammy: a guest is emailed again only when seats became free after
  * their last email, or (on a later trigger while seats are still free)
  * once at least 6 hours have passed.
+ *
+ * Test registrations (v1 X-TBook-Test) wait in their own line: they are
+ * emailed ("[TESZT] ") only when a test guest with a bus cancels, and
+ * live seat changes never email them (nor do test changes email live
+ * guests). They are left out of the console list and the export.
  */
 
 export const BUS_WAITLIST_RENOTIFY_MS = 6 * 3600_000;
@@ -79,7 +84,7 @@ export async function removeFromBusWaitlist(booking: IBooking): Promise<void> {
   await BusWaitlistEntryModel.deleteMany({ eventId: booking.eventId, attendeeKey: { $in: keys } }).exec();
 }
 
-/** Records that seats became free, then emails the line. */
+/** Records that seats became free, then emails the (live) line. */
 export async function seatsFreed(eventId: string, now = new Date()): Promise<void> {
   await BusSeatStateModel.updateOne({ eventId }, { $set: { lastFreedAt: now } }, { upsert: true }).exec();
   await notifyBusWaitlist(eventId, now);
@@ -97,11 +102,15 @@ interface WaitingGuest {
   notifiedAt: Date | null;
 }
 
-/** The line in order; drops entries whose guest is no longer waiting (cancelled, or picked a bus). */
-async function waitingGuests(eventId: string): Promise<WaitingGuest[]> {
-  const entries = await BusWaitlistEntryModel.find({ eventId }).sort({ joinedAt: 1, _id: 1 }).exec();
+/** The line in order (live, or with `test` the test line); drops entries whose guest is no longer waiting (cancelled, or picked a bus). */
+async function waitingGuests(eventId: string, test = false): Promise<WaitingGuest[]> {
+  const all = await BusWaitlistEntryModel.find({ eventId }).sort({ joinedAt: 1, _id: 1 }).exec();
+  if (all.length === 0) return [];
+  const bookingIds = [...new Set(all.map((e) => String(e.bookingId)))];
+  const inPool = new Set((await BookingModel.find({ _id: { $in: bookingIds }, ...(test ? { isTest: true } : { isTest: { $ne: true } }) }, { _id: 1 }).lean().exec()).map((b) => String(b._id)));
+  const entries = all.filter((entry) => inPool.has(String(entry.bookingId)));
   if (entries.length === 0) return [];
-  const bookings = await BookingModel.find({ _id: { $in: [...new Set(entries.map((e) => String(e.bookingId)))] }, status: { $in: ACTIVE_BOOKING_STATUSES } }).exec();
+  const bookings = await BookingModel.find({ _id: { $in: [...inPool] }, status: { $in: ACTIVE_BOOKING_STATUSES } }).exec();
   const rows = new Map<string, EventAttendee>();
   for (const booking of bookings) for (const row of toEventAttendees(booking)) rows.set(row.attendeeKey, row);
   const out: WaitingGuest[] = [];
@@ -120,10 +129,10 @@ async function waitingGuests(eventId: string): Promise<WaitingGuest[]> {
 }
 
 /** 1-based place in the bus waitlist, or null when the attendee isn't waiting. */
-export async function busWaitlistPosition(eventId: string, attendeeKey: string): Promise<number | null> {
+export async function busWaitlistPosition(eventId: string, attendeeKey: string, test = false): Promise<number | null> {
   const mine = await BusWaitlistEntryModel.findOne({ eventId, attendeeKey }).exec();
   if (!mine) return null;
-  const line = await waitingGuests(eventId);
+  const line = await waitingGuests(eventId, test);
   const index = line.findIndex((guest) => guest.row.attendeeKey === attendeeKey);
   return index >= 0 ? index + 1 : null;
 }
@@ -150,7 +159,7 @@ export interface BusWaitlistRow {
   notifiedAt: Date | null;
 }
 
-/** The line for the console and the export. */
+/** The (live) line for the console and the export. */
 export async function listBusWaitlist(eventId: string): Promise<BusWaitlistRow[]> {
   return (await waitingGuests(eventId)).map((guest, index) => ({
     position: index + 1,
@@ -168,22 +177,24 @@ export async function listBusWaitlist(eventId: string): Promise<BusWaitlistRow[]
  * is claimed atomically before the email, so overlapping triggers can't
  * send twice. Returns how many were emailed.
  */
-export async function notifyBusWaitlist(eventId: string, now = new Date()): Promise<number> {
+export async function notifyBusWaitlist(eventId: string, now = new Date(), opts: { test?: boolean } = {}): Promise<number> {
+  const test = Boolean(opts.test);
   if (!(await BusWaitlistEntryModel.exists({ eventId }))) return 0;
   const event = await eventRepository.findById(eventId);
   if (!event) return 0;
   const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
   if (!modules.isOn("bus-transport")) return 0;
-  if ((await freeSeats(eventId)) <= 0) return 0;
+  // The test line is told whenever a test guest gives up a bus (live seats aren't involved).
+  if (!test && (await freeSeats(eventId)) <= 0) return 0;
 
   const state = await BusSeatStateModel.findOne({ eventId }).lean().exec();
   const lastFreedAt = state?.lastFreedAt ? new Date(state.lastFreedAt).getTime() : 0;
   const config = modules.config<BusWaitlistConfig>("bus-transport");
   const siteUrl = await eventSiteUrl(event);
   let sent = 0;
-  for (const guest of await waitingGuests(eventId)) {
+  for (const guest of await waitingGuests(eventId, test)) {
     const last = guest.notifiedAt ? guest.notifiedAt.getTime() : null;
-    const due = last == null || lastFreedAt > last || now.getTime() - last >= BUS_WAITLIST_RENOTIFY_MS;
+    const due = test || last == null || lastFreedAt > last || now.getTime() - last >= BUS_WAITLIST_RENOTIFY_MS;
     if (!due) continue;
     const claimed = await BusWaitlistEntryModel.findOneAndUpdate({ _id: guest.entryId, notifiedAt: guest.notifiedAt }, { $set: { notifiedAt: now } }).exec();
     if (!claimed) continue;
@@ -195,6 +206,7 @@ export async function notifyBusWaitlist(eventId: string, now = new Date()): Prom
           to: emailOf(guest.row),
           subject: fillTemplate(config.busWaitlistSubject?.trim() || BUS_WAITLIST_DEFAULTS.subject, values),
           text: fillTemplate(config.busWaitlistMessage?.trim() || BUS_WAITLIST_DEFAULTS.message, values),
+          test,
         },
         transporterOverride,
       );

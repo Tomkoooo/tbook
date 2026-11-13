@@ -71,6 +71,10 @@ requests). `group keys` shows the API key hint and the dev preview key
 only as a hash, so it can't be shown again. `setup apply --update` brings an
 existing event's module grants, module settings and emails in line with its
 plan file without touching the event's own fields (`--confirm UPDATE`).
+`booking purge-test --event <id>` deletes an event's test data (v1
+`X-TBook-Test` bookings, their tickets and ID claims, test waitlist entries,
+test survey answers, email log rows); dry run lists it, `--apply --prod-ack
+--confirm PURGE` deletes, sends no email and leaves live counters alone.
 
 Safety model, enforced the same way for every command and every entity
 added later:

@@ -68,6 +68,14 @@ export function generatePreviewKey(): string {
 }
 
 /** The `X-TBook-Preview` header value, normalized like an API key; null when absent. */
+/** `X-TBook-Test: 1` — test bookings; honoured only together with a valid preview key. */
+export const TBOOK_TEST_HEADER = "x-tbook-test";
+
+/** True when the request asks for test mode (`X-TBook-Test: 1`). Meaningless without a valid preview key. */
+export function requestAsksForTestMode(request: Request): boolean {
+  return (request.headers.get(TBOOK_TEST_HEADER) ?? "").trim() === "1";
+}
+
 export function extractPreviewKeyFromRequest(request: Request): string | null {
   const value = normalizeTBookApiKey(request.headers.get(TBOOK_PREVIEW_HEADER));
   return value || null;

@@ -44,6 +44,8 @@ export const voucherSchema = z.object({
   lastSentToName: z.string().nullable().default(null),
   checkedInAt: z.date().nullable().default(null),
   checkedInByUserId: z.string().nullable().default(null),
+  /** Ticket of a test booking: not valid for entry, left out of check-in lists. */
+  isTest: z.boolean().default(false),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

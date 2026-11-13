@@ -6,6 +6,7 @@ import { normalizeUniqueValue } from "@tbook/domain";
 import {
   checkRegistrationAnswers,
   createBookingWithCheckout,
+  createTestBookingWithCheckout,
   resolveAttendeeDisplayName,
   resolveModules,
   sendMail,
@@ -37,6 +38,13 @@ export const WAITLIST = "waitlist";
  * entry has no position (its place is held until `offerExpiresAt`).
  * While an entry is open its identifying answers (e.g. employee ID) are
  * held: the same ID can't book or join again until it leaves.
+ *
+ * Test entries (v1 preview key + `X-TBook-Test: 1`) form their own queue:
+ * positions count test entries only, a test entry is promoted only when a
+ * test booking is cancelled (one place per freed test guest, no capacity
+ * involved), live cancellations never touch them and test cancellations
+ * never promote a live entry. Their IDs are held among test records only.
+ * Their emails go out with "[TESZT] " subjects.
  */
 export interface WaitlistConfig {
   mode?: "auto" | "offer";
@@ -74,6 +82,11 @@ export function setWaitlistTransporter(transporter: MailTransporter | undefined)
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 const OPEN: WaitlistStatus[] = ["waiting", "offered"];
+
+/** The live queue, or with `test` the test queue. */
+function pool(test: boolean | null | undefined): Record<string, unknown> {
+  return test ? { isTest: true } : { isTest: { $ne: true } };
+}
 
 function appUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
@@ -120,7 +133,7 @@ async function notify(entry: IWaitlistEntry, event: IEvent, kind: NoticeKind, ex
   try {
     await sendMail(
       event.organizationId ? String(event.organizationId) : null,
-      { to: entry.customer.email, subject: fill(subject, values), html: `<p>${html.replace(/\n/g, "<br>")}</p>` },
+      { to: entry.customer.email, subject: fill(subject, values), html: `<p>${html.replace(/\n/g, "<br>")}</p>`, test: entry.isTest },
       transporterOverride,
     );
     await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { notifiedAt: new Date() } }).exec();
@@ -156,8 +169,8 @@ function identifierValues(event: IEvent, list: unknown[]): string[] {
     .filter((v) => !v.endsWith("\u0000"));
 }
 
-function openEntries(event: IEvent): Promise<IWaitlistEntry[]> {
-  return WaitlistEntryModel.find({ eventId: event._id, status: { $in: OPEN } }).sort({ createdAt: 1, _id: 1 }).exec();
+function openEntries(event: IEvent, test = false): Promise<IWaitlistEntry[]> {
+  return WaitlistEntryModel.find({ eventId: event._id, status: { $in: OPEN }, ...pool(test) }).sort({ createdAt: 1, _id: 1 }).exec();
 }
 
 /** Rank among waiting entries (1 = next); null for an offered/closed entry. */
@@ -166,6 +179,7 @@ async function positionOf(entry: IWaitlistEntry): Promise<number | null> {
   const ahead = await WaitlistEntryModel.countDocuments({
     eventId: entry.eventId,
     status: "waiting",
+    ...pool(entry.isTest),
     $or: [{ createdAt: { $lt: entry.createdAt } }, { createdAt: entry.createdAt, _id: { $lt: entry._id } }],
   }).exec();
   return ahead + 1;
@@ -174,31 +188,41 @@ async function positionOf(entry: IWaitlistEntry): Promise<number | null> {
 export interface JoinWaitlistOptions {
   /** Preview mode: draft events allowed; everything is checked, nothing saved or sent. */
   preview?: boolean;
+  /**
+   * Test mode (preview key + X-TBook-Test): draft events allowed, the entry
+   * is saved in the test queue and emailed ("[TESZT] "). No "not full"
+   * check: test data doesn't depend on live capacity.
+   */
+  test?: boolean;
 }
 
-export type JoinWaitlistResult = { entryId: string; position: number } | { preview: true; entryId: null; position: number };
+export type JoinWaitlistResult =
+  | { entryId: string; position: number }
+  | { entryId: string; position: number; test: true }
+  | { preview: true; entryId: null; position: number };
 
 export async function joinWaitlist(eventId: string, input: JoinWaitlistInput, groupId: string | null = null, opts: JoinWaitlistOptions = {}): Promise<JoinWaitlistResult> {
   const event = await eventRepository.findById(eventId);
-  const visible = event?.status === "active" || (opts.preview && event?.status === "draft");
+  const test = Boolean(opts.test);
+  const visible = event?.status === "active" || ((opts.preview || test) && event?.status === "draft");
   if (!event || !visible || (groupId && String(event.groupId) !== groupId)) throw ActionError.notFound("Az esemény nem található.");
   const { on } = await waitlistContext(event);
   if (!on) throw ActionError.notFound("Ennek az eseménynek nincs várólistája.");
   const guests = Math.max(Math.floor(Number(input.guests ?? 1)) || 1, 1);
-  if (freePlaces(event) >= guests) throw ActionError.conflict("Még van szabad hely – regisztrálj inkább!", "not_full");
+  if (!test && freePlaces(event) >= guests) throw ActionError.conflict("Még van szabad hely – regisztrálj inkább!", "not_full");
   const name = String(input.customer?.name ?? "").trim();
   const email = String(input.customer?.email ?? "").trim().toLowerCase();
   const phone = String(input.customer?.phone ?? "").trim();
   if (!name || !phone || !/^\S+@\S+\.\S+$/.test(email)) throw ActionError.validation("Add meg a neved, a telefonszámod és egy érvényes e-mail-címet.");
 
-  const attendees = await checkRegistrationAnswers(eventId, guests, input.attendees ?? []);
-  const open = await openEntries(event);
+  const attendees = await checkRegistrationAnswers(eventId, guests, input.attendees ?? [], { isTest: test });
+  const open = await openEntries(event, test);
   if (open.some((entry) => entry.customer.email === email)) throw ActionError.conflict("Ezzel az e-mail-címmel már várólistán vagy.", "duplicate");
   const mine = new Set(identifierValues(event, attendees));
   if (open.some((entry) => identifierValues(event, entry.attendees).some((v) => mine.has(v)))) throw ActionError.conflict("Ezzel az azonosítóval már várólistán vagy.", "duplicate");
 
   const position = open.filter((e) => e.status === "waiting").length + 1;
-  if (opts.preview) return { preview: true, entryId: null, position };
+  if (opts.preview && !test) return { preview: true, entryId: null, position };
 
   const entry = await WaitlistEntryModel.create({
     organizationId: event.organizationId ?? null,
@@ -207,24 +231,36 @@ export async function joinWaitlist(eventId: string, input: JoinWaitlistInput, gr
     customer: { name, email, phone, note: String(input.customer.note ?? "").slice(0, 1000) },
     attendees,
     returnBaseUrl: input.returnBaseUrl?.trim() || null,
+    isTest: test,
   });
   const actual = (await positionOf(entry)) ?? position;
   await notify(entry, event, "joined", { position: actual });
-  return { entryId: String(entry._id), position: actual };
+  return test ? { entryId: String(entry._id), position: actual, test: true } : { entryId: String(entry._id), position: actual };
 }
 
 // ---- Guest status and leaving ------------------------------------------------------
 
-/** The open entry one of whose attendees has this identifying answer (e.g. employee ID). */
-export async function findOpenEntryByCode(event: IEvent, code: string): Promise<IWaitlistEntry | null> {
+/**
+ * The open entry one of whose attendees has this identifying answer (e.g.
+ * employee ID). Live entries only; with `includeTest` (a request carrying
+ * the preview key) the test queue is searched first.
+ */
+export async function findOpenEntryByCode(event: IEvent, code: string, opts: { includeTest?: boolean } = {}): Promise<IWaitlistEntry | null> {
   const value = normalizeUniqueValue(code);
   if (!value) return null;
   const keys = uniqueKeysOf(event).map((f) => f.key);
   if (keys.length === 0) return null;
-  for (const entry of await openEntries(event)) {
-    if ((entry.attendees as BookingAttendee[]).some((a) => keys.some((key) => normalizeUniqueValue(a.fields?.[key]) === value))) return entry;
+  for (const test of opts.includeTest ? [true, false] : [false]) {
+    for (const entry of await openEntries(event, test)) {
+      if ((entry.attendees as BookingAttendee[]).some((a) => keys.some((key) => normalizeUniqueValue(a.fields?.[key]) === value))) return entry;
+    }
   }
   return null;
+}
+
+/** Guest-facing options: `preview` = the request carries the group's preview key (draft events and test entries are visible). */
+export interface WaitlistGuestOptions {
+  preview?: boolean;
 }
 
 export interface WaitlistStatusView {
@@ -237,23 +273,23 @@ export interface WaitlistStatusView {
   offerExpiresAt: string | null;
 }
 
-async function guestWaitlistEvent(eventId: string, groupId: string | null): Promise<IEvent> {
+async function guestWaitlistEvent(eventId: string, groupId: string | null, opts: WaitlistGuestOptions): Promise<IEvent> {
   const event = await eventRepository.findById(eventId);
-  if (!event || (groupId && String(event.groupId) !== groupId)) throw ActionError.notFound("Az esemény nem található.");
+  if (!event || (groupId && String(event.groupId) !== groupId) || (event.status === "draft" && !opts.preview)) throw ActionError.notFound("Az esemény nem található.");
   if (!(await waitlistContext(event)).on) throw ActionError.notFound("Ennek az eseménynek nincs várólistája.");
   return event;
 }
 
-async function entryForCode(eventId: string, code: string, groupId: string | null): Promise<{ event: IEvent; entry: IWaitlistEntry }> {
-  const event = await guestWaitlistEvent(eventId, groupId);
+async function entryForCode(eventId: string, code: string, groupId: string | null, opts: WaitlistGuestOptions): Promise<{ event: IEvent; entry: IWaitlistEntry }> {
+  const event = await guestWaitlistEvent(eventId, groupId, opts);
   await expireOffers(eventId);
-  const entry = await findOpenEntryByCode(event, code);
+  const entry = await findOpenEntryByCode(event, code, { includeTest: opts.preview });
   if (!entry) throw ActionError.notFound("Ezzel az azonosítóval nem találtunk várólistás jelentkezést.");
   return { event, entry };
 }
 
-export async function waitlistStatus(eventId: string, code: string, groupId: string | null = null): Promise<{ entry: WaitlistStatusView }> {
-  const { event, entry } = await entryForCode(eventId, code, groupId);
+export async function waitlistStatus(eventId: string, code: string, groupId: string | null = null, opts: WaitlistGuestOptions = {}): Promise<{ entry: WaitlistStatusView; test?: true }> {
+  const { event, entry } = await entryForCode(eventId, code, groupId, opts);
   const schema = (event.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
   const attendees = entry.attendees as BookingAttendee[];
   return {
@@ -265,23 +301,35 @@ export async function waitlistStatus(eventId: string, code: string, groupId: str
       createdAt: entry.createdAt.toISOString(),
       offerExpiresAt: entry.offerExpiresAt?.toISOString() ?? null,
     },
+    ...(entry.isTest ? { test: true as const } : {}),
   };
 }
 
 /** The guest leaves the waitlist: the entry is removed, a held place goes to the next in line. */
-export async function leaveWaitlist(eventId: string, code: string, groupId: string | null = null): Promise<{ left: true }> {
-  const { entry } = await entryForCode(eventId, code, groupId);
+export async function leaveWaitlist(eventId: string, code: string, groupId: string | null = null, opts: WaitlistGuestOptions = {}): Promise<{ left: true; test?: true }> {
+  const { entry } = await entryForCode(eventId, code, groupId, opts);
   const claimed = await WaitlistEntryModel.findOneAndUpdate({ _id: entry._id, status: { $in: OPEN } }, { $set: { status: "removed", heldGuests: 0, lastError: "left by guest" } }).exec();
   if (!claimed) throw ActionError.notFound("Ezzel az azonosítóval nem találtunk várólistás jelentkezést.");
-  if (claimed.heldGuests > 0) await eventRepository.releaseCapacity(eventId, claimed.heldGuests);
+  await afterOpenEntryClosed(claimed);
+  return claimed.isTest ? { left: true, test: true } : { left: true };
+}
+
+/** An open entry was closed (left, removed, declined): a held (or, in the test queue, offered) place moves on. */
+async function afterOpenEntryClosed(closed: IWaitlistEntry): Promise<void> {
+  const eventId = String(closed.eventId);
+  if (closed.isTest) {
+    if (closed.status === "offered") await processWaitlist(eventId, { test: true, freed: closed.guests });
+    return;
+  }
+  if (closed.heldGuests > 0) await eventRepository.releaseCapacity(eventId, closed.heldGuests);
   await processWaitlist(eventId);
-  return { left: true };
 }
 
 /** Identifier holder: an ID in an open entry can't register (or join) again. */
 export async function waitlistHeldIdentifier(ctx: EventContext, values: Array<{ fieldKey: string; value: string }>): Promise<HeldIdentifier | null> {
   if (!ctx.modules.isOn(WAITLIST) || values.length === 0) return null;
-  const open = await openEntries(ctx.event);
+  // A test registration is checked against test entries only, a live one against live entries.
+  const open = await openEntries(ctx.event, ctx.isTest);
   if (open.length === 0) return null;
   const wanted = new Set(values.map((v) => `${v.fieldKey}\u0000${v.value}`));
   for (const entry of open) {
@@ -349,7 +397,10 @@ async function registerEntry(entry: IWaitlistEntry, event: IEvent, opts: { allow
     // A full bus is no longer a live choice: move those answers to the bus waitlist first.
     const attendees = await withFullBusesWaitlisted(event, stored);
     const busFallback = JSON.stringify(attendees) !== JSON.stringify(stored);
-    const result = await createBookingWithCheckout(bookingInput(entry, attendees), { allowClosedSales: true, ...opts });
+    // A test entry becomes a test booking (no capacity, test ID namespace, "[TESZT] " emails).
+    const result = entry.isTest
+      ? await createTestBookingWithCheckout(bookingInput(entry, attendees))
+      : await createBookingWithCheckout(bookingInput(entry, attendees), { allowClosedSales: true, ...opts });
     if (busFallback) await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { attendees } }).exec();
     return { result, busFallback };
   };
@@ -364,15 +415,65 @@ async function registerEntry(entry: IWaitlistEntry, event: IEvent, opts: { allow
 
 const running = new Map<string, Promise<void>>();
 
-/** Fills free places from the waitlist, first come first served. Serialised per event within a process. */
-export function processWaitlist(eventId: string): Promise<void> {
-  const previous = running.get(eventId) ?? Promise.resolve();
-  const next = previous.then(() => processOnce(eventId)).catch((error) => console.error("[tbook] waitlist processing failed", eventId, error));
-  running.set(eventId, next);
+export interface ProcessWaitlistOptions {
+  /** Process the test queue instead of the live one. */
+  test?: boolean;
+  /** Test queue only: places freed by the test release (test entries take no live capacity). */
+  freed?: number;
+}
+
+/**
+ * Fills free places from the waitlist, first come first served. Serialised
+ * per event (and queue) within a process. The live queue fills live
+ * capacity; the test queue moves only by `freed` places of a test release.
+ */
+export function processWaitlist(eventId: string, opts: ProcessWaitlistOptions = {}): Promise<void> {
+  const key = opts.test ? `${eventId}:test` : eventId;
+  const previous = running.get(key) ?? Promise.resolve();
+  const run = () => (opts.test ? processTestOnce(eventId, opts.freed ?? 0) : processOnce(eventId));
+  const next = previous.then(run).catch((error) => console.error("[tbook] waitlist processing failed", eventId, error));
+  running.set(key, next);
   void next.finally(() => {
-    if (running.get(eventId) === next) running.delete(eventId);
+    if (running.get(key) === next) running.delete(key);
   });
   return next;
+}
+
+/**
+ * The test queue: up to `freed` guests, in joining order, are registered
+ * (auto) or offered a place (offer; nothing held). Stops at the first entry
+ * that doesn't fit, like the live queue.
+ */
+async function processTestOnce(eventId: string, freed: number): Promise<void> {
+  let left = freed;
+  while (left > 0) {
+    const event = await eventRepository.findById(eventId);
+    if (!event) return;
+    const { on, mode, hours } = await waitlistContext(event);
+    if (!on) return;
+    const entry = await WaitlistEntryModel.findOne({ eventId: event._id, status: "waiting", isTest: true }).sort({ createdAt: 1, _id: 1 }).exec();
+    if (!entry || entry.guests > left) return;
+    left -= entry.guests;
+    if (mode === "auto") {
+      const claimed = await WaitlistEntryModel.findOneAndUpdate({ _id: entry._id, status: "waiting" }, { $set: { status: "registered" } }, { returnDocument: "after" }).exec();
+      if (!claimed) continue;
+      try {
+        const { result, busFallback } = await registerEntry(claimed, event, {});
+        await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { bookingId: result.bookingId, lastError: "" } }).exec();
+        await notify(claimed, event, "registered", busFallback ? { note: BUS_FALLBACK_NOTE } : {});
+      } catch (error) {
+        await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { status: "failed", lastError: error instanceof Error ? error.message : String(error) } }).exec();
+      }
+      continue;
+    }
+    const token = randomBytes(24).toString("base64url");
+    const offered = await WaitlistEntryModel.findOneAndUpdate(
+      { _id: entry._id, status: "waiting" },
+      { $set: { status: "offered", offerTokenHash: hashToken(token), offeredAt: new Date(), offerExpiresAt: new Date(Date.now() + hours * 3600_000), heldGuests: 0, lastError: "" } },
+      { returnDocument: "after" },
+    ).exec();
+    if (offered) await notify(offered, event, "offer", { link: `${appUrl()}/waitlist/${token}` });
+  }
 }
 
 async function processOnce(eventId: string): Promise<void> {
@@ -382,7 +483,8 @@ async function processOnce(eventId: string): Promise<void> {
     if (!event) return;
     const { on, mode, hours } = await waitlistContext(event);
     if (!on) return;
-    const entry = await WaitlistEntryModel.findOne({ eventId: event._id, status: "waiting" }).sort({ createdAt: 1, _id: 1 }).exec();
+    // The live queue only: test entries never take live places.
+    const entry = await WaitlistEntryModel.findOne({ eventId: event._id, status: "waiting", ...pool(false) }).sort({ createdAt: 1, _id: 1 }).exec();
     if (!entry || freePlaces(event) < entry.guests) return;
 
     if (mode === "auto") {
@@ -461,7 +563,7 @@ export async function acceptOffer(token: string): Promise<{ status: "confirmed";
     if (!event) throw ActionError.notFound("Az esemény nem található.");
     // The place is already held for this entry: register over the cap, then give the hold back.
     const { result } = await registerEntry(claimed, event, { allowOverCapacity: true });
-    await eventRepository.releaseCapacity(String(claimed.eventId), claimed.heldGuests);
+    if (claimed.heldGuests > 0) await eventRepository.releaseCapacity(String(claimed.eventId), claimed.heldGuests);
     await WaitlistEntryModel.updateOne({ _id: claimed._id }, { $set: { bookingId: result.bookingId, heldGuests: 0, lastError: "" } }).exec();
     return result.status === "confirmed" ? { status: "confirmed", registrationNumber: result.registrationNumber ?? null } : { status: "payment", checkoutUrl: result.checkoutUrl };
   } catch (error) {
@@ -475,8 +577,7 @@ export async function declineOffer(token: string): Promise<void> {
   if (!entry) throw ActionError.notFound("Ez a link nem érvényes.");
   const claimed = await WaitlistEntryModel.findOneAndUpdate({ _id: entry._id, status: "offered" }, { $set: { status: "declined", heldGuests: 0 } }).exec();
   if (!claimed) return;
-  if (claimed.heldGuests > 0) await eventRepository.releaseCapacity(String(claimed.eventId), claimed.heldGuests);
-  await processWaitlist(String(claimed.eventId));
+  await afterOpenEntryClosed(claimed);
 }
 
 // ---- Console ---------------------------------------------------------------------------
@@ -493,6 +594,8 @@ export interface WaitlistRow {
   offerExpiresAt: Date | null;
   bookingId: string | null;
   lastError: string;
+  /** A test entry (own queue; its position counts test entries only). */
+  isTest: boolean;
 }
 
 async function eventForOrg(organizationId: string, eventId: string): Promise<IEvent> {
@@ -506,10 +609,10 @@ export async function listWaitlist(organizationId: string, eventId: string): Pro
   await expireOffers(eventId);
   const { mode, hours } = await waitlistContext(event);
   const entries = await WaitlistEntryModel.find({ eventId: event._id }).sort({ createdAt: 1, _id: 1 }).exec();
-  let position = 0;
+  const positions = { live: 0, test: 0 };
   const rows = entries.map((entry) => ({
     id: String(entry._id),
-    position: entry.status === "waiting" ? ++position : null,
+    position: entry.status === "waiting" ? ++positions[entry.isTest ? "test" : "live"] : null,
     status: entry.status,
     name: entry.customer.name,
     email: entry.customer.email,
@@ -519,6 +622,7 @@ export async function listWaitlist(organizationId: string, eventId: string): Pro
     offerExpiresAt: entry.offerExpiresAt,
     bookingId: entry.bookingId ? String(entry.bookingId) : null,
     lastError: entry.lastError,
+    isTest: Boolean(entry.isTest),
   }));
   return { rows, mode, hours, free: event.capacity == null ? null : freePlaces(event) };
 }
@@ -527,10 +631,7 @@ export async function removeWaitlistEntry(organizationId: string, entryId: strin
   const entry = await WaitlistEntryModel.findById(entryId).exec();
   if (!entry || String(entry.organizationId) !== organizationId) throw ActionError.notFound("Entry not found");
   const claimed = await WaitlistEntryModel.findOneAndUpdate({ _id: entry._id, status: { $in: OPEN } }, { $set: { status: "removed", heldGuests: 0 } }).exec();
-  if (claimed && claimed.heldGuests > 0) {
-    await eventRepository.releaseCapacity(String(claimed.eventId), claimed.heldGuests);
-    await processWaitlist(String(claimed.eventId));
-  }
+  if (claimed && (claimed.heldGuests > 0 || (claimed.isTest && claimed.status === "offered"))) await afterOpenEntryClosed(claimed);
 }
 
 export async function processWaitlistForOrg(organizationId: string, eventId: string): Promise<void> {

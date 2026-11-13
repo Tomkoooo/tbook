@@ -56,6 +56,51 @@ key:
 A missing or wrong preview key is not an error: the request is handled
 normally (a draft event is a 404).
 
+**Test bookings (for the client to try the real flow before go-live).**
+Send `X-TBook-Test: 1` **together with a valid** `X-TBook-Preview` key. Without
+a valid preview key the header is ignored (a normal request). With it:
+
+- `POST /bookings` (single event, free registration) runs the **real**
+  booking path — also on a **draft** event and outside the sales window —
+  and saves a **test booking**: the normal response plus `test: true`
+  (`{ ok, bookingId, totalHuf: 0, checkoutUrl, stripeSessionId: "", expiresAt,
+  status: "confirmed", registrationNumber, test: true }`). A booking that
+  would need payment is refused (400 `test_payment_unsupported`); `entries`
+  (multi-event) stay unsupported (400).
+- `POST /waitlist/join` saves a **test waitlist entry**: `{ ok, entryId,
+  position, test: true }`. Test entries are their own queue: `position`
+  counts test entries only, and there is no `not_full` check.
+- Every email the normal flow sends is really sent for test records —
+  confirmation (with QR), bus details, waitlist joined / promoted / offer,
+  cancellation, bus-seat-freed notice — with the subject prefixed
+  **`[TESZT] `**, to the test record's own addresses only.
+- Test records are **kept apart from live data**: they take no event
+  capacity (`remainingPlaces`, `salesState`, `capacity_full`, `waitlistOpen`
+  never change) and no bus seats; their unique answers (employee ID) live in
+  a separate namespace, so a test ID never blocks a live registration and
+  vice versa (an ID is unique among tests and among live guests separately).
+  A cancelled test guest moves only the test waitlist (auto mode: the first
+  test entry is registered as a test booking; one place per cancelled test
+  guest) and notifies only test guests on the bus waitlist; live
+  cancellations never promote or notify test records. Test records are left
+  out of console statistics, reports, exports, check-in lists (a test ticket
+  is refused at the door) and the public entry list; the console's booking
+  list shows them with a **TESZT** badge.
+- **Visibility:** any request with the valid preview key sees test records
+  — `/guest/lookup|update|cancel`, `/waitlist/status|leave`,
+  `/surveys/{id}/responses` search test registrations first, then live ones;
+  answers for a test record add `test: true` (`guest.test` in lookup/update,
+  top-level in cancel, status, leave and survey responses). Requests
+  without the preview key never see test records (404 / "not found"), and
+  these guest endpoints need the preview key on a draft event.
+  `POST /events/{id}/prefill` with `X-TBook-Test: 1` reports
+  `alreadyRegistered` / `onWaitlist` among test records.
+- Clean up with `tbook-cli booking purge-test --org <org> --event <id>`
+  (dry run lists what would go; `--apply --prod-ack --confirm PURGE`
+  deletes test bookings, tickets, ID claims, bus waitlist places, email log
+  rows, test waitlist entries and test survey answers — no emails, no live
+  counter changes).
+
 ## Endpoints
 
 | Method | Path | Key | Purpose |

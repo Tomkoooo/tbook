@@ -46,7 +46,8 @@ export default async function WaitlistPage({ searchParams }: { searchParams: Pro
 
   const eventId = String(event._id);
   const { rows, mode, hours, free } = await waitlist.listWaitlist(organizationId, eventId);
-  const count = (status: string) => rows.filter((row) => row.status === status).length;
+  // Test entries (v1 X-TBook-Test) are listed with a badge but never counted.
+  const count = (status: string) => rows.filter((row) => row.status === status && !row.isTest).length;
 
   return (
     <>
@@ -92,7 +93,9 @@ export default async function WaitlistPage({ searchParams }: { searchParams: Pro
                 <TableRow key={row.id}>
                   <TableCell className="tabular-nums">{row.position ?? "—"}</TableCell>
                   <TableCell>
-                    <div className="font-medium">{row.name}</div>
+                    <div className="font-medium">
+                      {row.name} {row.isTest ? <Badge variant="warning">TESZT</Badge> : null}
+                    </div>
                     <div className="text-muted-foreground text-xs">{[row.email, row.phone].filter(Boolean).join(" · ")}</div>
                     {row.lastError ? <div className="text-destructive text-xs">{row.lastError}</div> : null}
                   </TableCell>

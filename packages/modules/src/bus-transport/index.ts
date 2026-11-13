@@ -15,7 +15,7 @@ import {
   seatsByRoute,
   upsertRoutesByCode,
 } from "./service";
-import { BUS_WAITLIST_DEFAULTS, removeFromBusWaitlist, seatsFreed, syncBusWaitlist } from "./waitlist";
+import { BUS_WAITLIST_DEFAULTS, notifyBusWaitlist, removeFromBusWaitlist, seatsFreed, syncBusWaitlist } from "./waitlist";
 
 /**
  * Seats an edit gave back, per booking, until the edit's new reservation
@@ -98,6 +98,11 @@ export function registerBusTransportModule(): void {
     const eventId = String(ctx.event._id);
     const wanted = seatsByRoute(ctx.attendees, ctx.fieldSchema);
     if (ctx.dryRun) return reserveSeats(eventId, wanted, { dryRun: true });
+    if (ctx.isTest) {
+      // Test registrations take no seats (live availability is untouched); the bus waitlist still works, in its own line.
+      await syncBusWaitlist({ organizationId: ctx.organizationId, eventId }, ctx.bookingId, ctx.attendees, ctx.fieldSchema);
+      return null;
+    }
     const reservation = await reserveSeats(eventId, wanted);
     await syncBusWaitlist({ organizationId: ctx.organizationId, eventId }, ctx.bookingId, ctx.attendees, ctx.fieldSchema);
     const released = editReleases.get(ctx.bookingId);
@@ -110,6 +115,14 @@ export function registerBusTransportModule(): void {
 
   // Seats are released whether or not the module is still on: they were taken while it was.
   extensions.onBookingReleased(BUS_TRANSPORT, async (booking, reason) => {
+    if (booking.isTest) {
+      if (reason === "edited") return;
+      await removeFromBusWaitlist(booking);
+      // A cancelled test guest who had a bus "frees" a seat for the test line only (no live seat changes).
+      const hadBus = seatsByRoute((booking.attendees ?? []) as never, booking.attendeeFieldSchema as never).size > 0;
+      if (hadBus && (reason === "cancelled" || reason === "attendee_cancelled")) await notifyBusWaitlist(String(booking.eventId), new Date(), { test: true });
+      return;
+    }
     const released = await releaseSeatsForBooking(booking);
     if (reason === "edited") {
       // The edit reserves its new answers next; decide there whether seats were really freed.

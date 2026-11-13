@@ -494,6 +494,7 @@ export async function withdrawBookingFromTDarts(bookingId: string, opts?: { fetc
 
 /** Registered into checkout-service's AFTER_BOOKING_PAID_HOOKS below. syncBookingToTDarts already no-ops when the event/org isn't tDarts-configured. */
 export async function tdartsAfterBookingPaidHook(booking: IBooking): Promise<void> {
+  if (booking.isTest) return;
   await syncBookingToTDarts(String(booking._id));
 }
 

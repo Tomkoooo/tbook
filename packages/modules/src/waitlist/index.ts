@@ -42,6 +42,14 @@ export function registerWaitlistModule(): void {
   // A freed place moves the line, whether or not someone is waiting (cheap when nobody is).
   extensions.onBookingReleased(WAITLIST, async (booking, reason) => {
     if (reason === "edited") return;
+    if (booking.isTest) {
+      // A cancelled test guest moves the test queue only, one place per guest (no live capacity involved).
+      if (reason === "cancelled" || reason === "attendee_cancelled") {
+        const freed = reason === "attendee_cancelled" ? Math.max(booking.attendees?.length ?? 1, 1) : booking.guests;
+        await processWaitlist(String(booking.eventId), { test: true, freed });
+      }
+      return;
+    }
     await processWaitlist(String(booking.eventId));
   });
 }

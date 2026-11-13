@@ -145,6 +145,7 @@ export async function issueVoucherRowsForBooking(bookingId: string): Promise<IVo
       ? { ...eventSnapshot, startDate: new Date(`${validDate}T00:00:00Z`), endDate: new Date(`${validDate}T00:00:00Z`) }
       : eventSnapshot,
     pdfFileName: null,
+    isTest: Boolean(booking.isTest),
     };
   });
 
@@ -202,6 +203,9 @@ export async function scanVoucher(rawToken: string, opts: ScanVoucherOptions = {
   }
   if (voucher.status === "void") {
     return { result: "invalid", message: "This voucher is void (booking cancelled).", voucher };
+  }
+  if (voucher.isTest) {
+    return { result: "invalid", message: "TEST ticket (TESZT) — not valid for entry.", voucher };
   }
   if (voucher.status === "checked_in") {
     return { result: "duplicate", message: "Already checked in.", voucher };
