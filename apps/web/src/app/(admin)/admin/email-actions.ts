@@ -48,7 +48,8 @@ function readConditions(form: FormData): EligibilityRulesConfig | null {
 }
 
 function readInput(form: FormData): eventEmails.EventEmailInput {
-  const trigger = text(form, "trigger") === "on_registration" ? "on_registration" : "manual";
+  const rawTrigger = text(form, "trigger");
+  const trigger: eventEmails.EmailTrigger = rawTrigger === "on_registration" || eventEmails.isSystemEmailTrigger(rawTrigger) ? rawTrigger : "manual";
   const audienceRaw = text(form, "audience");
   const audience = (["registered", "list_all", "list_unregistered"] as const).find((a) => a === audienceRaw) ?? "registered";
   return {

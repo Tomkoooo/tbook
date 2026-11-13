@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ActionError } from "@tbook/actions";
 import { eventGroupRepository } from "@tbook/db";
-import { EVENT_EMAILS, eventEmails } from "@tbook/modules";
+import { EVENT_EMAILS, eventEmails, systemEmailDefault } from "@tbook/modules";
 import type { AttendeeFieldDef } from "@tbook/schemas";
 import { extensions, getEventForOrg, listDataListsForOrg, resolveModules, resolveTicketAttendeeFieldSchema } from "@tbook/services";
 import { Badge } from "@/components/ui/badge";
@@ -18,9 +18,9 @@ export const dynamic = "force-dynamic";
 
 const MODE_LABELS: Record<string, string> = { auto: "automatic", manual: "manual send", test: "test" };
 
-export default async function EmailPage({ params, searchParams }: { params: Promise<{ emailId: string }>; searchParams: Promise<{ eventId?: string; status?: string }> }) {
+export default async function EmailPage({ params, searchParams }: { params: Promise<{ emailId: string }>; searchParams: Promise<{ eventId?: string; status?: string; trigger?: string }> }) {
   const { emailId } = await params;
-  const { eventId: eventIdParam, status } = await searchParams;
+  const { eventId: eventIdParam, status, trigger: triggerParam } = await searchParams;
   const { organizationId } = await requireAdminPage("email:send");
   const isNew = emailId === "new";
 
@@ -36,6 +36,15 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
   if (!event) notFound();
 
   const modules = await resolveModules({ organizationId, event });
+
+  // A system email (waitlist, bus seat freed, cancellation): one per event; a new one starts from the text sent today.
+  const trigger = email?.trigger ?? (eventEmails.isSystemEmailTrigger(triggerParam) ? triggerParam : "manual");
+  const systemInfo = eventEmails.isSystemEmailTrigger(trigger) ? eventEmails.systemEmailInfo(trigger) : null;
+  if (isNew && systemInfo) {
+    const existing = (await eventEmails.listEventEmails(eventId)).find((e) => e.trigger === trigger);
+    if (existing) redirect(`/admin/emails/${String(existing._id)}`);
+  }
+  const fallback = isNew && systemInfo ? systemEmailDefault(systemInfo.trigger, modules) : null;
   const group = event.groupId ? await eventGroupRepository.findById(String(event.groupId)) : null;
   const schema = resolveTicketAttendeeFieldSchema({
     registrationUnit: event.registrationUnit,
@@ -48,13 +57,23 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
     .attendeePlaceholderProviders()
     .filter((provider) => modules.isOn(provider.moduleKey))
     .map((provider) => ({ label: provider.moduleKey, items: provider.placeholders }));
+  const system = systemInfo
+    ? {
+        label: systemInfo.label,
+        when: systemInfo.when,
+        placeholders: eventEmails.systemEmailPlaceholders(systemInfo.trigger),
+        answers: systemInfo.answers,
+        // Module values ({{bus.*}}) need a registration; a waitlist contact has none yet.
+        moduleValues: systemInfo.recipient === "attendee",
+      }
+    : null;
 
   const log = email ? await eventEmails.listEmailDeliveries(organizationId, emailId, { status: status === "failed" ? "failed" : undefined, limit: 200 }) : null;
 
   return (
     <>
       <PageTitle
-        title={email ? email.name : "New email"}
+        title={email ? email.name : systemInfo ? `Customise: ${systemInfo.label}` : "New email"}
         description={event.name}
         back={{ href: `/admin/emails?eventId=${eventId}`, label: "Emails" }}
         actions={!modules.isOn(EVENT_EMAILS) ? <Badge variant="warning">module off for this event</Badge> : null}
@@ -63,10 +82,10 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
         eventId={eventId}
         emailId={email ? emailId : null}
         initial={{
-          name: email?.name ?? "",
-          subject: email?.subject ?? "",
-          body: email?.body ?? "",
-          trigger: email?.trigger ?? "manual",
+          name: email?.name ?? (systemInfo ? systemInfo.label : ""),
+          subject: email?.subject ?? fallback?.subject ?? "",
+          body: email?.body ?? fallback?.body ?? "",
+          trigger,
           audience: email?.audience ?? "registered",
           listId: email?.listId ? String(email.listId) : "",
           listMatchFieldKey: email?.listMatchFieldKey ?? "",
@@ -84,11 +103,12 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
           fields: eventEmails.fieldPlaceholders(schema),
           modules: moduleGroups,
         }}
+        system={system}
       />
 
       {email ? (
         <>
-          <SendPanel emailId={emailId} manual={email.trigger === "manual"} />
+          <SendPanel emailId={emailId} manual={email.trigger === "manual"} system={Boolean(systemInfo)} />
           <SectionCard
             flush
             title="Delivery log"

@@ -72,6 +72,18 @@ describe("tbook-cli setup apply", () => {
     expect((await OrganizationModel.findById(orgId))?.modules ?? {}).toEqual({});
   });
 
+  it("refuses an unknown email trigger and a second email of the same system trigger", async () => {
+    const plan = JSON.parse(fs.readFileSync(planFile, "utf8"));
+    const write = (emails: unknown[]) => {
+      const file = planFile.replace(/\.json$/, "-bad.json");
+      fs.writeFileSync(file, JSON.stringify({ ...plan, emails }));
+      return file;
+    };
+    await expect(runSetupCommand("apply", ["--org", orgSlug, "--plan", write([{ name: "X", subject: "s", trigger: "on_waitlist" }]), "--uri", uri])).rejects.toThrow(/unknown trigger/);
+    const twice = [{ name: "A", subject: "s", trigger: "bus_seat_freed" }, { name: "B", subject: "s", trigger: "bus_seat_freed" }];
+    await expect(runSetupCommand("apply", ["--org", orgSlug, "--plan", write(twice), "--uri", uri])).rejects.toThrow(/at most one/);
+  });
+
   it("refuses to write without the confirmation phrase", async () => {
     await expect(runSetupCommand("apply", ["--org", orgSlug, "--plan", planFile, "--uri", uri, "--apply", "--prod-ack"])).rejects.toThrow(/SETUP/);
     expect(await EventModel.countDocuments({})).toBe(0);
@@ -97,8 +109,12 @@ describe("tbook-cli setup apply", () => {
     expect(modules["event-emails"]?.config?.siteUrl).toBe("https://halozatokunnepe2026.hu");
 
     const emails = await eventEmails.listEventEmails(String(event?._id));
-    expect(emails).toHaveLength(6);
-    expect(emails.filter((e) => e.trigger === "on_registration")).toHaveLength(2);
+    expect(emails).toHaveLength(12);
+    expect(emails.filter((e) => e.trigger === "on_registration")).toHaveLength(3);
+    // System emails (R1–R4): one per module message this event sends.
+    const system = emails.filter((e) => eventEmails.isSystemEmailTrigger(e.trigger));
+    expect(system.map((e) => e.trigger).sort()).toEqual(["booking_cancelled", "bus_seat_freed", "waitlist_joined", "waitlist_registered"]);
+    expect(system.every((e) => e.name.startsWith("R") && e.active && e.audience === "registered")).toBe(true);
     expect(emails.find((e) => e.audience === "list_unregistered")?.listId?.toString()).toBe(String(list?._id));
 
     const attendee = (id: string) => ({

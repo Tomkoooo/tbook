@@ -35,3 +35,4 @@ export { WAITLIST } from "./waitlist";
 export { FEEDBACK } from "./feedback";
 export { setModuleMailTransporter } from "./shared/mail";
 export * as testData from "./test-data";
+export { systemEmailDefault, type SystemEmailDefault } from "./system-email-defaults";

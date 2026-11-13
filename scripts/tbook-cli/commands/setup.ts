@@ -167,6 +167,7 @@ async function setupApply(flags: Flags): Promise<void> {
   for (const email of plan.emails) {
     if (!email.name || !email.subject || !email.trigger) throw new CliError(`Every email needs name, subject and trigger (${JSON.stringify(email.name)}).`);
   }
+  validateEmailTriggers(plan.emails);
 
   // ---- Print the plan ----------------------------------------------------------------
   console.log("\nPlan:");
@@ -279,6 +280,26 @@ function mergedConfig(key: string, stored: Record<string, unknown> | undefined, 
   return cleanModuleConfig(key, merged);
 }
 
+/**
+ * Triggers: "on_registration", "manual", or a system trigger
+ * (waitlist_joined, waitlist_offer, waitlist_registered, bus_seat_freed,
+ * booking_cancelled) — the event's text for a module's own guest email;
+ * at most one email per system trigger.
+ */
+export function validateEmailTriggers(emails: Array<Record<string, unknown>>): void {
+  const seen = new Set<string>();
+  for (const email of emails) {
+    const trigger = String(email.trigger ?? "");
+    if (!(eventEmails.emailTriggers as readonly string[]).includes(trigger)) {
+      throw new CliError(`Email "${String(email.name)}": unknown trigger "${trigger}" (use one of: ${eventEmails.emailTriggers.join(", ")}).`);
+    }
+    if (eventEmails.isSystemEmailTrigger(trigger)) {
+      if (seen.has(trigger)) throw new CliError(`More than one email with the system trigger "${trigger}" — an event has at most one.`);
+      seen.add(trigger);
+    }
+  }
+}
+
 const EMAIL_FIELDS = ["subject", "body", "trigger", "audience", "listId", "listMatchFieldKey", "conditions", "attachTicket", "active", "sortOrder"] as const;
 
 function emailComparable(email: Record<string, unknown>): Record<string, unknown> {
@@ -286,7 +307,7 @@ function emailComparable(email: Record<string, unknown>): Record<string, unknown
     subject: String(email.subject ?? "").trim(),
     body: String(email.body ?? ""),
     trigger: email.trigger,
-    audience: email.trigger === "on_registration" ? "registered" : (email.audience ?? "registered"),
+    audience: email.trigger === "manual" ? (email.audience ?? "registered") : "registered",
     listId: email.listId ? String(email.listId) : null,
     listMatchFieldKey: email.listMatchFieldKey ?? null,
     conditions: email.conditions && (email.conditions as { rules?: unknown[] }).rules?.length ? plainObject(email.conditions) : null,
@@ -334,6 +355,7 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
     moduleChanges.push({ key, enabled: state.enabled, config, before: current ?? null });
   }
 
+  validateEmailTriggers(plan.emails);
   const only = new Set(flags.getAll("email"));
   const storedEmails = await eventEmails.listEventEmails(eventId);
   const emailChanges: Array<{ name: string; id: string | null; input: Record<string, unknown>; fields: string[]; before: unknown }> = [];
@@ -342,13 +364,15 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
     if (only.size > 0 && !only.has(name)) continue;
     const resolved = resolveRefs(raw, listIds) as Record<string, unknown>;
     const desired = emailComparable({ ...resolved, body: sanitizeRichText(String(resolved.body ?? "")) });
-    const existing = storedEmails.find((e) => e.name === name);
+    // A system email is one per event: one made in the console under another name is the one to update.
+    const existing = storedEmails.find((e) => e.name === name) ?? (eventEmails.isSystemEmailTrigger(raw.trigger) ? storedEmails.find((e) => e.trigger === raw.trigger) : undefined);
     if (!existing) {
       emailChanges.push({ name, id: null, input: resolved, fields: ["(new email)"], before: null });
       continue;
     }
     const current = emailComparable(existing.toObject() as unknown as Record<string, unknown>);
-    const fields = EMAIL_FIELDS.filter((field) => JSON.stringify(current[field]) !== JSON.stringify(desired[field]));
+    const fields: string[] = EMAIL_FIELDS.filter((field) => JSON.stringify(current[field]) !== JSON.stringify(desired[field]));
+    if (existing.name !== name) fields.unshift("name");
     if (fields.length > 0) emailChanges.push({ name, id: String(existing._id), input: { ...resolved, name }, fields: [...fields], before: existing.toObject() });
   }
   if (only.size > 0) for (const name of only) if (!plan.emails.some((e) => e.name === name)) throw new CliError(`The plan has no email named "${name}".`);

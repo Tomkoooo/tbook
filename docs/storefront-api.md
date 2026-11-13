@@ -141,7 +141,7 @@ a valid preview key the header is ignored (a normal request). With it:
 - **Statuses:** `waiting`, `offered` (open); `registered`, `expired`, `declined`, `failed`, `removed` (closed — `status`/`leave` then 404).
 - **IDs are held:** while an entry is open, its identifying answers (employee ID) can't book (`POST /bookings` → 409 `on_waitlist`) or join again; `prefill` returns `{ found: true, alreadyRegistered: false, onWaitlist: true, fields: {} }`. Send those guests to the waitlist status page.
 - **Promotion:** when a place frees up (guest or console cancel, expired checkout), the first entry that fits moves up. Auto mode (free events): registered at once; they get the "Bekerültél" email and the event's normal confirmation with the QR code. If their chosen bus has filled up meanwhile they are registered with `busz = "waitlist"` (see below) and the email says so. Offer mode: an email link holds the place for `offerHours`.
-- **Cancellation email:** with module `guest-portal` on, a cancelled guest (by themselves or by an organizer) gets a short confirmation email (settings `cancelSubject` / `cancelMessage`).
+- **Cancellation email:** with module `guest-portal` on, a cancelled guest (by themselves or by an organizer) gets a short confirmation email. Its text, like the waitlist and bus-seat emails, is edited on the console's Emails page as a system email (`booking_cancelled`); switched off there, nothing is sent. The old module settings `cancelSubject` / `cancelMessage` still apply when the event has no such email.
 
 ### Two bus states: no buses yet / bus booking open
 

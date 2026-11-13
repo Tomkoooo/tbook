@@ -1,15 +1,26 @@
 import mongoose, { Schema, type Document, type Model, Types } from "mongoose";
 
 /**
- * An email an organizer defines for an event. Two kinds of trigger:
+ * An email an organizer defines for an event. Kinds of trigger:
  *  - "on_registration": sent automatically to each attendee when a
  *    registration is confirmed (optionally only to attendees matching
  *    `conditions`, e.g. those who chose a bus);
  *  - "manual": sent when an organizer presses Send (there is no scheduler:
- *    "Nov 20 reminder" means pressing Send on Nov 20).
+ *    "Nov 20 reminder" means pressing Send on Nov 20);
+ *  - a system trigger (see `systemEmailTriggers`): the event's own text for
+ *    a message a module sends (waitlist, bus seat freed, cancellation). At
+ *    most one per trigger and event; inactive = that message isn't sent at
+ *    all; no template = the module's built-in text.
  */
-export const emailTriggers = ["on_registration", "manual"] as const;
+export const systemEmailTriggers = ["waitlist_joined", "waitlist_offer", "waitlist_registered", "bus_seat_freed", "booking_cancelled"] as const;
+export type SystemEmailTrigger = (typeof systemEmailTriggers)[number];
+
+export const emailTriggers = ["on_registration", "manual", ...systemEmailTriggers] as const;
 export type EmailTrigger = (typeof emailTriggers)[number];
+
+export function isSystemEmailTrigger(trigger: unknown): trigger is SystemEmailTrigger {
+  return (systemEmailTriggers as readonly unknown[]).includes(trigger);
+}
 
 /**
  * Who a manual email goes to:

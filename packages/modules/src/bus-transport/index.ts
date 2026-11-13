@@ -49,12 +49,14 @@ export function registerBusTransportModule(): void {
       },
       {
         key: "busWaitlistSubject",
+        deprecated: "Deprecated: edit this email on the Emails page (system email “Bus waitlist: seat freed”). An email there overrides this field.",
         label: "Bus waitlist email subject (a seat freed up)",
         type: "text",
         hint: `Placeholders {{name}}, {{event}}, {{siteUrl}}. Default: ${BUS_WAITLIST_DEFAULTS.subject}`,
       },
       {
         key: "busWaitlistMessage",
+        deprecated: "Deprecated: edit this email on the Emails page (system email “Bus waitlist: seat freed”). An email there overrides this field.",
         label: "Bus waitlist email text",
         type: "text",
         hint: "Sent to guests who asked to be notified (bus answer “waitlist”). Placeholders {{name}}, {{event}}, {{siteUrl}}. Empty = the built-in Hungarian text.",

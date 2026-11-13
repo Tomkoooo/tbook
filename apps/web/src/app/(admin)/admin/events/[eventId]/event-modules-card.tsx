@@ -15,7 +15,7 @@ export interface EventModuleRow {
   name: string;
   description: string;
   on: boolean;
-  configFields: Array<{ key: string; label: string; type: "text" | "url" | "select"; hint?: string; options?: Array<{ value: string; label: string }> }>;
+  configFields: Array<{ key: string; label: string; type: "text" | "url" | "select"; hint?: string; options?: Array<{ value: string; label: string }>; deprecated?: string }>;
   config: Record<string, string>;
 }
 
@@ -67,8 +67,14 @@ function ModuleConfigForm({ eventId, module, disabled }: { eventId: string; modu
   return (
     <form action={action} className="grid gap-3 border-t pt-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        {module.configFields.map((field) => (
-          <FormField key={field.key} label={field.label} htmlFor={`${module.key}-${field.key}`} hint={field.hint}>
+        {/* A deprecated field shows only while it still holds a value (kept working as a fallback). */}
+        {module.configFields.filter((field) => !field.deprecated || module.config[field.key]).map((field) => (
+          <FormField
+            key={field.key}
+            label={field.deprecated ? `${field.label} (deprecated)` : field.label}
+            htmlFor={`${module.key}-${field.key}`}
+            hint={field.deprecated ? `${field.deprecated} Clear it to hide it.` : field.hint}
+          >
             {field.type === "select" ? (
               <NativeSelect id={`${module.key}-${field.key}`} name={field.key} defaultValue={module.config[field.key] ?? ""} disabled={disabled}>
                 <option value="">Default</option>

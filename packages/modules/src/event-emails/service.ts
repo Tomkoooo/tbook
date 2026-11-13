@@ -1,14 +1,15 @@
 import QRCode from "qrcode";
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
-import { dataListRepository, eventRepository, organizationRepository, voucherRepository, type IBooking, type IEvent } from "@tbook/db";
+import { dataListRepository, eventGroupRepository, eventRepository, organizationRepository, voucherRepository, type IBooking, type IEvent } from "@tbook/db";
 import { ELIGIBILITY_MATCH_OPS, isEligibilityMatchOp, matchesRuleConfig, normalizeListKey, type EligibilityRulesConfig } from "@tbook/domain";
-import type { AttendeeFieldDef } from "@tbook/schemas";
+import type { AttendeeFieldDef, AttendeeFieldValue } from "@tbook/schemas";
 import {
   extensions,
   getDataListForOrg,
   renderVoucherPdfForBooking,
   resolveModules,
+  resolveTicketAttendeeFieldSchema,
   sanitizeRichText,
   sendMail,
   type EventContext,
@@ -16,8 +17,19 @@ import {
   type MailTransporter,
 } from "@tbook/services";
 import { listEventAttendees, givenName, toEventAttendees, type EventAttendee } from "../shared/attendees";
-import { EmailDeliveryModel, EventEmailModel, idleState, type DeliveryMode, type EmailAudience, type EmailTrigger, type IEventEmail } from "./model";
+import {
+  EmailDeliveryModel,
+  EventEmailModel,
+  idleState,
+  isSystemEmailTrigger,
+  type DeliveryMode,
+  type EmailAudience,
+  type EmailTrigger,
+  type IEventEmail,
+  type SystemEmailTrigger,
+} from "./model";
 import { QR_CID, fieldValues, renderEventEmail } from "./render";
+import { systemEmailInfo, systemEmailSampleValues } from "./system";
 
 export const EVENT_EMAILS = "event-emails";
 
@@ -73,8 +85,9 @@ async function cleanInput(organizationId: string, input: EventEmailInput) {
   if (!input.name.trim()) throw ActionError.validation("Give the email a name.");
   if (!input.subject.trim()) throw ActionError.validation("Write a subject line.");
   const trigger = input.trigger;
-  // An automatic email always goes to the attendee who just registered.
-  const audience: EmailAudience = trigger === "on_registration" ? "registered" : input.audience;
+  const system = isSystemEmailTrigger(trigger);
+  // An automatic email always goes to the attendee who just registered; a system email to whoever the module addresses.
+  const audience: EmailAudience = trigger === "on_registration" || system ? "registered" : input.audience;
   let listId: Types.ObjectId | null = null;
   if (audience !== "registered") {
     if (!input.listId) throw ActionError.validation("Choose the data list to send to.");
@@ -85,7 +98,7 @@ async function cleanInput(organizationId: string, input: EventEmailInput) {
     }
     listId = list._id as Types.ObjectId;
   }
-  const conditions = input.conditions && input.conditions.rules.length > 0 ? input.conditions : null;
+  const conditions = !system && input.conditions && input.conditions.rules.length > 0 ? input.conditions : null;
   // An unknown op would match everyone (the engine lets it pass): refuse it instead.
   for (const rule of conditions?.rules ?? []) {
     if (!isEligibilityMatchOp(rule.op)) throw ActionError.validation(`Unknown condition "${String(rule.op)}" (use one of: ${ELIGIBILITY_MATCH_OPS.join(", ")}).`);
@@ -99,20 +112,31 @@ async function cleanInput(organizationId: string, input: EventEmailInput) {
     listId,
     listMatchFieldKey: audience === "list_unregistered" ? (input.listMatchFieldKey ?? null) : null,
     conditions,
-    attachTicket: Boolean(input.attachTicket),
+    attachTicket: !system && Boolean(input.attachTicket),
     active: input.active ?? true,
     sortOrder: input.sortOrder ?? 0,
   };
 }
 
+/** A system trigger has one template per event: the one the module uses. */
+async function assertSingleSystemEmail(eventId: string, trigger: EmailTrigger, exceptId: string | null): Promise<void> {
+  if (!isSystemEmailTrigger(trigger)) return;
+  const other = await EventEmailModel.findOne({ eventId, trigger, ...(exceptId ? { _id: { $ne: exceptId } } : {}) }, { name: 1 }).lean().exec();
+  if (other) throw ActionError.validation(`This event already has the “${systemEmailInfo(trigger).label}” email (“${other.name}”). Edit that one instead.`);
+}
+
 export async function createEventEmail(organizationId: string, eventId: string, input: EventEmailInput): Promise<IEventEmail> {
-  return EventEmailModel.create({ organizationId, eventId, ...(await cleanInput(organizationId, input)), sendState: idleState() });
+  const clean = await cleanInput(organizationId, input);
+  await assertSingleSystemEmail(eventId, clean.trigger, null);
+  return EventEmailModel.create({ organizationId, eventId, ...clean, sendState: idleState() });
 }
 
 export async function updateEventEmail(organizationId: string, emailId: string, input: EventEmailInput): Promise<IEventEmail> {
   const email = await getEventEmailForOrg(organizationId, emailId);
   if (email.sendState?.status === "running" && !isStale(email)) throw ActionError.validation("This email is being sent right now. Stop the send before editing it.");
-  const updated = await EventEmailModel.findByIdAndUpdate(emailId, await cleanInput(organizationId, input), { returnDocument: "after" }).exec();
+  const clean = await cleanInput(organizationId, input);
+  await assertSingleSystemEmail(String(email.eventId), clean.trigger, emailId);
+  const updated = await EventEmailModel.findByIdAndUpdate(emailId, clean, { returnDocument: "after" }).exec();
   return updated!;
 }
 
@@ -133,7 +157,7 @@ function formatEventTime(event: IEvent): string {
   return [event.startTime, event.endTime].filter(Boolean).join("–");
 }
 
-interface RenderContext {
+export interface RenderContext {
   event: IEvent;
   organizationId: string;
   organizationName: string;
@@ -187,7 +211,18 @@ interface OutgoingMessage {
   test?: boolean;
 }
 
-async function attendeeMessage(email: IEventEmail, ctx: RenderContext, row: EventAttendee): Promise<OutgoingMessage> {
+/** {{name}} / {{event}}: the names the modules' built-in texts use. */
+function aliasValues(values: Record<string, string>): Record<string, string> {
+  return { name: values.fullName ?? "", event: values.eventName ?? "" };
+}
+
+async function attendeeMessage(
+  email: IEventEmail,
+  ctx: RenderContext,
+  row: EventAttendee,
+  extra: Record<string, string> = {},
+  template: { subject: string; body: string } = email,
+): Promise<OutgoingMessage> {
   const schema = (row.booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
   const values: Record<string, string> = {
     ...baseValues(ctx),
@@ -202,10 +237,11 @@ async function attendeeMessage(email: IEventEmail, ctx: RenderContext, row: Even
     if (!ctx.extensionCtx.modules.isOn(provider.moduleKey)) continue;
     Object.assign(values, await provider.values(ctx.extensionCtx, row.booking, row.index));
   }
+  Object.assign(values, aliasValues(values), extra);
 
   const vouchers = await voucherRepository.findByBookingId(String(row.booking._id));
   const voucher = vouchers.find((v) => v.attendeeIndex === row.index && v.status !== "void");
-  const rendered = renderEventEmail(email, values, Boolean(voucher));
+  const rendered = renderEventEmail(template, values, Boolean(voucher));
   const attachments: MailAttachment[] = [];
   if (rendered.usesQr && voucher) {
     const png = await QRCode.toBuffer(voucher.token, { type: "png", width: 440, margin: 1, errorCorrectionLevel: "M" });
@@ -234,13 +270,14 @@ interface ListRecipient {
   data: Record<string, string>;
 }
 
-function listMessage(email: IEventEmail, ctx: RenderContext, recipient: ListRecipient): OutgoingMessage {
+function listMessage(email: IEventEmail, ctx: RenderContext, recipient: ListRecipient, extra: Record<string, string> = {}): OutgoingMessage {
   const values: Record<string, string> = {
     ...baseValues(ctx),
     fullName: recipient.name,
     firstName: givenName(recipient.name, ctx.config.nameOrder),
     ...Object.fromEntries(Object.entries(recipient.data).map(([key, value]) => [`list.${key}`, value])),
   };
+  Object.assign(values, aliasValues(values), extra);
   const rendered = renderEventEmail(email, values, false);
   return { recipientKey: `list:${recipient.key}`, to: recipient.to, name: recipient.name, subject: rendered.subject, html: rendered.html, attachments: [], bookingId: null };
 }
@@ -461,13 +498,15 @@ export async function sendEventEmailTest(organizationId: string, emailId: string
   const ctx = await renderContextFor(event);
   let message: OutgoingMessage;
   let basedOn = "sample data";
+  // A system email: its own placeholders ({{position}}, {{link}}, …) get sample values.
+  const extra = isSystemEmailTrigger(email.trigger) ? systemEmailSampleValues(email.trigger) : {};
   if (email.audience === "registered") {
     const row = (await listEventAttendees(String(event._id))).find((r) => matchesConditions(email, r));
     if (row) {
-      message = await attendeeMessage(email, ctx, row);
+      message = await attendeeMessage(email, ctx, row, { ...extra, ...(extra.registrationNumber ? { registrationNumber: row.registrationNumber ?? extra.registrationNumber } : {}) });
       basedOn = row.displayName;
     } else {
-      message = listMessage(email, ctx, { key: "sample", to: address, name: "Minta Vendég", data: {} });
+      message = listMessage(email, ctx, { key: "sample", to: address, name: "Minta Vendég", data: {} }, extra);
     }
   } else {
     const recipient = (await listRecipients(email, event))[0];
@@ -514,7 +553,8 @@ export async function listEmailDeliveries(
 /** Re-sends the automatic emails of one booking (admin "resend confirmation"). */
 export async function resendAutomaticEmails(organizationId: string, booking: IBooking, transporter?: MailTransporter): Promise<void> {
   if (String(booking.organizationId) !== organizationId) throw ActionError.notFound("Booking not found");
-  await EmailDeliveryModel.deleteMany({ bookingId: booking._id, mode: "auto" }).exec();
+  const automatic = await EventEmailModel.find({ eventId: booking.eventId, trigger: "on_registration" }, { _id: 1 }).lean().exec();
+  await EmailDeliveryModel.deleteMany({ bookingId: booking._id, mode: "auto", emailId: { $in: automatic.map((email) => email._id) } }).exec();
   await sendAutomaticEmailsForBooking(booking, transporter);
 }
 
@@ -563,4 +603,97 @@ export async function sendAutomaticEmailsAfterEdit(before: IBooking, after: IBoo
       }
     }
   }
+}
+
+// ---- System emails ----------------------------------------------------------------
+
+/**
+ * What a module does with one of its guest messages (waitlist, bus seat
+ * freed, cancellation), decided by the event's template of that trigger:
+ *  - "on": the event has an active template → it is sent (`sendSystemEmail…`);
+ *  - "off": the template exists but is switched off → nothing is sent;
+ *  - "default": no template (or event emails are off for the event) → the
+ *    module sends its own text (module settings text, else the built-in one).
+ */
+export type SystemEmailPlan = { state: "default" } | { state: "off" } | { state: "on"; email: IEventEmail; ctx: RenderContext };
+
+export async function systemEmailPlan(event: IEvent, trigger: SystemEmailTrigger): Promise<SystemEmailPlan> {
+  const email = await EventEmailModel.findOne({ eventId: event._id, trigger }).sort({ createdAt: 1 }).exec();
+  if (!email) return { state: "default" };
+  const ctx = await renderContextFor(event);
+  if (!ctx.extensionCtx.modules.isOn(EVENT_EMAILS)) return { state: "default" };
+  return email.active ? { state: "on", email, ctx } : { state: "off" };
+}
+
+const BUS_NOTE_TOKEN = /\{\{\s*busNote\s*\}\}/;
+const BUS_NOTE_PARAGRAPH = /<p>\s*\{\{\s*busNote\s*\}\}\s*<\/p>/g;
+
+/**
+ * {{busNote}}: a note the template doesn't place itself is added as a last
+ * paragraph; without a note, a paragraph holding only the placeholder goes.
+ */
+function withNote(email: IEventEmail, extra: Record<string, string>): { subject: string; body: string } {
+  if (!extra.busNote) return BUS_NOTE_TOKEN.test(email.body) ? { subject: email.subject, body: email.body.replace(BUS_NOTE_PARAGRAPH, "") } : email;
+  if (BUS_NOTE_TOKEN.test(email.body)) return email;
+  return { subject: email.subject, body: `${email.body}<p>{{busNote}}</p>` };
+}
+
+/** To one attendee of a booking (bus seat freed, cancellation); logged like the automatic emails. */
+export async function sendSystemEmailToAttendee(
+  plan: Extract<SystemEmailPlan, { state: "on" }>,
+  row: EventAttendee,
+  opts: { extra?: Record<string, string>; transporter?: MailTransporter; test?: boolean } = {},
+): Promise<boolean> {
+  const extra = opts.extra ?? {};
+  const cancelled = plan.email.trigger === "booking_cancelled";
+  const template = withNote(plan.email, extra);
+  // A cancelled guest's ticket is void: no ticket, no QR.
+  const message = await attendeeMessage(plan.email, plan.ctx, row, extra, cancelled ? { subject: template.subject, body: template.body.replace(/\{\{\s*qrCode\s*\}\}/g, "") } : template);
+  const outgoing = { ...message, attachments: cancelled ? [] : message.attachments };
+  return deliver(plan.email, opts.test ? { ...outgoing, test: true } : outgoing, "auto", opts.transporter);
+}
+
+export interface SystemEmailContact {
+  /** Delivery log key, e.g. "waitlist:<entry id>". */
+  key: string;
+  to: string;
+  name: string;
+  email?: string;
+  test?: boolean;
+  /** The first attendee's answers ({{field.*}}). */
+  fields?: Record<string, AttendeeFieldValue>;
+}
+
+/** To a contact who isn't (yet) a registered attendee — the waitlist entry's contact. */
+export async function sendSystemEmailToContact(
+  plan: Extract<SystemEmailPlan, { state: "on" }>,
+  contact: SystemEmailContact,
+  opts: { extra?: Record<string, string>; transporter?: MailTransporter } = {},
+): Promise<boolean> {
+  const { ctx, email } = plan;
+  const extra = opts.extra ?? {};
+  const group = ctx.event.groupId ? await eventGroupRepository.findById(String(ctx.event.groupId)) : null;
+  const schema = resolveTicketAttendeeFieldSchema({
+    registrationUnit: ctx.event.registrationUnit,
+    groupSchema: group?.defaultAttendeeFieldSchema as AttendeeFieldDef[] | undefined,
+    eventSchema: ctx.event.attendeeFieldSchema as AttendeeFieldDef[],
+    mode: ctx.event.attendeeFieldSchemaMode,
+  });
+  const values: Record<string, string> = {
+    ...baseValues(ctx),
+    fullName: contact.name,
+    firstName: givenName(contact.name, ctx.config.nameOrder),
+    customerName: contact.name,
+    customerEmail: contact.email ?? contact.to,
+    registrationNumber: "",
+    ...fieldValues(schema, contact.fields ?? {}),
+  };
+  Object.assign(values, aliasValues(values), extra);
+  const rendered = renderEventEmail(withNote(email, extra), values, false);
+  return deliver(
+    email,
+    { recipientKey: contact.key, to: contact.to, name: contact.name, subject: rendered.subject, html: rendered.html, attachments: [], bookingId: null, test: Boolean(contact.test) },
+    "auto",
+    opts.transporter,
+  );
 }

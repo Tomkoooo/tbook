@@ -60,7 +60,8 @@ export interface EmailFormValues {
   name: string;
   subject: string;
   body: string;
-  trigger: "on_registration" | "manual";
+  /** "on_registration", "manual", or a system trigger (waitlist_joined, bus_seat_freed, …). */
+  trigger: string;
   audience: "registered" | "list_all" | "list_unregistered";
   listId: string;
   listMatchFieldKey: string;
@@ -78,10 +79,13 @@ export function EmailForm({
   fields,
   lists,
   placeholders,
+  system = null,
 }: {
   eventId: string;
   emailId: string | null;
   initial: EmailFormValues;
+  /** Set for a system email: fixed trigger, no audience/conditions, its own placeholders. */
+  system?: { label: string; when: string; placeholders: Placeholder[]; answers: boolean; moduleValues: boolean } | null;
   fields: Array<{ key: string; label: string; choices: Array<{ value: string; label: string }> }>;
   lists: Array<{ id: string; name: string; hasEmail: boolean; columns: Array<{ key: string; label: string }> }>;
   placeholders: { attendee: Placeholder[]; list: Placeholder[]; fields: Placeholder[]; modules: Array<{ label: string; items: Placeholder[] }> };
@@ -95,10 +99,17 @@ export function EmailForm({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, startDelete] = useTransition();
 
-  const effectiveAudience = trigger === "on_registration" ? "registered" : audience;
+  const effectiveAudience = trigger === "manual" ? audience : "registered";
   const list = lists.find((l) => l.id === listId) ?? null;
 
   const groups: PlaceholderGroup[] = useMemo(() => {
+    if (system) {
+      return [
+        { label: "This email", items: system.placeholders },
+        ...(system.answers ? [{ label: "Registration answers", items: placeholders.fields }] : []),
+        ...(system.moduleValues ? placeholders.modules.map((group) => ({ label: group.label === "bus-transport" ? "Bus" : group.label, items: group.items })) : []),
+      ];
+    }
     if (effectiveAudience !== "registered") {
       return [
         { label: "General", items: placeholders.list },
@@ -110,7 +121,7 @@ export function EmailForm({
       { label: "Registration answers", items: placeholders.fields },
       ...placeholders.modules.map((group) => ({ label: group.label === "bus-transport" ? "Bus" : group.label, items: group.items })),
     ];
-  }, [effectiveAudience, list, placeholders]);
+  }, [effectiveAudience, list, placeholders, system]);
 
   const [state, action, pending] = useActionState(async (_prev: EmailActionResult | null, formData: FormData) => {
     const result = await saveEventEmailAction(eventId, emailId, formData);
@@ -119,7 +130,7 @@ export function EmailForm({
   }, null);
 
   const serializedConditions =
-    effectiveAudience === "registered" && conditions.some((c) => c.fieldKey)
+    !system && effectiveAudience === "registered" && conditions.some((c) => c.fieldKey)
       ? JSON.stringify({ logic, rules: conditions.filter((c) => c.fieldKey).map((c, index) => ({ id: `c${index + 1}`, fieldKey: c.fieldKey, op: c.op, value: c.value.trim(), message: "" })) })
       : "";
 
@@ -136,6 +147,15 @@ export function EmailForm({
               <Input id="email-order" name="sortOrder" type="number" defaultValue={initial.sortOrder} />
             </FormField>
           </div>
+          {system ? (
+            <>
+              <input type="hidden" name="trigger" value={trigger} />
+              <input type="hidden" name="audience" value="registered" />
+              <Notice tone="info">
+                <strong>System email — {system.label}.</strong> {system.when} Switch it off to send nothing for this event; delete it to go back to the built-in text.
+              </Notice>
+            </>
+          ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="When" htmlFor="email-trigger">
               <NativeSelect id="email-trigger" name="trigger" value={trigger} onChange={(e) => setTrigger(e.target.value as EmailFormValues["trigger"])}>
@@ -155,8 +175,9 @@ export function EmailForm({
               <input type="hidden" name="audience" value="registered" />
             )}
           </div>
+          )}
 
-          {effectiveAudience !== "registered" ? (
+          {system ? null : effectiveAudience !== "registered" ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label="Data list" htmlFor="email-list" hint={list && !list.hasEmail ? "This list has no email column — re-import it and pick one." : undefined}>
                 <NativeSelect id="email-list" name="listId" value={listId} onChange={(e) => setListId(e.target.value)}>
@@ -187,8 +208,12 @@ export function EmailForm({
           )}
 
           <div className="flex flex-wrap gap-6">
-            <CheckboxField name="active" label={trigger === "on_registration" ? "On — send on each registration" : "On"} defaultChecked={initial.active} />
-            {effectiveAudience === "registered" ? <CheckboxField name="attachTicket" label="Attach the guest’s ticket PDF" defaultChecked={initial.attachTicket} /> : null}
+            <CheckboxField
+              name="active"
+              label={system ? "On — send this instead of the built-in text (off: nothing is sent)" : trigger === "on_registration" ? "On — send on each registration" : "On"}
+              defaultChecked={initial.active}
+            />
+            {!system && effectiveAudience === "registered" ? <CheckboxField name="attachTicket" label="Attach the guest’s ticket PDF" defaultChecked={initial.attachTicket} /> : null}
           </div>
           {trigger === "on_registration" ? (
             <Notice tone="info">While an automatic email is on, it replaces tBook’s default booking confirmation for this event. Each guest of a group registration gets their own copy.</Notice>
@@ -201,7 +226,7 @@ export function EmailForm({
           initialSubject={initial.subject}
           initialBody={initial.body}
           placeholderGroups={groups}
-          previewNote={effectiveAudience === "registered" ? "{{qrCode}} becomes the guest’s own QR code image (the same one as on the ticket)." : "List emails have no QR code or ticket."}
+          previewNote={system ? "Placeholders this email doesn't list stay empty." : effectiveAudience === "registered" ? "{{qrCode}} becomes the guest’s own QR code image (the same one as on the ticket)." : "List emails have no QR code or ticket."}
         />
       </SectionCard>
 
@@ -224,7 +249,7 @@ export function EmailForm({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete this email?</DialogTitle>
-              <DialogDescription>Its delivery log is deleted too.</DialogDescription>
+              <DialogDescription>{system ? "The built-in text goes out again. Its delivery log is deleted too." : "Its delivery log is deleted too."}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)}>
@@ -334,7 +359,7 @@ function ConditionEditor({
 }
 
 /** Test send for every email; for manual ones also Send now / Stop with live progress. */
-export function SendPanel({ emailId, manual }: { emailId: string; manual: boolean }) {
+export function SendPanel({ emailId, manual, system = false }: { emailId: string; manual: boolean; system?: boolean }) {
   const router = useRouter();
   const [testTo, setTestTo] = useState("");
   const [result, setResult] = useState<EmailActionResult | null>(null);
@@ -370,7 +395,9 @@ export function SendPanel({ emailId, manual }: { emailId: string; manual: boolea
   const done = progress ? progress.sent + progress.failed + progress.skipped : 0;
 
   return (
-    <SectionCard title={manual ? "Send" : "Test"} description={manual ? "Check it with a test first. Send only reaches people who haven’t received it yet, so pressing it again after a stop or a failure only finishes the rest." : "Automatic emails go out on each registration. Send yourself a copy to check it."}>
+    <SectionCard title={manual ? "Send" : "Test"} description={manual ? "Check it with a test first. Send only reaches people who haven’t received it yet, so pressing it again after a stop or a failure only finishes the rest." : system
+            ? "The module sends this when it happens. Send yourself a copy to check it ({{position}}, {{link}} and similar get sample values)."
+            : "Automatic emails go out on each registration. Send yourself a copy to check it."}>
       <div className="grid gap-5">
         <div className="flex flex-wrap items-end gap-3">
           <FormField label="Send a test to" htmlFor="test-to" className="min-w-64 flex-1">

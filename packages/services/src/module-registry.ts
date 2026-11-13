@@ -31,6 +31,12 @@ export interface ModuleConfigField {
   type: "text" | "url" | "select";
   hint?: string;
   options?: ReadonlyArray<{ value: string; label: string }>;
+  /**
+   * Kept only so existing settings keep working; the console hides the
+   * field while it is empty and shows this note when it is set (e.g. "Use
+   * the Emails page").
+   */
+  deprecated?: string;
 }
 
 const REGISTRY_KEY = Symbol.for("tbook.modules");

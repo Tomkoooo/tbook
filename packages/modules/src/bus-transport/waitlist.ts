@@ -3,7 +3,8 @@ import { BookingModel, eventRepository, type IBooking } from "@tbook/db";
 import { resolveModules, type MailTransporter } from "@tbook/services";
 import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
 import { ACTIVE_BOOKING_STATUSES, attendeeKeyOf, toEventAttendees, type EventAttendee } from "../shared/attendees";
-import { eventSiteUrl, fillTemplate, sendModuleMail } from "../shared/mail";
+import { sendSystemEmailToAttendee, systemEmailPlan } from "../event-emails/service";
+import { eventSiteUrl, fillTemplate, moduleMailTransporter, sendModuleMail } from "../shared/mail";
 import { BusRouteModel, BusSeatStateModel, BusWaitlistEntryModel } from "./model";
 import { busRouteFields, isBusWaitlistValue } from "./service";
 
@@ -189,6 +190,9 @@ export async function notifyBusWaitlist(eventId: string, now = new Date(), opts:
 
   const state = await BusSeatStateModel.findOne({ eventId }).lean().exec();
   const lastFreedAt = state?.lastFreedAt ? new Date(state.lastFreedAt).getTime() : 0;
+  // Precedence: the event's "bus_seat_freed" email (switched off = nobody is emailed) > module settings text > built-in text.
+  const plan = await systemEmailPlan(event, "bus_seat_freed");
+  if (plan.state === "off") return 0;
   const config = modules.config<BusWaitlistConfig>("bus-transport");
   const siteUrl = await eventSiteUrl(event);
   let sent = 0;
@@ -199,6 +203,10 @@ export async function notifyBusWaitlist(eventId: string, now = new Date(), opts:
     const claimed = await BusWaitlistEntryModel.findOneAndUpdate({ _id: guest.entryId, notifiedAt: guest.notifiedAt }, { $set: { notifiedAt: now } }).exec();
     if (!claimed) continue;
     const values = { name: guest.row.displayName, event: event.name, siteUrl };
+    if (plan.state === "on") {
+      if (await sendSystemEmailToAttendee(plan, guest.row, { test, transporter: transporterOverride ?? moduleMailTransporter() })) sent += 1;
+      continue;
+    }
     try {
       await sendModuleMail(
         event,

@@ -26,11 +26,12 @@ export function registerGuestPortalModule(): void {
       },
       {
         key: "cancelSubject",
+        deprecated: "Deprecated: edit this email on the Emails page (system email “Registration cancelled”). An email there overrides this field.",
         label: "Cancellation email subject",
         type: "text",
         hint: `Sent to a guest whose registration is cancelled (by them or an organizer). Placeholders {{name}}, {{event}}, {{registrationNumber}}, {{siteUrl}}. Default: ${GUEST_PORTAL_DEFAULTS.cancelSubject}`,
       },
-      { key: "cancelMessage", label: "Cancellation email text", type: "text", hint: "Empty = the built-in Hungarian text. Same placeholders as the subject." },
+      { key: "cancelMessage", deprecated: "Deprecated: edit this email on the Emails page (system email “Registration cancelled”). An email there overrides this field.", label: "Cancellation email text", type: "text", hint: "Empty = the built-in Hungarian text. Same placeholders as the subject." },
     ],
   });
 

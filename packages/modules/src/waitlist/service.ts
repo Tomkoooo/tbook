@@ -17,6 +17,8 @@ import {
 import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
 import { BusRouteModel } from "../bus-transport/model";
 import { BUS_WAITLIST_VALUE, busRouteFields, seatsByRoute } from "../bus-transport/service";
+import { sendSystemEmailToContact, systemEmailPlan } from "../event-emails/service";
+import type { SystemEmailTrigger } from "../event-emails/model";
 import { FREE_REGISTRATION } from "../free-registration";
 import { eventSiteUrl } from "../shared/mail";
 import { WaitlistEntryModel, type IWaitlistEntry, type WaitlistStatus } from "./model";
@@ -117,9 +119,42 @@ function fill(template: string, values: Record<string, string>): string {
 
 type NoticeKind = "offer" | "registered" | "joined";
 
-async function notify(entry: IWaitlistEntry, event: IEvent, kind: NoticeKind, extra: { link?: string; position?: number; note?: string } = {}): Promise<void> {
+const NOTICE_TRIGGERS: Record<NoticeKind, SystemEmailTrigger> = { joined: "waitlist_joined", offer: "waitlist_offer", registered: "waitlist_registered" };
+
+/**
+ * The guest's waitlist email. Precedence: the event's email of the
+ * trigger (event-emails; switched off = nothing is sent) > the module
+ * settings text > the built-in text.
+ */
+async function notify(
+  entry: IWaitlistEntry,
+  event: IEvent,
+  kind: NoticeKind,
+  extra: { link?: string; position?: number; note?: string; registrationNumber?: string | null } = {},
+): Promise<void> {
   const { config, hours } = await waitlistContext(event);
   const link = extra.link ?? "";
+  const plan = await systemEmailPlan(event, NOTICE_TRIGGERS[kind]);
+  if (plan.state === "off") return;
+  if (plan.state === "on") {
+    const first = (entry.attendees as BookingAttendee[])[0];
+    const ok = await sendSystemEmailToContact(
+      plan,
+      { key: `waitlist:${String(entry._id)}`, to: entry.customer.email, name: entry.customer.name, test: entry.isTest, fields: first?.fields ?? {} },
+      {
+        extra: {
+          position: extra.position != null ? String(extra.position) : "",
+          hours: String(hours),
+          link,
+          busNote: extra.note ?? "",
+          ...(kind === "registered" ? { registrationNumber: extra.registrationNumber ?? "" } : {}),
+        },
+        transporter: transporterOverride,
+      },
+    );
+    await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: ok ? { notifiedAt: new Date() } : { lastError: "Email failed (see the email's delivery log)" } }).exec();
+    return;
+  }
   const subject = config[`${kind}Subject`]?.trim() || DEFAULTS[`${kind}Subject`];
   let message = config[`${kind}Message`]?.trim() || DEFAULTS[`${kind}Message`];
   if (extra.note) message = `${message}\n\n${extra.note}`;
@@ -480,7 +515,7 @@ async function processTestOnce(eventId: string, freed: number): Promise<void> {
       try {
         const { result, busFallback } = await registerEntry(claimed, event, {});
         await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { bookingId: result.bookingId, lastError: "" } }).exec();
-        await notify(claimed, event, "registered", busFallback ? { note: BUS_FALLBACK_NOTE } : {});
+        await notify(claimed, event, "registered", { registrationNumber: result.registrationNumber, ...(busFallback ? { note: BUS_FALLBACK_NOTE } : {}) });
       } catch (error) {
         await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { status: "failed", lastError: error instanceof Error ? error.message : String(error) } }).exec();
       }
@@ -514,7 +549,7 @@ async function processOnce(eventId: string): Promise<void> {
       try {
         const { result, busFallback } = await registerEntry(claimed, event, {});
         await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { bookingId: result.bookingId, lastError: "" } }).exec();
-        await notify(claimed, event, "registered", busFallback ? { note: BUS_FALLBACK_NOTE } : {});
+        await notify(claimed, event, "registered", { registrationNumber: result.registrationNumber, ...(busFallback ? { note: BUS_FALLBACK_NOTE } : {}) });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if ((error as { code?: string }).code === "capacity_full") {

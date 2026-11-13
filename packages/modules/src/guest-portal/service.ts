@@ -7,7 +7,8 @@ import { BUS_TRANSPORT } from "../bus-transport";
 import { formatDeparture, routeForAttendee } from "../bus-transport/service";
 import { busWaitlistPosition } from "../bus-transport/waitlist";
 import { attendeeKeyOf, findAttendeeByCode, toEventAttendees } from "../shared/attendees";
-import { eventSiteUrl, fillTemplate, sendModuleMail } from "../shared/mail";
+import { sendSystemEmailToAttendee, systemEmailPlan } from "../event-emails/service";
+import { eventSiteUrl, fillTemplate, moduleMailTransporter, sendModuleMail } from "../shared/mail";
 
 export const GUEST_PORTAL = "guest-portal";
 
@@ -222,11 +223,18 @@ export async function sendCancellationEmails(booking: IBooking): Promise<void> {
   if (!event) return;
   const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
   if (!modules.isOn(GUEST_PORTAL)) return;
+  // Precedence: the event's "booking_cancelled" email (switched off = nothing is sent) > module settings text > built-in text.
+  const plan = await systemEmailPlan(event, "booking_cancelled");
+  if (plan.state === "off") return;
   const config = modules.config<GuestPortalConfig>(GUEST_PORTAL);
   const siteUrl = await eventSiteUrl(event);
   const schema = (booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
   const emailField = schema.find((field) => field.type === "email");
   for (const row of toEventAttendees(booking)) {
+    if (plan.state === "on") {
+      await sendSystemEmailToAttendee(plan, row, { transporter: moduleMailTransporter() }).catch((error) => console.error("[tbook] cancellation email failed", String(booking._id), row.attendeeKey, error));
+      continue;
+    }
     const to = (emailField ? String(row.fields[emailField.key] ?? "").trim() : "") || booking.customer?.email || "";
     const values = { name: row.displayName, event: event.name, registrationNumber: row.registrationNumber ?? booking.registrationNumber ?? "", siteUrl };
     try {

@@ -360,6 +360,46 @@
         ]
       },
       "body": "<p>Szia {{firstName}}!</p><p>Megnyílt a buszregisztráció az MVM Hálózatok Ünnepére!</p><p>Korábban jelezted, hogy szeretnél szervezett transzferrel érkezni a rendezvényre. Mostantól kiválaszthatod a számodra megfelelő buszjáratot, és lefoglalhatod a helyed.</p><p>Buszfoglalás: <a href=\"{{siteUrl}}/fiokom.php\">{{siteUrl}}/fiokom.php</a><br>Belépés a „Saját regisztrációm” oldalon a törzsszámoddal ({{field.torzsszam}}) – újra regisztrálni nem kell.</p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A felületen megtalálod az indulási helyszíneket, időpontokat és a még elérhető férőhelyeket.</p><p>Fontos, hogy a korábban jelzett transzferigény önmagában nem jelent buszfoglalást, ezért kérünk, mindenképpen válassz járatot!</p><p>A sikeres foglalás után külön visszaigazoló e-mailt kapsz, amely tartalmazza a buszod adatait és a buszkapitányod elérhetőségét.</p><p>Találkozunk december 4-én!</p>"
+    },
+    {
+      "name": "R1. Várólistára kerülés (automatikus)",
+      "subject": "Felkerültél a várólistára – MVM Hálózatok Ünnepe 2026",
+      "trigger": "waitlist_joined",
+      "audience": "registered",
+      "body": "<p>Szia {{firstName}}!</p><p>Köszönjük, hogy jelentkeztél az MVM Hálózatok Ünnepére! A rendezvény jelenleg betelt, ezért felírtunk a <strong>várólistára</strong>.</p><p><strong>A helyed a várólistán:</strong> {{position}}.</p><p>Ha felszabadul egy hely, a sorrend alapján <strong>automatikusan regisztrálunk</strong>, és erről e-mailben értesítünk – a visszaigazolást a belépéshez szükséges QR-kóddal együtt küldjük. Ehhez neked nincs további teendőd.</p><p>A várólistás helyedet bármikor megnézheted, vagy le is iratkozhatsz a weboldalon a „Saját regisztrációm” oldalon, a törzsszámoddal ({{field.torzsszam}}) belépve: <a href=\"{{siteUrl}}/fiokom.php\">{{siteUrl}}/fiokom.php</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>Ha bármilyen kérdésed van, vagy problémába ütközöl, keresd Mészáros Nórát: <a href=\"mailto:meszaros.nora@mvm.hu\">meszaros.nora@mvm.hu</a></p><p>Üdvözlettel:<br>A szervezők</p>",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 101
+    },
+    {
+      "name": "R2. Bekerültél a várólistáról (automatikus regisztráció)",
+      "subject": "Bekerültél! – MVM Hálózatok Ünnepe 2026",
+      "trigger": "waitlist_registered",
+      "audience": "registered",
+      "body": "<p>Szia {{firstName}}!</p><p>Jó hírünk van: felszabadult egy hely az MVM Hálózatok Ünnepén, így a várólistáról <strong>regisztráltunk a rendezvényre</strong>!</p><p><strong>Regisztrációs azonosítód:</strong> {{registrationNumber}}</p><p>A regisztráció visszaigazolását a belépéshez szükséges QR-kóddal <strong>külön e-mailben</strong> is megküldjük.</p><p>{{busNote}}</p><p>A regisztrációdat a weboldalon a „Saját regisztrációm” oldalon, a törzsszámoddal ({{field.torzsszam}}) belépve megtekintheted és módosíthatod: <a href=\"{{siteUrl}}/fiokom.php\">{{siteUrl}}/fiokom.php</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>Ha bármilyen kérdésed van, vagy problémába ütközöl, keresd Mészáros Nórát: <a href=\"mailto:meszaros.nora@mvm.hu\">meszaros.nora@mvm.hu</a></p><p>Találkozunk december 4-én!</p>",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 102
+    },
+    {
+      "name": "R3. Felszabadult hely a buszon (buszos várólista)",
+      "subject": "Felszabadult hely a buszon – MVM Hálózatok Ünnepe 2026",
+      "trigger": "bus_seat_freed",
+      "audience": "registered",
+      "body": "<p>Szia {{firstName}}!</p><p>Jó hír: <strong>felszabadult hely</strong> az MVM Hálózatok Ünnepére induló buszos transzferen!</p><p>Korábban jelezted, hogy értesítést kérsz, ha egy járaton hely szabadul fel. Ha még szeretnél busszal jönni, lépj be a „Saját regisztrációm” oldalon a törzsszámoddal ({{field.torzsszam}}), és válaszd ki a járatot: <a href=\"{{siteUrl}}/fiokom.php\">{{siteUrl}}/fiokom.php</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>Fontos: a helyek <strong>érkezési sorrendben</strong> telnek be, ezért érdemes minél előbb választanod. Ha közben már nincs szükséged a buszra, nincs teendőd.</p><p>A sikeres foglalás után külön visszaigazoló e-mailt kapsz a buszod adataival és a buszkapitányod elérhetőségével.</p><p>Ha bármilyen kérdésed van, vagy problémába ütközöl, keresd Mészáros Nórát: <a href=\"mailto:meszaros.nora@mvm.hu\">meszaros.nora@mvm.hu</a></p><p>Üdvözlettel:<br>A szervezők</p>",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 103
+    },
+    {
+      "name": "R4. Regisztráció lemondása (visszaigazolás)",
+      "subject": "Regisztrációd lemondva – MVM Hálózatok Ünnepe 2026",
+      "trigger": "booking_cancelled",
+      "audience": "registered",
+      "body": "<p>Szia {{firstName}}!</p><p>Ezúton visszaigazoljuk, hogy az MVM Hálózatok Ünnepére szóló regisztrációdat <strong>lemondtuk</strong>.</p><p><strong>Regisztrációs azonosító:</strong> {{registrationNumber}}<br>A korábban kapott QR-kódod és – ha volt – a buszfoglalásod ezzel érvényét vesztette.</p><p>Ha meggondolod magad, amíg van szabad hely, a weboldalon újra regisztrálhatsz: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>Ha nem te kérted a lemondást, vagy úgy gondolod, hogy tévedés történt, kérjük, mielőbb jelezd Mészáros Nórának: <a href=\"mailto:meszaros.nora@mvm.hu\">meszaros.nora@mvm.hu</a></p><p>Üdvözlettel:<br>A szervezők</p>",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 104
     }
   ]
 }
