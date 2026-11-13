@@ -107,3 +107,22 @@ describe("buildVoucherPdf", () => {
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
   });
 });
+
+describe("resolveVendoredFontPath", () => {
+  it("finds the vendored font on disk without import.meta.url (bundled builds), or uses TBOOK_FONT_PATH", async () => {
+    const { existsSync } = await import("node:fs");
+    const { resolveVendoredFontPath } = await import("./voucher-pdf");
+    const saved = process.env.TBOOK_FONT_PATH;
+    delete process.env.TBOOK_FONT_PATH;
+    try {
+      const found = resolveVendoredFontPath();
+      expect(found.endsWith("Roboto-Regular.ttf")).toBe(true);
+      expect(existsSync(found)).toBe(true);
+      process.env.TBOOK_FONT_PATH = "/custom/font.ttf";
+      expect(resolveVendoredFontPath()).toBe("/custom/font.ttf");
+    } finally {
+      if (saved === undefined) delete process.env.TBOOK_FONT_PATH;
+      else process.env.TBOOK_FONT_PATH = saved;
+    }
+  });
+});

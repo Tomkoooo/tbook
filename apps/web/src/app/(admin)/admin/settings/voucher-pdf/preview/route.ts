@@ -17,6 +17,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof ActionError) return new Response(error.message, { status: error.status });
     console.error("[voucher pdf preview]", error);
-    return new Response("Could not render the preview.", { status: 500 });
+    // The editor shows this text to the admin: say what went wrong instead of a bare "failed".
+    return new Response(`Could not render the preview: ${error instanceof Error ? error.message : String(error)}`, { status: 500 });
   }
 }

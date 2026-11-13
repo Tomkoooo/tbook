@@ -56,6 +56,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/
 # won't reliably pick them up) — copy explicitly. Currently: the voucher PDF
 # renderer's vendored Unicode font.
 COPY --from=builder --chown=nextjs:nodejs /app/packages/services/assets ./packages/services/assets
+ENV TBOOK_FONT_PATH=/app/packages/services/assets/fonts/Roboto-Regular.ttf
 
 USER nextjs
 

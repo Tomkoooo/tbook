@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import QRCode from "qrcode";
@@ -87,21 +88,28 @@ function formatAttendeeFieldValue(field: AttendeeFieldDef, value: AttendeeFieldV
   return String(value);
 }
 
+const VENDORED_FONT = path.join("packages", "services", "assets", "fonts", "Roboto-Regular.ttf");
+
 /**
- * Resolved lazily (not at module scope) — confirmed necessary once apps/web
- * actually wired a route importing this module: Next's build-time page-data
- * collection evaluates every module a route transitively imports, and a
- * top-level `fileURLToPath(new URL(..., import.meta.url))` computed eagerly
- * there threw (`ERR_INVALID_ARG_TYPE`, a webpack-bundled `import.meta.url`
- * producing a URL instance from a different realm than Node's `url` module
- * expects). Deferring the resolution into a function means it only runs
- * when a voucher PDF is actually rendered, never during module evaluation.
- * TBOOK_FONT_PATH remains the escape hatch for a bundled path that still
- * doesn't resolve correctly at runtime; the Dockerfile's runner stage
- * copies packages/services/assets explicitly either way.
+ * Where the vendored TTF lives on disk. Not derived from `import.meta.url`:
+ * Next's webpack turns `new URL("../assets/…", import.meta.url)` into a
+ * public asset URL (`static/media/Roboto-Regular.<hash>.ttf`), not a file
+ * path, so production rendering failed ("Could not render the preview.").
+ * Instead: TBOOK_FONT_PATH (set in the Dockerfile), else walk up from the
+ * working directory to the repo root (/app in the image, the repo root or a
+ * package dir in dev and tests).
  */
-function resolveVendoredFontPath(): string {
-  return process.env.TBOOK_FONT_PATH || fileURLToPath(new URL("../assets/fonts/Roboto-Regular.ttf", import.meta.url));
+export function resolveVendoredFontPath(): string {
+  if (process.env.TBOOK_FONT_PATH) return process.env.TBOOK_FONT_PATH;
+  let dir = process.cwd();
+  for (let i = 0; i < 6; i += 1) {
+    const candidate = path.join(dir, VENDORED_FONT);
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Voucher PDF font not found (${VENDORED_FONT} above ${process.cwd()}); set TBOOK_FONT_PATH.`);
 }
 
 let cachedFontBytes: Buffer | null = null;
