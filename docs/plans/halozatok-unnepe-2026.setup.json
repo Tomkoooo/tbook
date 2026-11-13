@@ -1,6 +1,13 @@
 {
   "description": "MVM Hálózatok Ünnepe 2026 (Eventstructure) — free registration checked against the DSO staff list, bus transfer with seat limits, per-attendee emails. Apply with: npx tsx scripts/tbook-cli/cli.ts setup apply --org eventstructure --plan docs/plans/halozatok-unnepe-2026.setup.json",
-  "organizationModules": ["free-registration", "bus-transport", "event-emails", "guest-portal", "waitlist", "feedback"],
+  "organizationModules": [
+    "free-registration",
+    "bus-transport",
+    "event-emails",
+    "guest-portal",
+    "waitlist",
+    "feedback"
+  ],
   "dataLists": [
     {
       "ref": "dso",
@@ -77,10 +84,22 @@
         "helpText": "",
         "sortOrder": 2,
         "choices": [
-          { "value": "DHEL", "label": "MVM Démász Áramhálózati" },
-          { "value": "EHEL", "label": "MVM ÉMÁSZ Áramhálózati" },
-          { "value": "EGDG", "label": "MVM Égáz-Dégáz Zrt." },
-          { "value": "FGEL", "label": "MVM Főgáz Kft." }
+          {
+            "value": "DHEL",
+            "label": "MVM Démász Áramhálózati"
+          },
+          {
+            "value": "EHEL",
+            "label": "MVM ÉMÁSZ Áramhálózati"
+          },
+          {
+            "value": "EGDG",
+            "label": "MVM Égáz-Dégáz Zrt."
+          },
+          {
+            "value": "FGEL",
+            "label": "MVM Főgáz Kft."
+          }
         ],
         "prefillColumn": "Vállalat"
       },
@@ -108,7 +127,16 @@
         "required": true,
         "helpText": "",
         "sortOrder": 5,
-        "choices": [{"value": "igen", "label": "Igen"}, {"value": "nem", "label": "Nem"}]
+        "choices": [
+          {
+            "value": "igen",
+            "label": "Igen"
+          },
+          {
+            "value": "nem",
+            "label": "Nem"
+          }
+        ]
       },
       {
         "key": "busz",
@@ -119,7 +147,12 @@
         "sortOrder": 6,
         "choices": [],
         "choicesSource": "bus-transport:routes",
-        "showWhen": { "fieldKey": "transzfer", "values": ["igen"] }
+        "showWhen": {
+          "fieldKey": "transzfer",
+          "values": [
+            "igen"
+          ]
+        }
       },
       {
         "key": "vacsora",
@@ -128,7 +161,16 @@
         "required": true,
         "helpText": "",
         "sortOrder": 7,
-        "choices": [{"value": "igen", "label": "Igen"}, {"value": "nem", "label": "Nem"}]
+        "choices": [
+          {
+            "value": "igen",
+            "label": "Igen"
+          },
+          {
+            "value": "nem",
+            "label": "Nem"
+          }
+        ]
       },
       {
         "key": "etkezesi_igeny",
@@ -137,7 +179,12 @@
         "required": false,
         "helpText": "Pl. gluténmentes, laktózmentes, vegetáriánus.",
         "sortOrder": 8,
-        "showWhen": { "fieldKey": "vacsora", "values": ["igen"] }
+        "showWhen": {
+          "fieldKey": "vacsora",
+          "values": [
+            "igen"
+          ]
+        }
       },
       {
         "key": "adatkezeles",
@@ -164,21 +211,39 @@
     "pricingRules": []
   },
   "eventModules": {
-    "free-registration": { "enabled": true },
-    "bus-transport": { "enabled": true },
+    "free-registration": {
+      "enabled": true
+    },
+    "bus-transport": {
+      "enabled": true
+    },
     "event-emails": {
       "enabled": true,
-      "config": { "siteUrl": "https://halozatokunnepe2026.hu", "surveyUrl": "", "galleryUrl": "", "nameOrder": "family_first" }
+      "config": {
+        "siteUrl": "https://halozatokunnepe2026.hu",
+        "surveyUrl": "",
+        "galleryUrl": "",
+        "nameOrder": "family_first"
+      }
     },
-    "guest-portal": { "enabled": true },
-    "waitlist": { "enabled": true, "config": { "mode": "auto" } },
-    "feedback": { "enabled": true }
+    "guest-portal": {
+      "enabled": true
+    },
+    "waitlist": {
+      "enabled": true,
+      "config": {
+        "mode": "auto"
+      }
+    },
+    "feedback": {
+      "enabled": true
+    }
   },
   "emails": [
     {
       "name": "1. Regisztráció megnyitása (nov. 16.)",
       "subject": "MVM Hálózatok Ünnepe 2026 – Elindult a regisztráció!",
-      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>A weboldal jelszóval védett. Belépéshez használd ezt a jelszót: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során kiválaszthatod a számodra megfelelő buszjáratot, amennyiben transzfert igényelsz, valamint jelezheted esetleges ételérzékenységedet is.</p><p>Várunk szeretettel!</p>",
+      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán!<br><a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során jelezheted transzferigényedet és esetleges ételérzékenységedet is.</p><p>A konkrét buszjáratokra történő helyfoglalás még nem érhető el. Amint megnyitjuk a buszregisztrációt, e-mailben értesítünk mindenkit, aki transzfert igényelt.</p><p>Várunk szeretettel!</p>",
       "trigger": "manual",
       "audience": "list_all",
       "listId": "$list:dso",
@@ -189,7 +254,7 @@
     {
       "name": "2. Regisztrációs emlékeztető (nov. 20.)",
       "subject": "Ne maradj le az MVM Hálózatok Ünnepéről!",
-      "body": "<p>Szia {{firstName}}!</p><p>Még nem regisztráltál az MVM Hálózatok Ünnepére? December 4-én díjátadóval, vacsorával, szórakoztató programokkal és Wellhello-koncerttel készülünk.</p><p>Ha szeretnél velünk ünnepelni, jelentkezz az esemény weboldalán: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>A férőhelyek száma korlátozott.</p><p>Találkozunk decemberben!</p>",
+      "body": "<h3>Még nem regisztráltál az MVM Hálózatok Ünnepére?</h3><p>December 4-én a BOK Csarnokban találkozunk, ahol díjátadóval, vacsorával, szórakoztató programokkal és Wellhello-koncerttel készülünk.</p><p>Ha szeretnél velünk ünnepelni, jelentkezz az esemény weboldalán!<br>Regisztráció: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során transzferigényedet is jelezheted. A konkrét buszjáratok kiválasztásáról a transzfert igénylőket a buszregisztráció megnyitásakor külön e-mailben tájékoztatjuk.</p><p>A férőhelyek száma korlátozott.</p><p>Találkozunk decemberben!</p>",
       "trigger": "manual",
       "audience": "list_unregistered",
       "listId": "$list:dso",
@@ -201,7 +266,7 @@
     {
       "name": "3. Regisztráció-visszaigazolás (automatikus)",
       "subject": "Sikeres regisztráció – MVM Hálózatok Ünnepe 2026",
-      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen regisztráltál az MVM Hálózatok Ünnepére!</p><p><strong>Az esemény részletei:</strong><br>Dátum: 2026. december 4.<br>Időpont: 18:00–01:00<br>Helyszín: BOK Csarnok, Budapest</p><p><strong>Program:</strong></p><ul><li>Vezetői köszöntők és díjátadó</li><li>Ünnepi vacsora</li><li>Wellhello-koncert</li><li>DJ és kiegészítő programok</li></ul><p><strong>A regisztrációd adatai:</strong><br>Név: {{fullName}}<br>Munkáltató: {{field.munkaltato}}<br>Regisztrációs azonosító: {{registrationNumber}}<br>Transzfer: {{bus.transfer}}</p><p><strong>A belépéshez szükséges QR-kód:</strong></p>{{qrCode}}<p>Kérünk, hogy a QR-kódodat őrizd meg, és érkezéskor mutasd be a bejáratnál. Ha transzfert is igényeltél, külön buszfoglalás-visszaigazoló e-mailt küldünk.</p><p>A részletes programot és a további tudnivalókat az esemény weboldalán találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Várunk szeretettel!</p>",
+      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen regisztráltál az MVM Hálózatok Ünnepére!</p><p><strong>Az esemény részletei:</strong><br>Dátum: 2026. december 4.<br>Időpont: 18:00–01:00<br>Helyszín: BOK Csarnok, Budapest</p><p><strong>Program:</strong></p><ul><li>Vezetői köszöntők és díjátadó</li><li>Ünnepi vacsora</li><li>Wellhello-koncert</li><li>DJ és kiegészítő programok</li></ul><p><strong>A regisztrációd adatai:</strong><br>Név: {{fullName}}<br>Munkáltató: {{field.munkaltato}}<br>Regisztrációs azonosító: {{registrationNumber}}<br>Transzferigény: {{field.transzfer}}</p><p><strong>A belépéshez szükséges QR-kód:</strong></p>{{qrCode}}<p>Kérünk, hogy a QR-kódodat őrizd meg, és érkezéskor mutasd be a regisztrációnál.</p><p><strong>Ha transzfert igényeltél:</strong><br>A transzferigényedet rögzítettük, azonban a konkrét buszjáratokra történő helyfoglalás még nem nyílt meg. Amint elérhetővé válik a buszregisztráció, e-mailben értesítünk, és kiválaszthatod a számodra megfelelő járatot.</p><p>A részletes programot és a további tudnivalókat az esemény weboldalán találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Várunk szeretettel!</p>",
       "trigger": "on_registration",
       "audience": "registered",
       "attachTicket": false,
@@ -209,14 +274,39 @@
       "sortOrder": 3
     },
     {
+      "name": "3b. Regisztráció-visszaigazolás – buszregisztráció megnyitása után",
+      "subject": "Sikeres regisztráció – MVM Hálózatok Ünnepe 2026",
+      "trigger": "on_registration",
+      "audience": "registered",
+      "attachTicket": false,
+      "active": false,
+      "sortOrder": 3,
+      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen regisztráltál az MVM Hálózatok Ünnepére!</p><p><strong>Az esemény részletei:</strong><br>Dátum: 2026. december 4.<br>Időpont: 18:00–01:00<br>Helyszín: BOK Csarnok, Budapest</p><p><strong>Program:</strong></p><ul><li>Vezetői köszöntők és díjátadó</li><li>Ünnepi vacsora</li><li>Wellhello-koncert</li><li>DJ és kiegészítő programok</li></ul><p><strong>A regisztrációd adatai:</strong><br>Név: {{fullName}}<br>Munkáltató: {{field.munkaltato}}<br>Regisztrációs azonosító: {{registrationNumber}}<br>Transzfer: {{bus.transfer}}</p><p><strong>A belépéshez szükséges QR-kód:</strong></p>{{qrCode}}<p>Kérünk, hogy a QR-kódodat őrizd meg, és érkezéskor mutasd be a regisztrációnál.</p><p>Amennyiben transzfert foglaltál, annak részleteiről külön visszaigazoló e-mailt küldünk.</p><p>A részletes programot és a további tudnivalókat az esemény weboldalán találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Várunk szeretettel!</p>"
+    },
+    {
       "name": "4. Buszfoglalás-visszaigazolás (automatikus, csak transzferrel)",
       "subject": "Buszfoglalás visszaigazolása – MVM Hálózatok Ünnepe",
-      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen lefoglaltad a helyed az MVM Hálózatok Ünnepére induló transzferen!</p><p><strong>A buszfoglalásod részletei:</strong><br>Indulási város: {{bus.city}}<br>Felszállási hely: {{bus.pickupPoint}}<br>Busz / járat azonosítója: {{bus.code}}<br>Indulási időpont: {{bus.departure}}<br>Visszaindulás: 00:00–02:00 között, a buszon utazó csoport igényeihez igazodva<br>Buszkapitány neve: {{bus.captainName}}<br>Buszkapitány telefonszáma: {{bus.captainPhone}}</p><p><strong>Fontos tudnivalók a transzferről:</strong></p><ul><li>Kérünk, hogy a tervezett indulás előtt legalább 15 perccel érkezz meg a felszállási helyre.</li><li>Amennyiben változás vagy késés adódik, a buszkapitányodat értesítsd a fenti telefonszámon.</li><li>A busz a tervezett indulási időponthoz képest legfeljebb 15 percet vár, előzetes jelzés esetén is. Ezt követően a járat elindul, ezért kérünk, hogy pontosan érkezz!</li><li>A hazautazás pontos időpontját a buszon utazó csoport igényei alapján, a buszkapitány koordinálásával határozzuk meg, 00:00 és 02:00 között. Kérünk, hogy a visszaindulással kapcsolatos egyeztetéseket is a buszkapitányoddal intézd.</li><li>A véglegesített visszaindulási időponthoz képest szintén legfeljebb 15 perc várakozás lehetséges, jelzés esetén is.</li></ul><p>A rendezvény részletes programját és további tudnivalóit itt találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Találkozunk az MVM Hálózatok Ünnepén!</p>",
+      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen lefoglaltad a helyed az MVM Hálózatok Ünnepére induló transzferen!</p><p><strong>A buszfoglalásod részletei:</strong><br>Indulási város: {{bus.city}}<br>Felszállási hely: {{bus.pickupPoint}}<br>Busz / járat azonosítója: {{bus.code}}<br>Indulási időpont: {{bus.departure}}<br>Visszaindulás: 00:00–02:00 között, a buszon utazó csoport igényeihez igazodva<br>Buszkapitány neve: {{bus.captainName}}<br>Buszkapitány telefonszáma: {{bus.captainPhone}}</p><p><strong>Fontos tudnivalók a transzferről:</strong></p><ul><li>Kérünk, hogy a tervezett indulás előtt legalább 15 perccel érkezz meg a felszállási helyre.</li><li>Amennyiben változás történik az utazásoddal kapcsolatban, vagy késnél, minden esetben közvetlenül a buszkapitányodat értesítsd a fenti telefonszámon.</li><li>A busz a tervezett indulási időponthoz képest legfeljebb 15 percet vár, előzetes jelzés esetén is. Ezt követően a járat elindul.</li><li>A hazautazás pontos időpontját a buszon utazó csoport igényei alapján, a buszkapitány koordinálásával határozzuk meg 00:00 és 02:00 között.</li><li>A véglegesített visszaindulási időponthoz képest szintén legfeljebb 15 perc várakozás lehetséges, jelzés esetén is.</li></ul><p>A rendezvény részletes programját és további tudnivalóit itt találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Találkozunk az MVM Hálózatok Ünnepén!</p>",
       "trigger": "on_registration",
       "audience": "registered",
       "conditions": {
         "logic": "and",
-        "rules": [{"id": "c1", "fieldKey": "transzfer", "op": "equals", "value": "igen", "message": ""}]
+        "rules": [
+          {
+            "id": "c1",
+            "fieldKey": "busz",
+            "op": "is_not_empty",
+            "value": "",
+            "message": ""
+          },
+          {
+            "id": "c2",
+            "fieldKey": "busz",
+            "op": "not_equals",
+            "value": "waitlist",
+            "message": ""
+          }
+        ]
       },
       "attachTicket": false,
       "active": true,
@@ -241,6 +331,35 @@
       "attachTicket": false,
       "active": true,
       "sortOrder": 6
+    },
+    {
+      "name": "7. Megnyílt a buszregisztráció (transzfert kértek, még nincs járatuk)",
+      "subject": "Megnyílt a buszregisztráció – Foglald le a helyed!",
+      "trigger": "manual",
+      "audience": "registered",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 7,
+      "conditions": {
+        "logic": "and",
+        "rules": [
+          {
+            "id": "c1",
+            "fieldKey": "transzfer",
+            "op": "equals",
+            "value": "igen",
+            "message": ""
+          },
+          {
+            "id": "c2",
+            "fieldKey": "busz",
+            "op": "is_empty",
+            "value": "",
+            "message": ""
+          }
+        ]
+      },
+      "body": "<p>Szia {{firstName}}!</p><p>Megnyílt a buszregisztráció az MVM Hálózatok Ünnepére!</p><p>Korábban jelezted, hogy szeretnél szervezett transzferrel érkezni a rendezvényre. Mostantól kiválaszthatod a számodra megfelelő buszjáratot, és lefoglalhatod a helyed.</p><p>Buszfoglalás: <a href=\"{{siteUrl}}/fiokom.php\">{{siteUrl}}/fiokom.php</a><br>Belépés a „Saját regisztrációm” oldalon a törzsszámoddal ({{field.torzsszam}}) – újra regisztrálni nem kell.</p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A felületen megtalálod az indulási helyszíneket, időpontokat és a még elérhető férőhelyeket.</p><p>Fontos, hogy a korábban jelzett transzferigény önmagában nem jelent buszfoglalást, ezért kérünk, mindenképpen válassz járatot!</p><p>A sikeres foglalás után külön visszaigazoló e-mailt kapsz, amely tartalmazza a buszod adatait és a buszkapitányod elérhetőségét.</p><p>Találkozunk december 4-én!</p>"
     }
   ]
 }
