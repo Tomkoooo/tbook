@@ -4,6 +4,7 @@ import {
   BUS_ROUTES_SOURCE,
   BUS_WAITLIST_LABEL,
   BUS_WAITLIST_VALUE,
+  attendeeAwaitsBus,
   attendeeOnBusWaitlist,
   busRouteFields,
   formatDeparture,
@@ -65,10 +66,13 @@ export function registerBusTransportModule(): void {
     key: BUS_ROUTES_SOURCE,
     moduleKey: BUS_TRANSPORT,
     label: "Buses (Bus transport)",
+    // No active bus yet ("bus booking not open"): the bus question offers nothing and may be left empty.
+    optionalWhenEmpty: true,
     async list(ctx) {
-      const routes = await listRoutes(String(ctx.event._id));
+      const routes = (await listRoutes(String(ctx.event._id))).filter((route) => route.active);
+      // Without buses there is nothing to wait for either: no "notify me" option, so "waitlist" is refused like any unknown answer.
+      if (routes.length === 0) return [];
       const choices = routes
-        .filter((route) => route.active)
         .map((route) => {
           const remaining = Math.max(route.capacity - route.seatsTaken, 0);
           return {
@@ -136,7 +140,11 @@ export function registerBusTransportModule(): void {
   extensions.registerAttendeePlaceholders({
     moduleKey: BUS_TRANSPORT,
     placeholders: [
-      { key: "bus.transfer", label: "Transfer (Igényelt / Nem igényelt / Várólistán)", sample: "Igényelt" },
+      {
+        key: "bus.transfer",
+        label: "Transfer (Foglalt / Várólistán (értesítünk) / Igényelt (járat még nincs kiválasztva) / Nem igényelt)",
+        sample: "Foglalt",
+      },
       { key: "bus.city", label: "Bus: departure city", sample: "Szeged" },
       { key: "bus.pickupPoint", label: "Bus: pickup point", sample: "Mars tér, buszpályaudvar" },
       { key: "bus.code", label: "Bus: identifier", sample: "B03" },
@@ -151,7 +159,11 @@ export function registerBusTransportModule(): void {
       const rules = route ? (ctx.modules.config<{ transferRules?: string }>(BUS_TRANSPORT).transferRules ?? "") : "";
       if (!route) {
         return {
-          "bus.transfer": attendeeOnBusWaitlist(booking, attendeeIndex) ? "Várólistán (értesítünk)" : "Nem igényelt",
+          "bus.transfer": attendeeOnBusWaitlist(booking, attendeeIndex)
+            ? "Várólistán (értesítünk)"
+            : attendeeAwaitsBus(booking, attendeeIndex)
+              ? "Igényelt (járat még nincs kiválasztva)"
+              : "Nem igényelt",
           "bus.city": "",
           "bus.pickupPoint": "",
           "bus.code": "",
@@ -163,7 +175,7 @@ export function registerBusTransportModule(): void {
         };
       }
       return {
-        "bus.transfer": "Igényelt",
+        "bus.transfer": "Foglalt",
         "bus.city": route.city,
         "bus.pickupPoint": route.pickupPoint,
         "bus.code": route.code,

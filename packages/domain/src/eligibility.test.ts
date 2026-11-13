@@ -1,6 +1,6 @@
 import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
 import { describe, expect, it } from "vitest";
-import { canonicalizeGenderValue, expandLegacyEligibilityForEdit, validateEligibility } from "./eligibility";
+import { canonicalizeGenderValue, expandLegacyEligibilityForEdit, isEligibilityMatchOp, matchesRuleConfig, validateEligibility } from "./eligibility";
 
 describe("expandLegacyEligibilityForEdit", () => {
   it("expands the legacy under18 preset into a custom max age", () => {
@@ -74,5 +74,47 @@ describe("validateEligibility", () => {
     const passing: BookingAttendee[] = [{ fields: { gender: "female" } }];
     expect(validateEligibility(event, failing, [genderField], [], null)[0]?.reason).toBe("form_rules_failed");
     expect(validateEligibility(event, passing, [genderField], [], null)).toEqual([]);
+  });
+});
+
+describe("is_empty / is_not_empty (email conditions such as \"bus not chosen yet\")", () => {
+  const schema: AttendeeFieldDef[] = [
+    { key: "transzfer", label: "Transzfer", type: "select", required: true, choices: [{ value: "igen", label: "Igen" }, { value: "nem", label: "Nem" }] },
+    { key: "busz", label: "Busz", type: "select", required: true, choicesSource: "bus-transport:routes", showWhen: { fieldKey: "transzfer", values: ["igen"] } },
+  ] as AttendeeFieldDef[];
+  const busEmpty = { logic: "and" as const, rules: [{ id: "c1", fieldKey: "busz", op: "is_empty" as const, value: "" }] };
+  const awaitingBus = { logic: "and" as const, rules: [{ id: "c1", fieldKey: "transzfer", op: "equals" as const, value: "igen" }, { id: "c2", fieldKey: "busz", op: "is_empty" as const, value: "" }] };
+  const busBooked = {
+    logic: "and" as const,
+    rules: [
+      { id: "c1", fieldKey: "busz", op: "is_not_empty" as const, value: "" },
+      { id: "c2", fieldKey: "busz", op: "not_equals" as const, value: "waitlist" },
+    ],
+  };
+
+  it("matches a missing, empty or blank answer as empty and ignores the value", () => {
+    expect(matchesRuleConfig(busEmpty, {}, schema)).toBe(true);
+    expect(matchesRuleConfig(busEmpty, { busz: "" }, schema)).toBe(true);
+    expect(matchesRuleConfig(busEmpty, { busz: "  " }, schema)).toBe(true);
+    expect(matchesRuleConfig(busEmpty, { busz: "64f0c0ffee" }, schema)).toBe(false);
+    expect(matchesRuleConfig({ logic: "and", rules: [{ id: "c1", fieldKey: "busz", op: "is_empty", value: "ignored" }] }, {}, schema)).toBe(true);
+  });
+
+  it("separates booked, waiting and not-chosen guests", () => {
+    expect(matchesRuleConfig(busBooked, { transzfer: "igen", busz: "64f0c0ffee" }, schema)).toBe(true);
+    expect(matchesRuleConfig(busBooked, { transzfer: "igen", busz: "waitlist" }, schema)).toBe(false);
+    expect(matchesRuleConfig(busBooked, { transzfer: "igen" }, schema)).toBe(false);
+    expect(matchesRuleConfig(awaitingBus, { transzfer: "igen" }, schema)).toBe(true);
+    expect(matchesRuleConfig(awaitingBus, { transzfer: "nem" }, schema)).toBe(false);
+    expect(matchesRuleConfig(awaitingBus, { transzfer: "igen", busz: "64f0c0ffee" }, schema)).toBe(false);
+  });
+
+  it("works as a registration rule too, and is a known op", () => {
+    const event = { eligibilityPreset: "form_rules", eligibilityFormRules: { logic: "and" as const, rules: [{ id: "r1", fieldKey: "busz", op: "is_not_empty" as const, value: "" }] } };
+    expect(validateEligibility(event, [{ fields: { busz: "x" } }], schema, [], null)).toEqual([]);
+    expect(validateEligibility(event, [{ fields: {} }], schema, [], null)[0]?.reason).toBe("form_rules_failed");
+    expect(isEligibilityMatchOp("is_empty")).toBe(true);
+    expect(isEligibilityMatchOp("is_not_empty")).toBe(true);
+    expect(isEligibilityMatchOp("empty")).toBe(false);
   });
 });

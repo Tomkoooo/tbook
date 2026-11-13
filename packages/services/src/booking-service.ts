@@ -64,6 +64,7 @@ import {
   newRegistrationNumber,
   releaseBookingExtensions,
   resolveFieldChoices,
+  storableFieldSchema,
   runRegistrationReservers,
 } from "./registration-pipeline";
 
@@ -576,7 +577,7 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
       },
       billing: input.billing ?? null,
       checkoutReturnBaseUrl: input.returnBaseUrl?.trim() || null,
-      attendeeFieldSchema: fieldSchema,
+      attendeeFieldSchema: storableFieldSchema(fieldSchema, registrationFieldSchema),
       teamMemberFieldSchema,
       teamMemberLimit: event.teamMemberLimit ?? null,
       playersPerTicket,

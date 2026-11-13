@@ -49,7 +49,12 @@ const CONDITION_OPS = [
   { value: "in", label: "is one of" },
   { value: "not_in", label: "is none of" },
   { value: "contains", label: "contains" },
+  { value: "is_empty", label: "is empty (not answered)" },
+  { value: "is_not_empty", label: "is answered (any value)" },
 ];
+
+/** Conditions that need no value. */
+const VALUELESS_OPS = new Set(["is_empty", "is_not_empty"]);
 
 export interface EmailFormValues {
   name: string;
@@ -289,7 +294,7 @@ function ConditionEditor({
               </NativeSelect>
             </FormField>
             <FormField label="Condition" htmlFor={`cond-${index}-op`}>
-              <NativeSelect id={`cond-${index}-op`} value={row.op} onChange={(e) => patch(index, { op: e.target.value })}>
+              <NativeSelect id={`cond-${index}-op`} value={row.op} onChange={(e) => patch(index, VALUELESS_OPS.has(e.target.value) ? { op: e.target.value, value: "" } : { op: e.target.value })}>
                 {CONDITION_OPS.map((op) => (
                   <option key={op.value} value={op.value}>
                     {op.label}
@@ -298,7 +303,9 @@ function ConditionEditor({
               </NativeSelect>
             </FormField>
             <FormField label="Value" htmlFor={`cond-${index}-value`}>
-              {field && field.choices.length > 0 && (row.op === "equals" || row.op === "not_equals") ? (
+              {VALUELESS_OPS.has(row.op) ? (
+                <Input id={`cond-${index}-value`} value="" disabled placeholder="—" aria-label="No value needed" />
+              ) : field && field.choices.length > 0 && (row.op === "equals" || row.op === "not_equals") ? (
                 <NativeSelect id={`cond-${index}-value`} value={row.value} onChange={(e) => patch(index, { value: e.target.value })}>
                   <option value="">Choose…</option>
                   {field.choices.map((choice) => (

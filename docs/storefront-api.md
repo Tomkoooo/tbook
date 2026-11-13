@@ -143,9 +143,18 @@ a valid preview key the header is ignored (a normal request). With it:
 - **Promotion:** when a place frees up (guest or console cancel, expired checkout), the first entry that fits moves up. Auto mode (free events): registered at once; they get the "Bekerültél" email and the event's normal confirmation with the QR code. If their chosen bus has filled up meanwhile they are registered with `busz = "waitlist"` (see below) and the email says so. Offer mode: an email link holds the place for `offerHours`.
 - **Cancellation email:** with module `guest-portal` on, a cancelled guest (by themselves or by an organizer) gets a short confirmation email (settings `cancelSubject` / `cancelMessage`).
 
+### Two bus states: no buses yet / bus booking open
+
+The organizer switches between them on the console's Buses page; the site reads the state from `GET /events/{eventId}` and needs no change of its own:
+
+- **No active bus yet** ("bus booking not open"): the bus question (`choicesSource: "bus-transport:routes"`) comes with `required: false`, `choices: []` and `fieldChoiceDetails.busz: []` — no buses and no `"waitlist"` option. Guests answer only the transfer question; an empty bus answer is valid (booking, preview, test booking, `/waitlist/join`, `/guest/update`). A `"waitlist"` (or any other) bus answer is refused with 400 `validation_error`, like any answer not offered. Hide the bus question when `choices` is empty.
+- **At least one active bus**: as before — the bus question is `required` (when shown), its choices are the buses plus `"waitlist"`. Guests registered earlier with "transfer: yes" add their bus to the same registration with `POST /guest/update` (`fields: { busz: "<routeId>" }`): registration number, QR code and ticket stay. While the bus question is required, a guest who wants a transfer must pick a bus (or `"waitlist"`) with their next change; the other guests of a group are not held to it.
+- `{{bus.transfer}}` in emails: "Foglalt" (bus booked), "Várólistán (értesítünk)" (bus waitlist), "Igényelt (járat még nincs kiválasztva)" (bus question shown, i.e. transfer wanted, but no bus yet), otherwise "Nem igényelt".
+- Emails: after a change (`/guest/update` or an organizer edit) an automatic email goes to that guest again only if they match its conditions now **and** a question its conditions look at changed, or their email address changed (an email without conditions: only on an address change). Picking a bus, or switching bus, therefore sends the bus email (conditions e.g. `busz is_not_empty` and `busz not_equals "waitlist"`), not the general confirmation.
+
 ### Bus waitlist ("értesítést kérek")
 
-A select fed by the bus module (`choicesSource: "bus-transport:routes"`) always accepts the value `"waitlist"`, listed last in both `attendeeFieldSchema[].choices` and `fieldChoiceDetails`:
+While at least one bus is active, a select fed by the bus module (`choicesSource: "bus-transport:routes"`) always accepts the value `"waitlist"`, listed last in both `attendeeFieldSchema[].choices` and `fieldChoiceDetails`:
 
 ```json
 { "value": "waitlist", "label": "Nincs szabad hely – értesítést kérek, ha felszabadul", "remaining": null, "disabled": false, "meta": { "waitlist": true } }
@@ -180,7 +189,7 @@ Rate-limited per client. The lookup returns `{ guest }`:
 - `busWaitlist`: `{ position }` (1 = next) when the guest asked to be notified about a bus seat, otherwise `null`;
 - `canEdit`, `canCancel`.
 
-An update is checked like a registration (required answers, rules, unique ID, bus seats). The guest's automatic confirmation email is sent again. In a group registration, cancel removes only that guest; the record is kept and listed as cancelled.
+An update is checked like a registration (required answers, rules, unique ID, bus seats). Automatic emails are sent again only where the change matters: the guest matches the email's conditions now and a question those conditions look at changed, or the guest's email address changed (see "Two bus states" above). In a group registration, cancel removes only that guest; the record is kept and listed as cancelled.
 
 ### Quote and booking body
 

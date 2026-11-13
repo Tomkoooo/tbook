@@ -40,7 +40,11 @@ const RULE_OPS: Array<{ value: string; label: string; hint: string }> = [
   { value: "max_age", label: "gives age at most", hint: "For a date-of-birth question" },
   { value: "in_list", label: "is on the list", hint: "Checked against an uploaded data list" },
   { value: "not_in_list", label: "is not on the list", hint: "Checked against an uploaded data list" },
+  { value: "is_empty", label: "is empty", hint: "Not answered (no value needed)" },
+  { value: "is_not_empty", label: "is answered", hint: "Any answer (no value needed)" },
 ];
+
+const VALUELESS_OPS = new Set(["is_empty", "is_not_empty"]);
 
 const GENDERS = [
   { value: "female", label: "Women" },
@@ -126,7 +130,7 @@ export function EligibilityEditor({
                 <FieldSelect id={`${rule.uid}-field`} value={rule.fieldKey} onChange={(fieldKey) => setRule(rule.uid, { fieldKey })} fields={fields} required />
               </FormField>
               <FormField label="Condition" htmlFor={`${rule.uid}-op`}>
-                <NativeSelect id={`${rule.uid}-op`} value={rule.op} onChange={(e) => setRule(rule.uid, { op: e.target.value })}>
+                <NativeSelect id={`${rule.uid}-op`} value={rule.op} onChange={(e) => setRule(rule.uid, VALUELESS_OPS.has(e.target.value) ? { op: e.target.value, value: "" } : { op: e.target.value })}>
                   {RULE_OPS.map((op) => (
                     <option key={op.value} value={op.value}>
                       {op.label}
@@ -135,7 +139,9 @@ export function EligibilityEditor({
                 </NativeSelect>
               </FormField>
               <FormField label="Value" htmlFor={`${rule.uid}-value`} hint={RULE_OPS.find((op) => op.value === rule.op)?.hint}>
-                {rule.op === "in_list" || rule.op === "not_in_list" ? (
+                {VALUELESS_OPS.has(rule.op) ? (
+                  <Input id={`${rule.uid}-value`} value="" disabled placeholder="—" />
+                ) : rule.op === "in_list" || rule.op === "not_in_list" ? (
                   <NativeSelect id={`${rule.uid}-value`} value={rule.value} onChange={(e) => setRule(rule.uid, { value: e.target.value })}>
                     <option value="">Choose a list…</option>
                     {dataLists.map((list) => (

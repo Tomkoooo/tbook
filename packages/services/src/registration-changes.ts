@@ -5,7 +5,7 @@ import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee, BookingChan
 import { cancelBooking } from "./booking-service";
 import { attendeeIssuesMessage, eligibilityIssuesMessage, normalizeAttendeePayload, validateAttendees } from "./booking-validation";
 import { loadDataListMembership } from "./data-list-service";
-import type { EventContext } from "./extensions";
+import { extensions, type EventContext } from "./extensions";
 import { resolveModules } from "./module-registry";
 import { refreshVoucherNames } from "./registration-admin-service";
 import { claimUniqueFieldValues, releaseHooksOnly, resolveFieldChoices, runRegistrationReservers } from "./registration-pipeline";
@@ -109,11 +109,21 @@ export async function replaceBookingAttendees(bookingId: string, incoming: Booki
   const memberSchema = (booking.teamMemberFieldSchema ?? []).map((f) => plain(f) as AttendeeFieldDef);
   const previous = (booking.attendees ?? []).map((attendee) => plain(attendee) as BookingAttendee);
 
-  const issues = validateAttendees(schema, booking.guests, incoming, memberSchema.length > 0 ? "team" : "person", {
+  const allIssues = validateAttendees(schema, booking.guests, incoming, memberSchema.length > 0 ? "team" : "person", {
     teamMemberFieldSchema: memberSchema,
     teamMemberLimit: booking.teamMemberLimit ?? null,
     playersPerTicket: (booking.playersPerTicket ?? 1) > 1 ? booking.playersPerTicket : null,
   });
+  // A guest whose answers this edit leaves as they were isn't held to what
+  // the form asks now (e.g. the bus that became required once buses opened,
+  // while another guest of the group picks theirs).
+  const normalizedIncoming = allIssues.length > 0 ? normalizeAttendeePayload(schema, incoming, memberSchema) : [];
+  const untouched = (index: number) => {
+    const before = previous[index];
+    const after = normalizedIncoming[index];
+    return Boolean(before && after) && diffAttendee(schema, memberSchema, before!, after!).length === 0;
+  };
+  const issues = allIssues.filter((issue) => issue.index < 0 || !untouched(issue.index));
   if (issues.length > 0) throw ActionError.validation(attendeeIssuesMessage(issues, schema), { issues });
 
   const next = normalizeAttendeePayload(schema, incoming, memberSchema).map((attendee, index) => {
@@ -148,6 +158,16 @@ export async function replaceBookingAttendees(bookingId: string, incoming: Booki
     { returnDocument: "after" },
   ).exec();
   if (opts.refreshVouchers !== false) await refreshVoucherNames(bookingId, updated!);
+  // Modules react to the change of a confirmed registration (e.g. emails whose conditions now match).
+  if (ACTIVE_STATUSES.has(booking.status)) {
+    for (const hook of extensions.attendeesEditedHooks()) {
+      try {
+        await hook(booking, updated!);
+      } catch (error) {
+        console.error("[tbook] attendees edited hook failed", bookingId, error);
+      }
+    }
+  }
   return updated!;
 }
 

@@ -18,20 +18,34 @@ export type EligibilityPreset = "none" | "custom" | "form_rules";
 /** Still present on some stored events (see @tbook/schemas event.ts) — resolved into `custom` at runtime. */
 export type LegacyEligibilityPreset = "under18" | "under18_female" | "women";
 
-export type EligibilityMatchOp =
-  | "equals"
-  | "not_equals"
-  | "contains"
-  | "regex"
-  | "min"
-  | "max"
-  | "min_age"
-  | "max_age"
-  | "in"
-  | "not_in"
+export const ELIGIBILITY_MATCH_OPS = [
+  "equals",
+  "not_equals",
+  "contains",
+  "regex",
+  "min",
+  "max",
+  "min_age",
+  "max_age",
+  "in",
+  "not_in",
   /** The answer is a key in a data list; `value` is the list's id. */
-  | "in_list"
-  | "not_in_list";
+  "in_list",
+  "not_in_list",
+  /** No answer (empty, or the question was hidden); `value` is ignored. */
+  "is_empty",
+  /** Any answer; `value` is ignored. */
+  "is_not_empty",
+] as const;
+
+export type EligibilityMatchOp = (typeof ELIGIBILITY_MATCH_OPS)[number];
+
+/** Ops that compare nothing: the rule's `value` is ignored (and may be left empty). */
+export const VALUELESS_MATCH_OPS: readonly EligibilityMatchOp[] = ["is_empty", "is_not_empty"];
+
+export function isEligibilityMatchOp(op: unknown): op is EligibilityMatchOp {
+  return typeof op === "string" && (ELIGIBILITY_MATCH_OPS as readonly string[]).includes(op);
+}
 
 /**
  * Answers "is this value a key of that data list?" for the `in_list` ops.
@@ -334,6 +348,10 @@ function evaluateFormRule(
       return Boolean(asString) && Boolean(listMembership?.(expected.trim(), asString));
     case "not_in_list":
       return !asString || !listMembership?.(expected.trim(), asString);
+    case "is_empty":
+      return asString === "";
+    case "is_not_empty":
+      return asString !== "";
     default:
       return true;
   }

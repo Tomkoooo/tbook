@@ -46,6 +46,13 @@ export interface ChoiceProvider {
   /** Shown in the form builder's "choices come from" picker. */
   label: string;
   list(ctx: EventContext): Promise<DynamicChoice[]>;
+  /**
+   * When `list` yields no choices at all (nothing is offered yet, e.g. no
+   * active buses), a question fed by this provider may be left empty even if
+   * it is marked required: guests can still register and answer later.
+   * With at least one choice (even a disabled one) `required` applies as set.
+   */
+  optionalWhenEmpty?: boolean;
 }
 
 /**
@@ -89,6 +96,13 @@ export type IdentifierHolder = (ctx: EventContext, values: Array<{ fieldKey: str
 export type BookingReleaseReason = "cancelled" | "expired" | "attendee_cancelled" | "edited";
 export type BookingReleasedHook = (booking: IBooking, reason: BookingReleaseReason) => Promise<void>;
 
+/**
+ * A confirmed registration's answers were changed (by the guest or an
+ * organizer). `before` is the booking as it was, `after` as saved; the
+ * attendees keep their positions and ids.
+ */
+export type AttendeesEditedHook = (before: IBooking, after: IBooking) => Promise<void>;
+
 /** A booking was confirmed and its vouchers exist (paid, comped, or free registration). */
 export type BookingConfirmedHook = (booking: IBooking) => Promise<void>;
 
@@ -117,6 +131,7 @@ interface ExtensionState {
   checkoutBypasses: Map<string, CheckoutBypass>;
   attendeePlaceholders: Map<string, AttendeePlaceholderProvider>;
   identifierHolders: Map<string, IdentifierHolder>;
+  attendeesEdited: Map<string, AttendeesEditedHook>;
 }
 
 const STATE_KEY = Symbol.for("tbook.extensions");
@@ -133,10 +148,12 @@ function state(): ExtensionState {
       checkoutBypasses: new Map(),
       attendeePlaceholders: new Map(),
       identifierHolders: new Map(),
+      attendeesEdited: new Map(),
     };
   }
   // A registry created by an older bundle may lack newer maps.
   holder[STATE_KEY]!.identifierHolders ??= new Map();
+  holder[STATE_KEY]!.attendeesEdited ??= new Map();
   return holder[STATE_KEY]!;
 }
 
@@ -164,6 +181,12 @@ export const extensions = {
   },
   registerAttendeePlaceholders(provider: AttendeePlaceholderProvider): void {
     state().attendeePlaceholders.set(provider.moduleKey, provider);
+  },
+  onAttendeesEdited(key: string, hook: AttendeesEditedHook): void {
+    state().attendeesEdited.set(key, hook);
+  },
+  attendeesEditedHooks(): AttendeesEditedHook[] {
+    return [...state().attendeesEdited.values()];
   },
   registerIdentifierHolder(key: string, holder: IdentifierHolder): void {
     state().identifierHolders.set(key, holder);

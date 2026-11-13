@@ -2,7 +2,7 @@ import QRCode from "qrcode";
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
 import { dataListRepository, eventRepository, organizationRepository, voucherRepository, type IBooking, type IEvent } from "@tbook/db";
-import { matchesRuleConfig, normalizeListKey, type EligibilityRulesConfig } from "@tbook/domain";
+import { ELIGIBILITY_MATCH_OPS, isEligibilityMatchOp, matchesRuleConfig, normalizeListKey, type EligibilityRulesConfig } from "@tbook/domain";
 import type { AttendeeFieldDef } from "@tbook/schemas";
 import {
   extensions,
@@ -86,6 +86,10 @@ async function cleanInput(organizationId: string, input: EventEmailInput) {
     listId = list._id as Types.ObjectId;
   }
   const conditions = input.conditions && input.conditions.rules.length > 0 ? input.conditions : null;
+  // An unknown op would match everyone (the engine lets it pass): refuse it instead.
+  for (const rule of conditions?.rules ?? []) {
+    if (!isEligibilityMatchOp(rule.op)) throw ActionError.validation(`Unknown condition "${String(rule.op)}" (use one of: ${ELIGIBILITY_MATCH_OPS.join(", ")}).`);
+  }
   return {
     name: input.name.trim(),
     subject: input.subject.trim(),
@@ -514,9 +518,49 @@ export async function resendAutomaticEmails(organizationId: string, booking: IBo
   await sendAutomaticEmailsForBooking(booking, transporter);
 }
 
+/** The question keys an email's conditions look at. */
+function conditionFieldKeys(email: IEventEmail): Set<string> {
+  const rules = (email.conditions as EligibilityRulesConfig | null)?.rules ?? [];
+  return new Set(rules.map((rule) => String(rule.fieldKey ?? "").trim()).filter(Boolean));
+}
 
-/** Re-sends one attendee's automatic emails (after they changed their registration). */
-export async function resendAutomaticEmailsForAttendee(booking: IBooking, attendeeKey: string, transporter?: MailTransporter): Promise<void> {
-  await EmailDeliveryModel.deleteMany({ bookingId: booking._id, recipientKey: attendeeKey, mode: "auto" }).exec();
-  await sendAutomaticEmailsForBooking(booking, transporter, attendeeKey);
+function changedFieldKeys(before: EventAttendee | undefined, after: EventAttendee): Set<string> {
+  const previous = before?.fields ?? {};
+  const keys = new Set([...Object.keys(previous), ...Object.keys(after.fields)]);
+  return new Set([...keys].filter((key) => String(previous[key] ?? "") !== String(after.fields[key] ?? "")));
+}
+
+/**
+ * After a confirmed registration was edited (by the guest or an
+ * organizer): an automatic email goes (again) to an attendee only when the
+ * attendee matches its conditions now AND either a question its conditions
+ * look at changed, or the attendee's email address changed. An email
+ * without conditions goes again only on an address change. So picking a
+ * bus later (or switching bus A → B) sends the bus email, not the general
+ * confirmation; other attendees of the booking get nothing.
+ */
+export async function sendAutomaticEmailsAfterEdit(before: IBooking, after: IBooking, transporter?: MailTransporter): Promise<void> {
+  const event = await eventRepository.findById(String(after.eventId));
+  if (!event) return;
+  const ctx = await renderContextFor(event);
+  if (!ctx.extensionCtx.modules.isOn(EVENT_EMAILS)) return;
+  const emails = (await listEventEmails(String(event._id))).filter((email) => email.trigger === "on_registration" && email.active);
+  if (emails.length === 0) return;
+  const previous = toEventAttendees(before);
+  for (const row of toEventAttendees(after)) {
+    const old = previous.find((candidate) => candidate.attendeeKey === row.attendeeKey) ?? previous[row.index];
+    const changed = changedFieldKeys(old, row);
+    const addressChanged = !old || attendeeEmailAddress(old).trim().toLowerCase() !== attendeeEmailAddress(row).trim().toLowerCase();
+    if (changed.size === 0 && !addressChanged) continue;
+    for (const email of emails) {
+      if (!matchesConditions(email, row)) continue;
+      const relevant = addressChanged || [...conditionFieldKeys(email)].some((key) => changed.has(key));
+      if (!relevant) continue;
+      try {
+        await deliver(email, await attendeeMessage(email, ctx, row), "auto", transporter);
+      } catch (error) {
+        console.error("[tbook] automatic event email after an edit failed", String(email._id), row.attendeeKey, error);
+      }
+    }
+  }
 }

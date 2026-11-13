@@ -164,7 +164,7 @@ describe("configured free registration with ID list, bus seats and event emails"
     expect(confirmations).toHaveLength(2);
     expect(confirmations[0]?.html).toContain("Szia Elek!");
     expect(confirmations[0]?.html).toContain(booking?.attendees[0]?.registrationNumber);
-    expect(confirmations[0]?.html).toContain("Transzfer: Igényelt");
+    expect(confirmations[0]?.html).toContain("Transzfer: Foglalt");
     expect(confirmations[0]?.html).toContain('src="cid:registration-qr"');
     expect(confirmations[0]?.attachments?.some((a) => a.cid === "registration-qr")).toBe(true);
     expect(confirmations[1]?.html).toContain("Szia Márta!");

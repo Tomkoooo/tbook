@@ -6,7 +6,6 @@ import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbo
 import { BUS_TRANSPORT } from "../bus-transport";
 import { formatDeparture, routeForAttendee } from "../bus-transport/service";
 import { busWaitlistPosition } from "../bus-transport/waitlist";
-import { EVENT_EMAILS, resendAutomaticEmailsForAttendee } from "../event-emails/service";
 import { attendeeKeyOf, findAttendeeByCode, toEventAttendees } from "../shared/attendees";
 import { eventSiteUrl, fillTemplate, sendModuleMail } from "../shared/mail";
 
@@ -195,13 +194,8 @@ export async function updateGuest(eventId: string, code: string, input: Record<s
     by: "guest",
     lockedKeys: view.form.filter((field) => !field.editable).map((field) => field.key),
   });
-  const { ctx } = await bookingEventContext(updated);
-  if (ctx.modules.isOn(EVENT_EMAILS) && JSON.stringify(updated.attendees?.[found.attendeeIndex]?.fields) !== JSON.stringify(found.booking.attendees?.[found.attendeeIndex]?.fields)) {
-    const attendee = updated.attendees![found.attendeeIndex] as BookingAttendee;
-    await resendAutomaticEmailsForAttendee(updated, attendeeKeyOf(updated, attendee, found.attendeeIndex)).catch((error) =>
-      console.error("[tbook] guest edit: re-sending confirmation failed", String(updated._id), error),
-    );
-  }
+  // Automatic emails after the change (e.g. the bus email once a bus is picked) are sent by the
+  // event-emails module's edit hook, the same for guest and organizer edits.
   return guestView({ ...found, booking: updated });
 }
 

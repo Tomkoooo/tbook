@@ -1,5 +1,5 @@
 import { extensions, registerModule } from "@tbook/services";
-import { EVENT_EMAILS, hasAutomaticConfirmation, sendAutomaticEmailsForBooking } from "./service";
+import { EVENT_EMAILS, hasAutomaticConfirmation, sendAutomaticEmailsAfterEdit, sendAutomaticEmailsForBooking } from "./service";
 
 /**
  * Event emails: per-event templates with placeholders (attendee answers,
@@ -33,6 +33,8 @@ export function registerEventEmailsModule(): void {
   });
 
   extensions.onBookingConfirmed(EVENT_EMAILS, (booking) => sendAutomaticEmailsForBooking(booking));
+  // A guest or organizer edit: only emails whose conditions now match and look at a changed answer (or a new address).
+  extensions.onAttendeesEdited(EVENT_EMAILS, (before, after) => sendAutomaticEmailsAfterEdit(before, after));
   extensions.registerBookingEmailSuppressor(EVENT_EMAILS, (booking) => hasAutomaticConfirmation(booking));
 }
 

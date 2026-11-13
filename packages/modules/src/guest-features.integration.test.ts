@@ -207,7 +207,8 @@ describe("guest features", () => {
     const stored = (await BookingModel.findById(bookingId))!.attendees[1]!;
     expect(stored.fields.employee_id).toBe("1002");
     expect(stored.fields.email).toBe("1002@example.com");
-    expect(sent.map((m) => m.subject)).toEqual(["Visszaigazolás"]);
+    // An unconditional confirmation isn't sent again for a changed answer (only for a new address).
+    expect(sent.map((m) => m.subject)).toEqual([]);
 
     // Dropping the transfer frees the bus seat.
     await updateGuest(eventId, "1001", { transfer: "nem" }, groupId);

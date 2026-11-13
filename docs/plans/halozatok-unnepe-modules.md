@@ -149,7 +149,7 @@ tBook already has both halves:
 - **Form builder**: attendee field defs (`attendeeFieldDefSchema`), edited in `registration-fields-editor.tsx`, with
   group-level defaults and event-level extend/replace (`resolveEventAttendeeFieldSchema`). Per-field type checks live in
   `booking-validation.ts` (`validateAttendees`).
-- **Rule engine**: `eligibility.ts` (`validateEligibility`, ops `equals/not_equals/in/not_in/contains/regex/min/max/min_age/max_age`,
+- **Rule engine**: `eligibility.ts` (`validateEligibility`, ops `equals/not_equals/in/not_in/contains/regex/min/max/min_age/max_age` (+ `in_list/not_in_list/is_empty/is_not_empty` since),
   `and`/`or`), edited in `rules-editor.tsx`, stored as `event.eligibilityFormRules`, reported as `form_rules_failed` with
   the organizer's own message per rule.
 
@@ -311,3 +311,13 @@ Still open: bus route data (none received), site/survey/gallery URLs and the tra
 - Hidden from live: guest/waitlist/survey endpoints find test records only with the preview key; console statistics, reports, exports, check-in lists, passenger lists, manual/“not registered” email audiences and the public entry list exclude them; bookings list and waitlist page show a TESZT badge.
 - Cleanup: `tbook-cli booking purge-test --org eventstructure --event <id>` (dry run; `--apply --prod-ack --confirm PURGE`, restore point under `backups/cli/`).
 - Tests: `apps/web/src/app/api/v1/test-bookings.integration.test.ts`.
+
+### 2026-11-13: two bus states (no buses yet / bus booking open)
+
+- **Switch = the Buses page**: no active bus → state 1 "bus booking not open yet"; activate (or import) at least one bus → state 2. No development, no special-casing of the event.
+- **State 1**: the bus question (`choicesSource: "bus-transport:routes"`) offers no choices at all (not even `"waitlist"`) and is not required, even if marked required and shown (booking, preview, test booking, waitlist join, guest/organizer edit). Mechanism: the bus choice provider sets `optionalWhenEmpty`; `resolveFieldChoices` relaxes `required` when a provider yields nothing. A `"waitlist"` answer is refused (400 `validation_error`) like any answer not offered. Bookings still store the organizer's `required`.
+- **State 2**: unchanged — the bus is required when shown, choices = buses + `"waitlist"`. State-1 guests add a bus with `POST /guest/update` (same registration number, QR, ticket). An edit only re-checks the guests it changes, so one guest of a group can pick a bus before the others. A waitlist entry from state 1 promoted in state 2 goes on the bus waitlist (`busz = "waitlist"`); a `"waitlist"` answer promoted while no bus is active is dropped.
+- **`{{bus.transfer}}`**: "Foglalt" (bus booked) / "Várólistán (értesítünk)" / "Igényelt (járat még nincs kiválasztva)" (bus question shown, no bus) / "Nem igényelt".
+- **Emails after an edit** (guest or organizer, via the `onAttendeesEdited` hook): an `on_registration` email goes again to that guest only if they match its conditions now and a question its conditions reference changed, or the guest's address changed; an email without conditions only on an address change. Picking or switching a bus sends the bus email, not the general confirmation. The console's "resend confirmation" still re-sends everything.
+- **Condition ops** `is_empty` / `is_not_empty` (no value) in the rule engine, email conditions and registration rules editors. Bus booked: `busz is_not_empty` AND `busz not_equals "waitlist"`; transfer wanted, no bus yet: `transzfer equals "igen"` AND `busz is_empty`. Unknown ops in email conditions are refused (they used to match everyone).
+- Tests: `apps/web/src/app/api/v1/bus-two-state.integration.test.ts`, `packages/domain/src/eligibility.test.ts`.

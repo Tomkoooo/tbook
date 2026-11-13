@@ -35,9 +35,26 @@ export async function resolveFieldChoices(schema: AttendeeFieldDef[], ctx: Event
     const provider = extensions.choiceProvider(field.choicesSource);
     const choices = provider && ctx.modules.isOn(provider.moduleKey) ? await provider.list(ctx) : [];
     details[field.key] = choices;
-    resolved.push({ ...field, choices: choices.filter((choice) => !choice.disabled).map((choice) => ({ value: choice.value, label: choice.label })) });
+    // Nothing offered yet (e.g. no active buses): the question may be left empty for now.
+    const optional = Boolean(provider?.optionalWhenEmpty) && choices.length === 0;
+    resolved.push({
+      ...field,
+      ...(optional ? { required: false } : {}),
+      choices: choices.filter((choice) => !choice.disabled).map((choice) => ({ value: choice.value, label: choice.label })),
+    });
   }
   return { schema: resolved, details };
+}
+
+/**
+ * The resolved form as stored on a booking: live choices kept, but each
+ * question's `required` as the organizer set it (a question that was
+ * optional only because nothing was offered yet is required again once
+ * choices exist, e.g. on a later edit).
+ */
+export function storableFieldSchema(resolved: AttendeeFieldDef[], original: AttendeeFieldDef[]): AttendeeFieldDef[] {
+  const required = new Map(original.map((field) => [field.key, Boolean(field.required)]));
+  return resolved.map((field) => (required.has(field.key) ? { ...field, required: required.get(field.key)! } : field));
 }
 
 interface UniqueClaim {

@@ -3,7 +3,8 @@ import ExcelJS from "exceljs";
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
 import { BookingModel, type IBooking } from "@tbook/db";
-import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
+import { isFieldVisible } from "@tbook/domain";
+import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
 import { ACTIVE_BOOKING_STATUSES, toEventAttendees, type EventAttendee } from "../shared/attendees";
 import { BusBoardingModel, BusRouteModel, type BoardingStatus, type BusLeg, type IBusRoute } from "./model";
 import { notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
@@ -385,6 +386,18 @@ export async function findRouteByCaptainToken(token: string): Promise<IBusRoute 
 export function attendeeOnBusWaitlist(booking: Pick<IBooking, "attendees" | "attendeeFieldSchema">, attendeeIndex: number): boolean {
   const attendee = ((booking.attendees ?? []) as BookingAttendee[])[attendeeIndex];
   return busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[]).some((field) => isBusWaitlistValue(attendee?.fields?.[field.key]));
+}
+
+/**
+ * True when the attendee's bus question is shown (e.g. they asked for a
+ * transfer) but holds no bus and no waitlist answer: transfer wanted, bus
+ * not chosen yet (typically registered before bus booking opened).
+ * Callers check for a booked route first.
+ */
+export function attendeeAwaitsBus(booking: Pick<IBooking, "attendees" | "attendeeFieldSchema">, attendeeIndex: number): boolean {
+  const attendee = ((booking.attendees ?? []) as BookingAttendee[])[attendeeIndex];
+  const fields = (attendee?.fields ?? {}) as Record<string, AttendeeFieldValue>;
+  return busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[]).some((field) => isFieldVisible(field, fields) && !isBusWaitlistValue(fields[field.key]));
 }
 
 export async function routeForAttendee(booking: IBooking, attendeeIndex: number): Promise<IBusRoute | null> {

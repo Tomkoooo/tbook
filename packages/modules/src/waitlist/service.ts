@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
 import { eventRepository, type IEvent } from "@tbook/db";
-import { normalizeUniqueValue } from "@tbook/domain";
+import { isFieldVisible, normalizeUniqueValue } from "@tbook/domain";
 import {
   checkRegistrationAnswers,
   createBookingWithCheckout,
@@ -371,20 +371,41 @@ function bookingInput(entry: IWaitlistEntry, attendees = entry.attendees as Book
   };
 }
 
-/** The stored answers with every bus that can't seat them now replaced by the bus waitlist. */
-async function withFullBusesWaitlisted(event: IEvent, attendees: BookingAttendee[]): Promise<BookingAttendee[]> {
+/**
+ * The stored answers fitted to the buses as they are now: every bus that
+ * can't seat them is replaced by the bus waitlist (`fallback`). The answer
+ * may also date from the other bus state: a bus left empty while no bus was
+ * offered goes on the bus waitlist once buses exist (the guest is told when
+ * a seat frees up and picks one), and a bus waitlist answer is dropped while
+ * no bus is offered (there is nothing to wait for).
+ */
+async function withFullBusesWaitlisted(event: IEvent, attendees: BookingAttendee[]): Promise<{ attendees: BookingAttendee[]; fallback: boolean }> {
   const schema = (event.attendeeFieldSchema ?? []) as AttendeeFieldDef[];
   const fields = busRouteFields(schema);
+  if (fields.length === 0) return { attendees, fallback: false };
+  const busesOffered = Boolean(await BusRouteModel.exists({ eventId: event._id, active: true }).exec());
   const full = new Set<string>();
   for (const [routeId, count] of seatsByRoute(attendees, schema)) {
     const route = Types.ObjectId.isValid(routeId) ? await BusRouteModel.findOne({ _id: routeId, eventId: event._id }).lean().exec() : null;
     if (!route || !route.active || route.seatsTaken + count > route.capacity) full.add(routeId);
   }
-  return attendees.map((attendee) => {
+  let fallback = false;
+  const fitted = attendees.map((attendee) => {
     const answers = { ...(attendee.fields ?? {}) };
-    for (const field of fields) if (full.has(String(answers[field.key] ?? ""))) answers[field.key] = BUS_WAITLIST_VALUE;
+    for (const field of fields) {
+      const value = String(answers[field.key] ?? "");
+      if (full.has(value)) {
+        answers[field.key] = BUS_WAITLIST_VALUE;
+        fallback = true;
+      } else if (!busesOffered && value === BUS_WAITLIST_VALUE) {
+        delete answers[field.key];
+      } else if (busesOffered && !value && isFieldVisible(field, answers)) {
+        answers[field.key] = BUS_WAITLIST_VALUE;
+      }
+    }
     return { ...attendee, fields: answers };
   });
+  return { attendees: fitted, fallback };
 }
 
 /**
@@ -395,13 +416,12 @@ async function registerEntry(entry: IWaitlistEntry, event: IEvent, opts: { allow
   const stored = entry.attendees as BookingAttendee[];
   const attempt = async () => {
     // A full bus is no longer a live choice: move those answers to the bus waitlist first.
-    const attendees = await withFullBusesWaitlisted(event, stored);
-    const busFallback = JSON.stringify(attendees) !== JSON.stringify(stored);
+    const { attendees, fallback: busFallback } = await withFullBusesWaitlisted(event, stored);
     // A test entry becomes a test booking (no capacity, test ID namespace, "[TESZT] " emails).
     const result = entry.isTest
       ? await createTestBookingWithCheckout(bookingInput(entry, attendees))
       : await createBookingWithCheckout(bookingInput(entry, attendees), { allowClosedSales: true, ...opts });
-    if (busFallback) await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { attendees } }).exec();
+    if (JSON.stringify(attendees) !== JSON.stringify(stored)) await WaitlistEntryModel.updateOne({ _id: entry._id }, { $set: { attendees } }).exec();
     return { result, busFallback };
   };
   try {
