@@ -109,12 +109,12 @@ describe("tbook-cli setup apply", () => {
     expect(modules["event-emails"]?.config?.siteUrl).toBe("https://halozatokunnepe2026.hu");
 
     const emails = await eventEmails.listEventEmails(String(event?._id));
-    expect(emails).toHaveLength(12);
-    expect(emails.filter((e) => e.trigger === "on_registration")).toHaveLength(3);
+    expect(emails).toHaveLength(11);
+    expect(emails.filter((e) => e.trigger === "on_registration")).toHaveLength(2);
     // System emails (R1–R4): one per module message this event sends.
     const system = emails.filter((e) => eventEmails.isSystemEmailTrigger(e.trigger));
-    expect(system.map((e) => e.trigger).sort()).toEqual(["booking_cancelled", "bus_seat_freed", "waitlist_joined", "waitlist_registered"]);
-    expect(system.every((e) => e.name.startsWith("R") && e.active && e.audience === "registered")).toBe(true);
+    expect(system.map((e) => e.trigger).sort()).toEqual(["booking_cancelled", "bus_captain_notice", "bus_seat_freed", "waitlist_joined", "waitlist_registered"]);
+    expect(system.filter((e) => e.trigger !== "bus_captain_notice").every((e) => e.name.startsWith("R") && e.active && e.audience === "registered")).toBe(true);
     expect(emails.find((e) => e.audience === "list_unregistered")?.listId?.toString()).toBe(String(list?._id));
 
     const attendee = (id: string) => ({

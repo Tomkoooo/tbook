@@ -36,8 +36,8 @@
     "address": "BOK Csarnok, Budapest",
     "startDate": "2026-12-04",
     "endDate": "2026-12-05",
-    "startTime": "18:00",
-    "endTime": "01:00",
+    "startTime": "17:00",
+    "endTime": "02:00",
     "salesOpensAt": "2026-11-16T00:00:00+01:00",
     "salesClosesAt": "2026-11-24T16:00:00+01:00",
     "currency": "HUF",
@@ -227,7 +227,10 @@
       }
     },
     "guest-portal": {
-      "enabled": true
+      "enabled": true,
+      "config": {
+        "showContactUnmasked": true
+      }
     },
     "waitlist": {
       "enabled": true,
@@ -243,7 +246,7 @@
     {
       "name": "1. Regisztráció megnyitása (nov. 16.)",
       "subject": "MVM Hálózatok Ünnepe 2026 – Elindult a regisztráció!",
-      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán!<br><a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során jelezheted transzferigényedet és esetleges ételérzékenységedet is.</p><p>A konkrét buszjáratokra történő helyfoglalás még nem érhető el. Amint megnyitjuk a buszregisztrációt, e-mailben értesítünk mindenkit, aki transzfert igényelt.</p><p>Várunk szeretettel!</p>",
+      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán!<br><a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során kiválaszthatod a számodra megfelelő buszjáratot, amennyiben transzfert igényelsz, valamint jelezheted esetleges ételérzékenységedet is.</p><p>Várunk szeretettel!</p>",
       "trigger": "manual",
       "audience": "list_all",
       "listId": "$list:dso",
@@ -254,7 +257,7 @@
     {
       "name": "2. Regisztrációs emlékeztető (nov. 20.)",
       "subject": "Ne maradj le az MVM Hálózatok Ünnepéről!",
-      "body": "<h3>Még nem regisztráltál az MVM Hálózatok Ünnepére?</h3><p>December 4-én a BOK Csarnokban találkozunk, ahol díjátadóval, vacsorával, szórakoztató programokkal és Wellhello-koncerttel készülünk.</p><p>Ha szeretnél velünk ünnepelni, jelentkezz az esemény weboldalán!<br>Regisztráció: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során transzferigényedet is jelezheted. A konkrét buszjáratok kiválasztásáról a transzfert igénylőket a buszregisztráció megnyitásakor külön e-mailben tájékoztatjuk.</p><p>A férőhelyek száma korlátozott.</p><p>Találkozunk decemberben!</p>",
+      "body": "<h3>Még nem regisztráltál az MVM Hálózatok Ünnepére?</h3><p>December 4-én a BOK Csarnokban találkozunk, ahol díjátadóval, vacsorával, szórakoztató programokkal és Wellhello-koncerttel készülünk.</p><p>Ha szeretnél velünk ünnepelni, jelentkezz az esemény weboldalán!<br>Regisztráció: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során a számodra megfelelő buszjáratot is kiválaszthatod.</p><p>A férőhelyek száma korlátozott.</p><p>Találkozunk decemberben!</p>",
       "trigger": "manual",
       "audience": "list_unregistered",
       "listId": "$list:dso",
@@ -266,7 +269,7 @@
     {
       "name": "3. Regisztráció-visszaigazolás (automatikus)",
       "subject": "Sikeres regisztráció – MVM Hálózatok Ünnepe 2026",
-      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen regisztráltál az MVM Hálózatok Ünnepére!</p><p><strong>Az esemény részletei:</strong><br>Dátum: 2026. december 4.<br>Időpont: 18:00–01:00<br>Helyszín: BOK Csarnok, Budapest</p><p><strong>Program:</strong></p><ul><li>Vezetői köszöntők és díjátadó</li><li>Ünnepi vacsora</li><li>Wellhello-koncert</li><li>DJ és kiegészítő programok</li></ul><p><strong>A regisztrációd adatai:</strong><br>Név: {{fullName}}<br>Munkáltató: {{field.munkaltato}}<br>Regisztrációs azonosító: {{registrationNumber}}<br>Transzferigény: {{field.transzfer}}</p><p><strong>A belépéshez szükséges QR-kód:</strong></p>{{qrCode}}<p>Kérünk, hogy a QR-kódodat őrizd meg, és érkezéskor mutasd be a regisztrációnál.</p><p><strong>Ha transzfert igényeltél:</strong><br>A transzferigényedet rögzítettük, azonban a konkrét buszjáratokra történő helyfoglalás még nem nyílt meg. Amint elérhetővé válik a buszregisztráció, e-mailben értesítünk, és kiválaszthatod a számodra megfelelő járatot.</p><p>A részletes programot és a további tudnivalókat az esemény weboldalán találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Várunk szeretettel!</p>",
+      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen regisztráltál az MVM Hálózatok Ünnepére!</p><p><strong>Az esemény részletei:</strong><br>Dátum: 2026. december 4.<br>Időpont: 18:00–02:00<br>Érkezés: 17:00–18:00<br>Helyszín: BOK Csarnok, Budapest</p><p><strong>Program:</strong></p><ul><li>Vezetői köszöntők és díjátadó</li><li>Ünnepi vacsora</li><li>Wellhello-koncert</li><li>DJ és kiegészítő programok</li></ul><p><strong>A regisztrációd adatai:</strong><br>Név: {{fullName}}<br>Munkáltató: {{field.munkaltato}}<br>Regisztrációs azonosító: {{registrationNumber}}<br>Transzfer: {{bus.transfer}}</p><p><strong>A belépéshez szükséges QR-kód:</strong></p>{{qrCode}}<p>Kérünk, hogy a QR-kódodat őrizd meg, és érkezéskor mutasd be a regisztrációnál.</p><p>Amennyiben transzfert foglaltál, annak részleteiről külön visszaigazoló e-mailt küldünk.</p><p>A részletes programot és a további tudnivalókat az esemény weboldalán találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Várunk szeretettel!</p>",
       "trigger": "on_registration",
       "audience": "registered",
       "attachTicket": false,
@@ -274,19 +277,9 @@
       "sortOrder": 3
     },
     {
-      "name": "3b. Regisztráció-visszaigazolás – buszregisztráció megnyitása után",
-      "subject": "Sikeres regisztráció – MVM Hálózatok Ünnepe 2026",
-      "trigger": "on_registration",
-      "audience": "registered",
-      "attachTicket": false,
-      "active": false,
-      "sortOrder": 3,
-      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen regisztráltál az MVM Hálózatok Ünnepére!</p><p><strong>Az esemény részletei:</strong><br>Dátum: 2026. december 4.<br>Időpont: 18:00–01:00<br>Helyszín: BOK Csarnok, Budapest</p><p><strong>Program:</strong></p><ul><li>Vezetői köszöntők és díjátadó</li><li>Ünnepi vacsora</li><li>Wellhello-koncert</li><li>DJ és kiegészítő programok</li></ul><p><strong>A regisztrációd adatai:</strong><br>Név: {{fullName}}<br>Munkáltató: {{field.munkaltato}}<br>Regisztrációs azonosító: {{registrationNumber}}<br>Transzfer: {{bus.transfer}}</p><p><strong>A belépéshez szükséges QR-kód:</strong></p>{{qrCode}}<p>Kérünk, hogy a QR-kódodat őrizd meg, és érkezéskor mutasd be a regisztrációnál.</p><p>Amennyiben transzfert foglaltál, annak részleteiről külön visszaigazoló e-mailt küldünk.</p><p>A részletes programot és a további tudnivalókat az esemény weboldalán találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Várunk szeretettel!</p>"
-    },
-    {
       "name": "4. Buszfoglalás-visszaigazolás (automatikus, csak transzferrel)",
       "subject": "Buszfoglalás visszaigazolása – MVM Hálózatok Ünnepe",
-      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen lefoglaltad a helyed az MVM Hálózatok Ünnepére induló transzferen!</p><p><strong>A buszfoglalásod részletei:</strong><br>Indulási város: {{bus.city}}<br>Felszállási hely: {{bus.pickupPoint}}<br>Busz / járat azonosítója: {{bus.code}}<br>Indulási időpont: {{bus.departure}}<br>Visszaindulás: 00:00–02:00 között, a buszon utazó csoport igényeihez igazodva<br>Buszkapitány neve: {{bus.captainName}}<br>Buszkapitány telefonszáma: {{bus.captainPhone}}</p><p><strong>Fontos tudnivalók a transzferről:</strong></p><ul><li>Kérünk, hogy a tervezett indulás előtt legalább 15 perccel érkezz meg a felszállási helyre.</li><li>Amennyiben változás történik az utazásoddal kapcsolatban, vagy késnél, minden esetben közvetlenül a buszkapitányodat értesítsd a fenti telefonszámon.</li><li>A busz a tervezett indulási időponthoz képest legfeljebb 15 percet vár, előzetes jelzés esetén is. Ezt követően a járat elindul.</li><li>A hazautazás pontos időpontját a buszon utazó csoport igényei alapján, a buszkapitány koordinálásával határozzuk meg 00:00 és 02:00 között.</li><li>A véglegesített visszaindulási időponthoz képest szintén legfeljebb 15 perc várakozás lehetséges, jelzés esetén is.</li></ul><p>A rendezvény részletes programját és további tudnivalóit itt találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Találkozunk az MVM Hálózatok Ünnepén!</p>",
+      "body": "<p>Szia {{firstName}}!</p><p>Sikeresen lefoglaltad a helyed az MVM Hálózatok Ünnepére induló transzferen!</p><p><strong>A buszfoglalásod részletei:</strong><br>Indulási város: {{bus.city}}<br>Felszállási hely: {{bus.pickupPoint}}<br>Busz / járat azonosítója: {{bus.code}}<br>Indulási időpont: {{bus.departure}}<br>Visszaindulás: 11:00–02:00 között, a buszon utazó csoport igényeihez igazodva<br>{{bus.captainInfo}}</p><p><strong>Fontos tudnivalók a transzferről:</strong></p><ul><li>Kérünk, hogy a tervezett indulás előtt legalább 15 perccel érkezz meg a felszállási helyre.</li><li>Amennyiben változás történik az utazásoddal kapcsolatban, vagy késnél, minden esetben közvetlenül a buszkapitányodat értesítsd a fenti telefonszámon.</li><li>A busz a tervezett indulási időponthoz képest legfeljebb 15 percet vár, előzetes jelzés esetén is. Ezt követően a járat elindul, ezért kérünk, hogy pontosan érkezz!</li><li>A hazautazás pontos időpontját a buszon utazó csoport igényei alapján, a buszkapitány koordinálásával határozzuk meg, 11:00 és 02:00 között. Kérünk, hogy a visszaindulással kapcsolatos egyeztetéseket is a buszkapitányoddal intézd.</li></ul><p>A rendezvény részletes programját és további tudnivalóit itt találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Találkozunk az MVM Hálózatok Ünnepén!</p>",
       "trigger": "on_registration",
       "audience": "registered",
       "conditions": {
@@ -313,53 +306,34 @@
       "sortOrder": 4
     },
     {
-      "name": "5. Rendezvény előtti emlékeztető",
+      "name": "5. Buszkapitány adatainak utólagos megküldése (járatonként)",
+      "trigger": "bus_captain_notice",
+      "audience": "registered",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 5,
+      "subject": "Transzferinformáció – Buszkapitányod elérhetősége | MVM Hálózatok Ünnepe 2026",
+      "body": "<p>Szia {{firstName}}!</p><p>Korábban már lefoglaltad a helyed az MVM Hálózatok Ünnepére induló transzferen. Mostanra kijelöltük a járatod buszkapitányát, akinek az elérhetőségét az alábbiakban találod.</p><p><strong>A buszfoglalásod adatai:</strong><br>Indulási város: {{bus.city}}<br>Felszállási hely: {{bus.pickupPoint}}<br>Busz / járat azonosítója: {{bus.code}}<br>Indulási időpont: {{bus.departure}}<br>Buszkapitány neve: {{bus.captainName}}<br>Buszkapitány telefonszáma: {{bus.captainPhone}}</p><p><strong>Fontos tudnivalók:</strong></p><ul><li>Amennyiben változás történik az utazásoddal kapcsolatban, vagy késnél, kérünk, minden esetben közvetlenül a buszkapitányodat értesítsd a fenti telefonszámon.</li><li>Kérünk, hogy a tervezett indulás előtt legalább 15 perccel érkezz meg a felszállási helyre.</li><li>A busz a tervezett indulási időponthoz képest legfeljebb 15 percet vár, előzetes jelzés esetén is.</li><li>A hazautazás pontos időpontját a buszon utazó csoport igényei alapján, a buszkapitány koordinálásával határozzuk meg, 11:00 és 02:00 között.</li></ul><p>A rendezvénnyel kapcsolatos további információkat itt találod: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Találkozunk december 4-én!</p>"
+    },
+    {
+      "name": "6. Rendezvény előtti emlékeztető",
+      "trigger": "manual",
+      "audience": "registered",
+      "attachTicket": false,
+      "active": true,
+      "sortOrder": 6,
       "subject": "Hamarosan találkozunk! – MVM Hálózatok Ünnepe 2026",
-      "body": "<p>Szia {{firstName}}!</p><p>Már csak néhány nap, és találkozunk az MVM Hálózatok Ünnepén!</p><p><strong>Dátum:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest<br><strong>Regisztrációs azonosítód:</strong> {{registrationNumber}}</p><p>A belépéshez szükséges QR-kódod:</p>{{qrCode}}<p>Az esemény részletes programját, a megközelítéssel kapcsolatos információkat és minden fontos tudnivalót megtalálsz a weboldalon: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Ha transzferrel érkezel, kérjük, ellenőrizd a buszfoglalásod adatait is a korábban kapott visszaigazolásban.</p><p>Várunk szeretettel!</p>",
-      "trigger": "manual",
-      "audience": "registered",
-      "attachTicket": false,
-      "active": true,
-      "sortOrder": 5
+      "body": "<p>Szia {{firstName}}!</p><p>Már csak néhány nap, és találkozunk az MVM Hálózatok Ünnepén!</p><p><strong>Dátum:</strong> 2026. december 4.<br><strong>Érkezés:</strong> 17:00–18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest<br><strong>Regisztrációs azonosítód:</strong> {{registrationNumber}}</p><p>A belépéshez szükséges QR-kódod:</p>{{qrCode}}<p>Az esemény részletes programját, a megközelítéssel kapcsolatos információkat és minden fontos tudnivalót megtalálsz a weboldalon: <a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Ha transzferrel érkezel, kérjük, ellenőrizd a buszfoglalásod adatait is a korábban kapott visszaigazolásban.</p><p>Várunk szeretettel!</p>"
     },
     {
-      "name": "6. Köszönő e-mail (rendezvény után)",
-      "subject": "Köszönjük, hogy velünk ünnepeltél!",
-      "body": "<p>Szia {{firstName}}!</p><p>Köszönjük, hogy velünk tartottál az MVM Hálózatok Ünnepén!</p><p>Reméljük, jól érezted magad, és sok szép élménnyel gazdagodtál az este során.</p><p>Kíváncsiak vagyunk a véleményedre, ezért kérünk, töltsd ki rövid elégedettségi kérdőívünket: <a href=\"{{surveyUrl}}\">{{surveyUrl}}</a></p><p>Az eseményen készült fotókat is megnézheted és letöltheted: <a href=\"{{galleryUrl}}\">{{galleryUrl}}</a></p><p>Köszönjük, hogy együtt ünnepelhettünk!</p>",
-      "trigger": "manual",
-      "audience": "registered",
-      "attachTicket": false,
-      "active": true,
-      "sortOrder": 6
-    },
-    {
-      "name": "7. Megnyílt a buszregisztráció (transzfert kértek, még nincs járatuk)",
-      "subject": "Megnyílt a buszregisztráció – Foglald le a helyed!",
+      "name": "7. Esemény utáni köszönő e-mail",
       "trigger": "manual",
       "audience": "registered",
       "attachTicket": false,
       "active": true,
       "sortOrder": 7,
-      "conditions": {
-        "logic": "and",
-        "rules": [
-          {
-            "id": "c1",
-            "fieldKey": "transzfer",
-            "op": "equals",
-            "value": "igen",
-            "message": ""
-          },
-          {
-            "id": "c2",
-            "fieldKey": "busz",
-            "op": "is_empty",
-            "value": "",
-            "message": ""
-          }
-        ]
-      },
-      "body": "<p>Szia {{firstName}}!</p><p>Megnyílt a buszregisztráció az MVM Hálózatok Ünnepére!</p><p>Korábban jelezted, hogy szeretnél szervezett transzferrel érkezni a rendezvényre. Mostantól kiválaszthatod a számodra megfelelő buszjáratot, és lefoglalhatod a helyed.</p><p>Buszfoglalás: <a href=\"{{siteUrl}}/fiokom.php\">{{siteUrl}}/fiokom.php</a><br>Belépés a „Saját regisztrációm” oldalon a törzsszámoddal ({{field.torzsszam}}) – újra regisztrálni nem kell.</p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A felületen megtalálod az indulási helyszíneket, időpontokat és a még elérhető férőhelyeket.</p><p>Fontos, hogy a korábban jelzett transzferigény önmagában nem jelent buszfoglalást, ezért kérünk, mindenképpen válassz járatot!</p><p>A sikeres foglalás után külön visszaigazoló e-mailt kapsz, amely tartalmazza a buszod adatait és a buszkapitányod elérhetőségét.</p><p>Találkozunk december 4-én!</p>"
+      "subject": "Köszönjük, hogy velünk ünnepeltél!",
+      "body": "<p>Szia {{firstName}}!</p><p>Köszönjük, hogy velünk tartottál az MVM Hálózatok Ünnepén!</p><p>Reméljük, jól érezted magad, és sok szép élménnyel gazdagodtál az este során.</p><p>Kíváncsiak vagyunk a véleményedre, ezért kérünk, töltsd ki rövid elégedettségi kérdőívünket: <a href=\"{{surveyUrl}}\">{{surveyUrl}}</a></p><p>Az eseményen készült fotókat is megnézheted és letöltheted: <a href=\"{{galleryUrl}}\">{{galleryUrl}}</a></p><p>Köszönjük, hogy együtt ünnepelhettünk!</p>"
     },
     {
       "name": "R1. Várólistára kerülés (automatikus)",
@@ -400,6 +374,372 @@
       "attachTicket": false,
       "active": true,
       "sortOrder": 104
+    }
+  ],
+  "busRoutes": [
+    {
+      "code": "B01",
+      "city": "Szombathely-Győr-Tatabánya",
+      "capacity": 50,
+      "active": true,
+      "sortOrder": 1,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:00. Kapitányjelölt: Mallár Bence (+36 20 747 4552) – nem vette fel",
+      "stops": [
+        {
+          "city": "Szombathely",
+          "pickupPoint": "9700 Szombathely, Rákóczi Ferenc utca 23",
+          "departureAt": "2026-12-04T13:30:00+01:00"
+        },
+        {
+          "city": "Győr",
+          "pickupPoint": "9027 Győr, Puskás Tivadar utca 37.",
+          "departureAt": "2026-12-04T15:00:00+01:00"
+        },
+        {
+          "city": "Tatabánya",
+          "pickupPoint": "2800 Tatabánya, Eötvös utca I I.",
+          "departureAt": "2026-12-04T16:00:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B02",
+      "city": "Baja",
+      "capacity": 49,
+      "active": true,
+      "sortOrder": 2,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Zeléné Berek Zsuzsanna (+36 70 443 6794) – nem vállalja",
+      "stops": [
+        {
+          "city": "Baja",
+          "pickupPoint": "6500 Baja, Bajcsy-Zsilinszky utca 6.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B03",
+      "city": "Gyöngyös",
+      "capacity": 20,
+      "active": true,
+      "sortOrder": 3,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "Bozsik Eszter",
+      "captainPhone": "+36 20 217 1459",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. ",
+      "stops": [
+        {
+          "city": "Gyöngyös",
+          "pickupPoint": "3200 Gyöngyös, Gyár utca 7.",
+          "departureAt": "2026-12-04T16:20:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B04",
+      "city": "Encs-Miskolc",
+      "capacity": 49,
+      "active": true,
+      "sortOrder": 4,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "Balogh Bence",
+      "captainPhone": "+36 20 776 8556",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:00. ",
+      "stops": [
+        {
+          "city": "Encs",
+          "pickupPoint": "Encs, Petőfi út 66, 3860 (Spar parkoló)",
+          "departureAt": "2026-12-04T14:20:00+01:00"
+        },
+        {
+          "city": "Miskolc",
+          "pickupPoint": "Miskolc, Dózsa György utca 13.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B05",
+      "city": "Kazincbarcika-Miskolc",
+      "capacity": 49,
+      "active": true,
+      "sortOrder": 5,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "Hegyi István",
+      "captainPhone": "+36 20 940 3325",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:15. ",
+      "stops": [
+        {
+          "city": "Kazincbarcika",
+          "pickupPoint": "3700 Kazincbarcika, Alkotmány utca 11.",
+          "departureAt": "2026-12-04T14:30:00+01:00"
+        },
+        {
+          "city": "Miskolc",
+          "pickupPoint": "Miskolc, Dózsa György utca 13.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B06",
+      "city": "Nagykőrös-Cegléd",
+      "capacity": 13,
+      "active": true,
+      "sortOrder": 6,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:15. Kapitányjelölt: Maász-Szabó Tünde Júlia (+36 20 254 1509) – nem vette fel",
+      "stops": [
+        {
+          "city": "Nagykőrös",
+          "pickupPoint": "2750 Nagykőrös, Kossuth utca 76.",
+          "departureAt": "2026-12-04T15:15:00+01:00"
+        },
+        {
+          "city": "Cegléd",
+          "pickupPoint": "2700 Cegléd, Kossuth Ferenc utca 63",
+          "departureAt": "2026-12-04T15:55:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B07",
+      "city": "Kiskunhalas",
+      "capacity": 23,
+      "active": true,
+      "sortOrder": 7,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:15. Kapitányjelölt: Lány Ádám (+36 70 443 6834) – nem vállalja",
+      "stops": [
+        {
+          "city": "Kiskunhalas",
+          "pickupPoint": "6400 Kiskunhalas, Mátyás tér 2.",
+          "departureAt": "2026-12-04T13:50:00+01:00"
+        },
+        {
+          "city": "Kiskörös",
+          "pickupPoint": "6200 Kiskörös, Petőfi utca 110.",
+          "departureAt": "2026-12-04T14:40:00+01:00"
+        },
+        {
+          "city": "Szabadszállás",
+          "pickupPoint": "6080 Szabadszállás, Dózsa György utca 10",
+          "departureAt": "2026-12-04T15:40:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B08",
+      "city": "Szentes",
+      "capacity": 23,
+      "active": true,
+      "sortOrder": 8,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "Tyityán Bendegúz",
+      "captainPhone": "+36 30 603 1070",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:00. ",
+      "stops": [
+        {
+          "city": "Szentes",
+          "pickupPoint": "6600 Szentes, Klauzál utca 24.",
+          "departureAt": "2026-12-04T14:45:00+01:00"
+        },
+        {
+          "city": "Kiskunfélegyháza",
+          "pickupPoint": "Kiskunfélegyháza, Tesco parkoló",
+          "departureAt": "2026-12-04T15:40:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B09",
+      "city": "Szeged 1",
+      "capacity": 49,
+      "active": true,
+      "sortOrder": 9,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Molnár Brigitta (+36 30 155 8741) – már nem dolgozik ott",
+      "stops": [
+        {
+          "city": "Szeged",
+          "pickupPoint": "6724 Szeged, Pulz utca 44.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B10",
+      "city": "Szeged 2",
+      "capacity": 49,
+      "active": true,
+      "sortOrder": 10,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Kotogán László (+36 30 635 4698) – nembiztos, hogy jön",
+      "stops": [
+        {
+          "city": "Szeged",
+          "pickupPoint": "6724 Szeged, Pulz utca 44.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B11",
+      "city": "Szeged 3",
+      "capacity": 49,
+      "active": true,
+      "sortOrder": 11,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Kicska-Kordás Erika (+36 70 384 6876) – idén nem jön",
+      "stops": [
+        {
+          "city": "Szeged",
+          "pickupPoint": "6724 Szeged, Pulz utca 44.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B12",
+      "city": "Szeged 4",
+      "capacity": 196,
+      "active": true,
+      "sortOrder": 12,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Pócsik Tímea (+36 20 452 9056) – már nem dolgozik ott, aki a helyére jött nem vállalja",
+      "stops": [
+        {
+          "city": "Szeged",
+          "pickupPoint": "6724 Szeged, Pulz utca 44.",
+          "departureAt": "2026-12-04T15:10:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B13",
+      "city": "Tiszaújváros",
+      "capacity": 8,
+      "active": true,
+      "sortOrder": 13,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:15. Kapitányjelölt: Hegedűs József Csaba (+36 20 405 7086) – nem vette fel",
+      "stops": [
+        {
+          "city": "Tiszaújváros",
+          "pickupPoint": "3580 Tiszaújváros, Szederkényi út 8.",
+          "departureAt": "2026-12-04T14:45:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B14",
+      "city": "Sárospatak",
+      "capacity": 8,
+      "active": true,
+      "sortOrder": 14,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:15. Kapitányjelölt: Noszály István (+36 20 940 3277) – még nemtudja, vissza szól",
+      "stops": [
+        {
+          "city": "Sárospatak",
+          "pickupPoint": "3950 Sárospatak, Bláthy Ottó utca 2.",
+          "departureAt": "2026-12-04T14:00:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B15",
+      "city": "Salgótarján",
+      "capacity": 8,
+      "active": true,
+      "sortOrder": 15,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "Stork Joachim Gábor",
+      "captainPhone": "+36 20 940 3460",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:15. ",
+      "stops": [
+        {
+          "city": "Salgótarján",
+          "pickupPoint": "3100 Salgótarján, Rákóczi út 54.",
+          "departureAt": "2026-12-04T14:45:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B16",
+      "city": "Sopron",
+      "capacity": 8,
+      "active": true,
+      "sortOrder": 16,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Kapitányjelölt: tavaly autóval jöttek (-) – ",
+      "stops": [
+        {
+          "city": "Sopron",
+          "pickupPoint": "9400 Sopron, Fuvaros utca 2.",
+          "departureAt": "2026-12-04T13:45:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B17",
+      "city": "Békéscsaba",
+      "capacity": 42,
+      "active": true,
+      "sortOrder": 17,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Bánáti Aliz (+36 20 344 6222) – Nem vallaja, Balogh Andrást kérdezzük meg helyette",
+      "stops": [
+        {
+          "city": "Békéscsaba",
+          "pickupPoint": "5600 Békéscsaba, Kétegyházi út 4.",
+          "departureAt": "2026-12-04T14:00:00+01:00"
+        }
+      ]
+    },
+    {
+      "code": "B18",
+      "city": "Kecskemét",
+      "capacity": 41,
+      "active": true,
+      "sortOrder": 18,
+      "returnInfo": "A hazaindulás pontos időpontját a buszkapitány egyezteti az utasokkal (legkésőbb 02:00).",
+      "captainName": "",
+      "captainPhone": "",
+      "notes": "Érkezés a BOK Csarnokhoz: 17:30. Kapitányjelölt: Bertus József (+36 30 466 1776) – ha nincs más elvállalja",
+      "stops": [
+        {
+          "city": "Kecskemét",
+          "pickupPoint": "6000 Kecskemét, Szultán utca 2-4.",
+          "departureAt": "2026-12-04T15:15:00+01:00"
+        }
+      ]
     }
   ]
 }
