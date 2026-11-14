@@ -15,6 +15,8 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["packages/**/*.integration.test.ts", "apps/**/*.integration.test.ts", "scripts/**/*.integration.test.ts"],
+    // Build output (apps/web/.next/standalone) contains copies of the tests.
+    exclude: ["**/node_modules/**", "**/.next/**"],
     testTimeout: 30_000,
     hookTimeout: 120_000,
     env: {
