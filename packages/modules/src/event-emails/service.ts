@@ -55,6 +55,29 @@ export function setEventEmailTransporter(transporter: MailTransporter | undefine
   defaultTransporter = transporter;
 }
 
+/**
+ * Called after an email reached an attendee (automatic, manual, system):
+ * modules record what the guest now knows (e.g. the bus captain's details).
+ * Not called for test sends to an organizer's address.
+ */
+export type AttendeeEmailDeliveredHook = (email: IEventEmail, row: EventAttendee) => Promise<void>;
+const deliveredHooks: AttendeeEmailDeliveredHook[] = [];
+export function onAttendeeEmailDelivered(hook: AttendeeEmailDeliveredHook): void {
+  if (!deliveredHooks.includes(hook)) deliveredHooks.push(hook);
+}
+
+async function deliveredToAttendee(email: IEventEmail, row: EventAttendee, ok: boolean): Promise<boolean> {
+  if (!ok) return ok;
+  for (const hook of deliveredHooks) {
+    try {
+      await hook(email, row);
+    } catch (error) {
+      console.error("[tbook] email delivered hook failed", String(email._id), row.attendeeKey, error);
+    }
+  }
+  return ok;
+}
+
 // ---- CRUD ------------------------------------------------------------------------
 
 export interface EventEmailInput {
@@ -379,7 +402,7 @@ export async function sendAutomaticEmailsForBooking(booking: IBooking, transport
       const already = await EmailDeliveryModel.exists({ emailId: email._id, recipientKey: row.attendeeKey, status: "sent" });
       if (already) continue;
       try {
-        await deliver(email, await attendeeMessage(email, ctx, row), "auto", transporter);
+        await deliveredToAttendee(email, row, await deliver(email, await attendeeMessage(email, ctx, row), "auto", transporter));
       } catch (error) {
         console.error("[tbook] automatic event email failed", String(email._id), row.attendeeKey, error);
       }
@@ -442,10 +465,10 @@ async function runSend(email: IEventEmail, opts: StartSendOptions): Promise<void
   if (!event) throw new Error("Event not found");
   const ctx = await renderContextFor(event);
 
-  const builders: Array<{ key: string; build: () => Promise<OutgoingMessage> }> = [];
+  const builders: Array<{ key: string; build: () => Promise<OutgoingMessage>; row?: EventAttendee }> = [];
   if (email.audience === "registered") {
     for (const row of await listEventAttendees(String(event._id))) {
-      if (matchesConditions(email, row)) builders.push({ key: row.attendeeKey, build: () => attendeeMessage(email, ctx, row) });
+      if (matchesConditions(email, row)) builders.push({ key: row.attendeeKey, build: () => attendeeMessage(email, ctx, row), row });
     }
   } else {
     for (const recipient of await listRecipients(email, event)) {
@@ -465,6 +488,7 @@ async function runSend(email: IEventEmail, opts: StartSendOptions): Promise<void
       state.skipped += 1;
     } else {
       const ok = await deliver(email, await builder.build(), "manual", opts.transporter).catch(() => false);
+      if (builder.row) await deliveredToAttendee(email, builder.row, ok);
       if (ok) state.sent += 1;
       else state.failed += 1;
       if (SEND_DELAY_MS > 0 && !opts.transporter && !defaultTransporter) await new Promise((resolve) => setTimeout(resolve, SEND_DELAY_MS));
@@ -597,7 +621,7 @@ export async function sendAutomaticEmailsAfterEdit(before: IBooking, after: IBoo
       const relevant = addressChanged || [...conditionFieldKeys(email)].some((key) => changed.has(key));
       if (!relevant) continue;
       try {
-        await deliver(email, await attendeeMessage(email, ctx, row), "auto", transporter);
+        await deliveredToAttendee(email, row, await deliver(email, await attendeeMessage(email, ctx, row), "auto", transporter));
       } catch (error) {
         console.error("[tbook] automatic event email after an edit failed", String(email._id), row.attendeeKey, error);
       }
@@ -650,7 +674,7 @@ export async function sendSystemEmailToAttendee(
   // A cancelled guest's ticket is void: no ticket, no QR.
   const message = await attendeeMessage(plan.email, plan.ctx, row, extra, cancelled ? { subject: template.subject, body: template.body.replace(/\{\{\s*qrCode\s*\}\}/g, "") } : template);
   const outgoing = { ...message, attachments: cancelled ? [] : message.attachments };
-  return deliver(plan.email, opts.test ? { ...outgoing, test: true } : outgoing, "auto", opts.transporter);
+  return deliveredToAttendee(plan.email, row, await deliver(plan.email, opts.test ? { ...outgoing, test: true } : outgoing, "auto", opts.transporter));
 }
 
 export interface SystemEmailContact {

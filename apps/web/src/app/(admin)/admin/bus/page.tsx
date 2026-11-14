@@ -48,6 +48,10 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
   const eventId = String(event._id);
   const routes = await busTransport.listRoutes(eventId);
   const passengers = await Promise.all(routes.map((route) => busTransport.listPassengers(route)));
+  // Per bus: live passengers who haven't had its current captain's details (null = no captain name/phone yet).
+  const captainPending = canManage
+    ? await Promise.all(routes.map(async (route) => (busTransport.hasCaptain(route) ? (await busTransport.captainNoticeRecipients(route)).length : null)))
+    : routes.map(() => null);
   const waitlist = await busTransport.listBusWaitlist(eventId);
   const totals = routes.reduce((sum, route) => ({ seats: sum.seats + route.capacity, taken: sum.taken + route.seatsTaken }), { seats: 0, taken: 0 });
 
@@ -114,8 +118,21 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
                       ) : null}
                     </TableCell>
                     <TableCell>
-                      {route.pickupPoint || "—"}
-                      <div className="text-muted-foreground text-xs">{busTransport.formatDeparture(route.departureAt)}</div>
+                      {route.stops?.length ? (
+                        <ul className="grid gap-0.5">
+                          {busTransport.routeStops(route).map((stop, stopIndex) => (
+                            <li key={stopIndex} className="text-sm">
+                              {busTransport.stopShortLabel(stop)}
+                              <span className="text-muted-foreground text-xs"> · {list.filter((p) => p.stopIndex === stopIndex).length} booked</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <>
+                          {route.pickupPoint || "—"}
+                          <div className="text-muted-foreground text-xs">{busTransport.formatDeparture(route.departureAt)}</div>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {route.seatsTaken} / {route.capacity}
@@ -126,6 +143,7 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
                         {route.captainPhone}
                         {route.captainTokenHash ? ` · link …${route.captainTokenHint}` : " · no link"}
                       </div>
+                      {captainPending[index] ? <div className="text-xs text-amber-700 dark:text-amber-400">{captainPending[index]} not told yet</div> : null}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {out.boarded}/{out.booked}
@@ -138,6 +156,7 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
                         <BusRouteRowActions
                           eventId={eventId}
                           hasLink={Boolean(route.captainTokenHash)}
+                          captainNoticePending={captainPending[index] ?? null}
                           route={{
                             id: routeId,
                             code: route.code,
@@ -151,6 +170,7 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
                             notes: route.notes,
                             active: route.active,
                             sortOrder: route.sortOrder,
+                            stops: busTransport.routeStops(route).map((stop) => ({ city: stop.city, pickupPoint: stop.pickupPoint, departureAt: toDateTimeLocal(stop.departureAt) })),
                           }}
                         />
                       ) : null}

@@ -13,6 +13,8 @@ export interface PassengerRow {
   name: string;
   registrationNumber: string | null;
   phone: string;
+  /** Where they board on a multi-stop bus, e.g. "15:00 Győr – Szent István út" (empty for a single-stop bus). */
+  stop?: string;
   outbound: "boarded" | "not_boarded" | null;
   return: "boarded" | "not_boarded" | null;
 }
@@ -143,6 +145,7 @@ export function PassengerList({
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{row.name}</p>
                   <p className="text-muted-foreground flex flex-wrap items-center gap-x-3 text-xs">
+                    {row.stop ? <span>{row.stop}</span> : null}
                     {row.registrationNumber ? <span className="font-mono">{row.registrationNumber}</span> : null}
                     {row.phone ? (
                       <a href={`tel:${row.phone.replace(/\s+/g, "")}`} className="inline-flex items-center gap-1 hover:underline">

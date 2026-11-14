@@ -8,11 +8,12 @@ import mongoose, { Schema, type Document, type Model, Types } from "mongoose";
  *  - "manual": sent when an organizer presses Send (there is no scheduler:
  *    "Nov 20 reminder" means pressing Send on Nov 20);
  *  - a system trigger (see `systemEmailTriggers`): the event's own text for
- *    a message a module sends (waitlist, bus seat freed, cancellation). At
+ *    a message a module sends (waitlist, bus seat freed, bus captain
+ *    notice, cancellation). At
  *    most one per trigger and event; inactive = that message isn't sent at
  *    all; no template = the module's built-in text.
  */
-export const systemEmailTriggers = ["waitlist_joined", "waitlist_offer", "waitlist_registered", "bus_seat_freed", "booking_cancelled"] as const;
+export const systemEmailTriggers = ["waitlist_joined", "waitlist_offer", "waitlist_registered", "bus_seat_freed", "bus_captain_notice", "booking_cancelled"] as const;
 export type SystemEmailTrigger = (typeof systemEmailTriggers)[number];
 
 export const emailTriggers = ["on_registration", "manual", ...systemEmailTriggers] as const;

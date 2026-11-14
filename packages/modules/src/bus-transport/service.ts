@@ -5,8 +5,9 @@ import { ActionError } from "@tbook/actions";
 import { BookingModel, type IBooking } from "@tbook/db";
 import { isFieldVisible } from "@tbook/domain";
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
+import type { DynamicChoice } from "@tbook/services";
 import { ACTIVE_BOOKING_STATUSES, toEventAttendees, type EventAttendee } from "../shared/attendees";
-import { BusBoardingModel, BusRouteModel, type BoardingStatus, type BusLeg, type IBusRoute } from "./model";
+import { BusBoardingModel, BusRouteModel, type BoardingStatus, type BusLeg, type BusStop, type IBusRoute } from "./model";
 import { notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
 
 /** The `choicesSource` that turns a select field into "pick your bus". */
@@ -27,9 +28,111 @@ export function formatDeparture(date: Date | null | undefined): string {
   return new Intl.DateTimeFormat("hu-HU", { dateStyle: "long", timeStyle: "short", timeZone: TIME_ZONE }).format(date);
 }
 
-function formatTime(date: Date | null | undefined): string {
+export function formatTime(date: Date | null | undefined): string {
   if (!date) return "";
   return new Intl.DateTimeFormat("hu-HU", { timeStyle: "short", timeZone: TIME_ZONE }).format(date);
+}
+
+// ---- Stops -----------------------------------------------------------------------
+
+/** Between the route id and the stop index in a bus answer: "<routeId>~<stopIndex>". */
+export const BUS_STOP_SEPARATOR = "~";
+
+/**
+ * Reads a bus answer: "<routeId>" (a single-stop bus, or an answer given
+ * before the bus had stops) or "<routeId>~<stopIndex>". Null for an empty
+ * answer and the bus waitlist.
+ */
+export function parseBusValue(value: unknown): { routeId: string; stopIndex: number | null } | null {
+  const text = String(value ?? "").trim();
+  if (!text || isBusWaitlistValue(text)) return null;
+  const at = text.indexOf(BUS_STOP_SEPARATOR);
+  if (at < 0) return { routeId: text, stopIndex: null };
+  const index = text.slice(at + 1);
+  return { routeId: text.slice(0, at), stopIndex: /^\d{1,3}$/.test(index) ? Number(index) : null };
+}
+
+/** The answer for a bus (and a stop of a multi-stop bus). */
+export function busChoiceValue(routeId: string, stopIndex: number | null): string {
+  return stopIndex == null ? routeId : `${routeId}${BUS_STOP_SEPARATOR}${stopIndex}`;
+}
+
+/** Where a guest boards: a stop of the bus, or (single-stop bus, or no stop chosen) the bus's own pickup. */
+export interface EffectiveStop extends BusStop {
+  /** The stop's index, null for the route's own pickup. */
+  index: number | null;
+}
+
+export function routeStops(route: Pick<IBusRoute, "stops">): BusStop[] {
+  return ((route.stops ?? []) as BusStop[]).map((stop) => ({ city: stop.city, pickupPoint: stop.pickupPoint ?? "", departureAt: stop.departureAt ?? null }));
+}
+
+/**
+ * The pickup for a stop index. An answer without a (valid) stop on a
+ * multi-stop bus (given before the bus had stops) is the stop with the
+ * route's own pickup point and departure, else the route's own city /
+ * pickup point / departure — answers stay readable after stops are added.
+ */
+export function effectiveStop(route: Pick<IBusRoute, "stops" | "city" | "pickupPoint" | "departureAt">, stopIndex: number | null): EffectiveStop {
+  const stops = routeStops(route);
+  if (stopIndex != null && stops[stopIndex]) return { ...stops[stopIndex]!, index: stopIndex };
+  const own = stops.findIndex(
+    (stop) => (route.pickupPoint ?? "") !== "" && stop.pickupPoint === route.pickupPoint && (stop.departureAt?.getTime() ?? null) === (route.departureAt?.getTime() ?? null),
+  );
+  if (own >= 0) return { ...stops[own]!, index: own };
+  return { city: route.city, pickupPoint: route.pickupPoint ?? "", departureAt: route.departureAt ?? null, index: null };
+}
+
+/** A stop's choice label: "Győr – Szent István út, indulás 15:00 (Szombathely–Győr–Tatabánya, B07)". */
+export function stopLabel(route: Pick<IBusRoute, "city" | "code">, stop: BusStop): string {
+  const place = [stop.city, stop.pickupPoint].filter(Boolean).join(" – ");
+  const time = formatTime(stop.departureAt);
+  return `${place}${time ? `, indulás ${time}` : ""} (${[route.city, route.code].filter(Boolean).join(", ")})`;
+}
+
+/** Short pickup text for lists: "15:00 Győr – Szent István út". */
+export function stopShortLabel(stop: BusStop): string {
+  return [formatTime(stop.departureAt), [stop.city, stop.pickupPoint].filter(Boolean).join(" – ")].filter(Boolean).join(" ");
+}
+
+/** The choices of one route: one per stop (sharing the route's seats), or the route itself. */
+export function routeChoices(route: IBusRoute): DynamicChoice[] {
+  const remaining = Math.max(route.capacity - route.seatsTaken, 0);
+  const routeId = String(route._id);
+  const stops = routeStops(route);
+  const common = { code: route.code, routeName: route.city, returnInfo: route.returnInfo };
+  if (stops.length === 0) {
+    return [
+      {
+        value: routeId,
+        label: routeLabel(route),
+        remaining,
+        disabled: remaining <= 0,
+        // Display details only; the captain's phone goes to booked guests by email, not to the public.
+        meta: {
+          ...common,
+          city: route.city,
+          pickupPoint: route.pickupPoint,
+          departureAt: route.departureAt ? route.departureAt.toISOString() : null,
+          departure: formatDeparture(route.departureAt),
+        },
+      },
+    ];
+  }
+  return stops.map((stop, index) => ({
+    value: busChoiceValue(routeId, index),
+    label: stopLabel(route, stop),
+    remaining,
+    disabled: remaining <= 0,
+    meta: {
+      ...common,
+      stopIndex: index,
+      city: stop.city,
+      pickupPoint: stop.pickupPoint,
+      departureAt: stop.departureAt ? stop.departureAt.toISOString() : null,
+      departure: formatDeparture(stop.departureAt),
+    },
+  }));
 }
 
 /** The label a guest picks from: "Szeged – Mars tér (B03), 15:30". */
@@ -49,9 +152,10 @@ export function seatsByRoute(attendees: BookingAttendee[], schema: AttendeeField
   const fields = busRouteFields(schema);
   for (const attendee of attendees) {
     for (const field of fields) {
-      const value = attendee.fields?.[field.key];
-      if (value == null || value === "" || isBusWaitlistValue(value)) continue;
-      const routeId = String(value);
+      const parsed = parseBusValue(attendee.fields?.[field.key]);
+      if (!parsed) continue;
+      // Every stop of a bus takes a seat of the same bus.
+      const routeId = parsed.routeId;
       counts.set(routeId, (counts.get(routeId) ?? 0) + 1);
     }
   }
@@ -72,6 +176,8 @@ export interface BusRouteInput {
   notes?: string;
   active?: boolean;
   sortOrder?: number;
+  /** Pickup stops in order; empty = single-stop bus. Omitted on an update = keep the stored stops. */
+  stops?: Array<{ city: string; pickupPoint?: string; departureAt?: Date | null }>;
 }
 
 export function listRoutes(eventId: string): Promise<IBusRoute[]> {
@@ -90,7 +196,13 @@ function cleanInput(input: BusRouteInput) {
   if (!code) throw ActionError.validation("Give the bus an identifier (e.g. B01).");
   if (!city) throw ActionError.validation("Give the departure city.");
   if (!Number.isInteger(input.capacity) || input.capacity < 0) throw ActionError.validation("Seats must be a whole number.");
+  const stops = input.stops?.map((stop, index) => {
+    const stopCity = String(stop.city ?? "").trim();
+    if (!stopCity) throw ActionError.validation(`Stop ${index + 1}: give the city.`);
+    return { city: stopCity, pickupPoint: String(stop.pickupPoint ?? "").trim(), departureAt: stop.departureAt ?? null };
+  });
   return {
+    ...(stops ? { stops } : {}),
     code,
     city,
     pickupPoint: input.pickupPoint?.trim() ?? "",
@@ -119,6 +231,10 @@ export async function createRoute(organizationId: string, eventId: string, input
 export async function updateRoute(organizationId: string, routeId: string, input: BusRouteInput): Promise<IBusRoute> {
   const route = await getRouteForOrg(organizationId, routeId);
   const clean = cleanInput(input);
+  const before = routeStops(route).length;
+  if (clean.stops && before > 0 && clean.stops.length < before && (await stopsInUse(route)).some((index) => index >= clean.stops!.length)) {
+    throw ActionError.validation("Guests are booked on a stop you removed. Keep the stop (or move them) first.");
+  }
   if (clean.capacity < route.seatsTaken) {
     throw ActionError.validation(`${route.seatsTaken} seats are already booked on this bus; capacity can't go below that.`);
   }
@@ -132,6 +248,15 @@ export async function updateRoute(organizationId: string, routeId: string, input
     if ((error as { code?: number }).code === 11000) throw ActionError.validation(`A bus with identifier "${clean.code}" already exists for this event.`);
     throw error;
   }
+}
+
+/** Stop indexes live (non-cancelled) guests have chosen on a route. */
+async function stopsInUse(route: IBusRoute): Promise<number[]> {
+  const used = new Set<number>();
+  for (const row of await routeAttendees(route, { test: null, statuses: [...ACTIVE_BOOKING_STATUSES, "pending", "checkout_started"] })) {
+    if (row.stopIndex != null) used.add(row.stopIndex);
+  }
+  return [...used];
 }
 
 export async function deleteRoute(organizationId: string, routeId: string): Promise<void> {
@@ -260,6 +385,14 @@ export interface Passenger {
   registrationNumber: string | null;
   phone: string;
   email: string;
+  /** The chosen stop's index (null: single-stop bus, or no stop chosen yet). */
+  stopIndex: number | null;
+  /** Where they board, e.g. "15:00 Győr – Szent István út". */
+  stop: string;
+  stopCity: string;
+  stopPickupPoint: string;
+  /** "15:00". */
+  stopDeparture: string;
   outbound: BoardingStatus | null;
   return: BoardingStatus | null;
 }
@@ -276,19 +409,47 @@ function emailOf(row: EventAttendee): string {
   return String(own ?? row.booking.customer?.email ?? "");
 }
 
-/** Who is booked on a route, with each leg's boarding status. */
-export async function listPassengers(route: IBusRoute): Promise<Passenger[]> {
-  // Test bookings hold no seat and never appear on a captain's list.
-  const bookings = await BookingModel.find({ eventId: route.eventId, status: { $in: ACTIVE_BOOKING_STATUSES }, isTest: { $ne: true } }).sort({ createdAt: 1 }).exec();
+export interface RouteAttendee extends EventAttendee {
+  /** The chosen stop's index (null: single-stop bus, or no stop chosen). */
+  stopIndex: number | null;
+  stop: EffectiveStop;
+}
+
+/**
+ * The attendees whose bus answer is this route, with their stop. Live
+ * bookings by default; `test: true` only test bookings, `test: null` both.
+ */
+export async function routeAttendees(
+  route: IBusRoute,
+  opts: { test?: boolean | null; statuses?: readonly string[] } = {},
+): Promise<RouteAttendee[]> {
+  const test = opts.test === undefined ? false : opts.test;
+  const query: Record<string, unknown> = { eventId: route.eventId, status: { $in: opts.statuses ?? ACTIVE_BOOKING_STATUSES } };
+  if (test === true) query.isTest = true;
+  else if (test === false) query.isTest = { $ne: true };
+  const bookings = await BookingModel.find(query).sort({ createdAt: 1 }).exec();
   const routeId = String(route._id);
-  const rows: EventAttendee[] = [];
+  const rows: RouteAttendee[] = [];
   for (const booking of bookings) {
     const fields = busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[]);
     if (fields.length === 0) continue;
     for (const row of toEventAttendees(booking)) {
-      if (fields.some((field) => String(row.fields[field.key] ?? "") === routeId)) rows.push(row);
+      for (const field of fields) {
+        const parsed = parseBusValue(row.fields[field.key]);
+        if (parsed?.routeId !== routeId) continue;
+        const stop = effectiveStop(route, parsed.stopIndex);
+        rows.push({ ...row, stopIndex: stop.index, stop });
+        break;
+      }
     }
   }
+  return rows;
+}
+
+/** Who is booked on a route, with their stop and each leg's boarding status; ordered by stop, then name. */
+export async function listPassengers(route: IBusRoute): Promise<Passenger[]> {
+  // Test bookings hold no seat and never appear on a captain's list.
+  const rows = await routeAttendees(route);
   const boardings = await BusBoardingModel.find({ routeId: route._id }).lean().exec();
   const status = new Map(boardings.map((b) => [`${b.attendeeKey}\u0000${b.leg}`, b.status as BoardingStatus]));
   return rows
@@ -300,10 +461,15 @@ export async function listPassengers(route: IBusRoute): Promise<Passenger[]> {
       registrationNumber: row.registrationNumber,
       phone: phoneOf(row),
       email: emailOf(row),
+      stopIndex: row.stopIndex,
+      stop: stopShortLabel(row.stop),
+      stopCity: row.stop.city,
+      stopPickupPoint: row.stop.pickupPoint,
+      stopDeparture: formatTime(row.stop.departureAt),
       outbound: status.get(`${row.attendeeKey}\u0000outbound`) ?? null,
       return: status.get(`${row.attendeeKey}\u0000return`) ?? null,
     }))
-    .sort((a, b) => a.name.localeCompare(b.name, "hu"));
+    .sort((a, b) => (a.stopIndex ?? -1) - (b.stopIndex ?? -1) || a.name.localeCompare(b.name, "hu"));
 }
 
 export interface LegCounts {
@@ -400,16 +566,21 @@ export function attendeeAwaitsBus(booking: Pick<IBooking, "attendees" | "attende
   return busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[]).some((field) => isFieldVisible(field, fields) && !isBusWaitlistValue(fields[field.key]));
 }
 
-export async function routeForAttendee(booking: IBooking, attendeeIndex: number): Promise<IBusRoute | null> {
+/** The attendee's booked bus and the stop they board at; null without a bus. */
+export async function busForAttendee(booking: Pick<IBooking, "attendees" | "attendeeFieldSchema" | "eventId">, attendeeIndex: number): Promise<{ route: IBusRoute; stop: EffectiveStop } | null> {
   const attendee = ((booking.attendees ?? []) as BookingAttendee[])[attendeeIndex];
   for (const field of busRouteFields(booking.attendeeFieldSchema as AttendeeFieldDef[])) {
-    const value = attendee?.fields?.[field.key];
-    if (value && Types.ObjectId.isValid(String(value))) {
-      const route = await BusRouteModel.findOne({ _id: String(value), eventId: booking.eventId }).exec();
-      if (route) return route;
+    const parsed = parseBusValue(attendee?.fields?.[field.key]);
+    if (parsed && Types.ObjectId.isValid(parsed.routeId)) {
+      const route = await BusRouteModel.findOne({ _id: parsed.routeId, eventId: booking.eventId }).exec();
+      if (route) return { route, stop: effectiveStop(route, parsed.stopIndex) };
     }
   }
   return null;
+}
+
+export async function routeForAttendee(booking: IBooking, attendeeIndex: number): Promise<IBusRoute | null> {
+  return (await busForAttendee(booking, attendeeIndex))?.route ?? null;
 }
 
 // ---- Export ---------------------------------------------------------------------------
@@ -437,11 +608,12 @@ export async function exportPassengersXlsx(routes: IBusRoute[], waitlist?: BusWa
   ];
   for (const route of routes) {
     const passengers = await listPassengers(route);
+    const stops = routeStops(route);
     summary.addRow({
       code: route.code,
       city: route.city,
-      pickup: route.pickupPoint,
-      departure: formatDeparture(route.departureAt),
+      pickup: stops.length > 0 ? stops.map((stop) => stopShortLabel(stop)).join("; ") : route.pickupPoint,
+      departure: formatDeparture(stops[0]?.departureAt ?? route.departureAt),
       capacity: route.capacity,
       booked: passengers.length,
       outBoarded: legCounts(passengers, "outbound").boarded,
@@ -451,6 +623,8 @@ export async function exportPassengersXlsx(routes: IBusRoute[], waitlist?: BusWa
     });
     const sheet = workbook.addWorksheet(route.code.replace(/[\\/?*[\]:]/g, "-").slice(0, 31) || "Busz");
     sheet.columns = [
+      { header: "Felszállás", key: "stopTime", width: 10 },
+      { header: "Felszállási hely", key: "stop", width: 34 },
       { header: "Név", key: "name", width: 28 },
       { header: "Regisztrációs azonosító", key: "reg", width: 22 },
       { header: "Telefon", key: "phone", width: 16 },
@@ -460,6 +634,8 @@ export async function exportPassengersXlsx(routes: IBusRoute[], waitlist?: BusWa
     ];
     for (const passenger of passengers) {
       sheet.addRow({
+        stopTime: passenger.stopDeparture,
+        stop: [passenger.stopCity, passenger.stopPickupPoint].filter(Boolean).join(" – "),
         name: passenger.name,
         reg: passenger.registrationNumber ?? "",
         phone: passenger.phone,

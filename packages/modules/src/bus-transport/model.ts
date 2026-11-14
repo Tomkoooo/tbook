@@ -1,5 +1,15 @@
 import mongoose, { Schema, type Document, type Model, Types } from "mongoose";
 
+/**
+ * One pickup stop of a multi-stop bus (e.g. 13:30 Szombathely, 15:00 Győr,
+ * 16:00 Tatabánya). All stops of a bus share its seats.
+ */
+export interface BusStop {
+  city: string;
+  pickupPoint: string;
+  departureAt: Date | null;
+}
+
 /** One bus (route) to an event: where and when it leaves, how many seats, who the captain is. */
 export interface IBusRoute extends Document {
   organizationId: Types.ObjectId;
@@ -9,6 +19,13 @@ export interface IBusRoute extends Document {
   city: string;
   pickupPoint: string;
   departureAt: Date | null;
+  /**
+   * Pickup stops in order. Empty = a single-stop bus leaving from the
+   * route's own city / pickup point / departure. With stops, the route's
+   * `city` is the bus's name (e.g. "Szombathely–Győr–Tatabánya") and the
+   * guest picks a stop (choice value "<routeId>~<stop index>").
+   */
+  stops: BusStop[];
   /** Free text about the return trip (no fixed time: the captain coordinates it). */
   returnInfo: string;
   capacity: number;
@@ -34,6 +51,15 @@ const BusRouteSchema = new Schema<IBusRoute>(
     city: { type: String, required: true },
     pickupPoint: { type: String, default: "" },
     departureAt: { type: Date, default: null },
+    stops: {
+      type: [
+        new Schema<BusStop>(
+          { city: { type: String, required: true }, pickupPoint: { type: String, default: "" }, departureAt: { type: Date, default: null } },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
     returnInfo: { type: String, default: "" },
     capacity: { type: Number, required: true, min: 0 },
     seatsTaken: { type: Number, default: 0, min: 0 },
@@ -55,6 +81,45 @@ export const BusRouteModel: Model<IBusRoute> =
 
 export const busLegs = ["outbound", "return"] as const;
 export type BusLeg = (typeof busLegs)[number];
+/**
+ * "This guest has the captain's details": written when an email carrying
+ * the captain's name/phone reached them (a bus confirmation using
+ * {{bus.captainName}} / {{bus.captainInfo}}, or the "bus_captain_notice"
+ * email). Tied to the route and the captain (`captainKey`): a new captain
+ * or a different bus makes the guest "not informed" again. One row per
+ * attendee; test bookings' attendees have their own keys (`test` marks them).
+ */
+export interface IBusCaptainInform extends Document {
+  eventId: Types.ObjectId;
+  routeId: Types.ObjectId;
+  bookingId: Types.ObjectId;
+  attendeeKey: string;
+  /** "<captain name>|<captain phone>" as it was sent. */
+  captainKey: string;
+  test: boolean;
+  via: string;
+  informedAt: Date;
+}
+
+const BusCaptainInformSchema = new Schema<IBusCaptainInform>(
+  {
+    eventId: { type: Schema.Types.ObjectId, ref: "TBookEvent", required: true },
+    routeId: { type: Schema.Types.ObjectId, ref: "TBookBusRoute", required: true, index: true },
+    bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", required: true },
+    attendeeKey: { type: String, required: true },
+    captainKey: { type: String, required: true },
+    test: { type: Boolean, default: false },
+    via: { type: String, default: "" },
+    informedAt: { type: Date, required: true },
+  },
+  { timestamps: false },
+);
+BusCaptainInformSchema.index({ eventId: 1, attendeeKey: 1 }, { unique: true });
+
+export const BusCaptainInformModel: Model<IBusCaptainInform> =
+  mongoose.models.TBookBusCaptainInform ??
+  mongoose.model<IBusCaptainInform>("TBookBusCaptainInform", BusCaptainInformSchema, "tbookbuscaptaininforms");
+
 export const boardingStatuses = ["boarded", "not_boarded"] as const;
 export type BoardingStatus = (typeof boardingStatuses)[number];
 

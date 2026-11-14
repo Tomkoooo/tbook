@@ -180,7 +180,10 @@ export function cleanModuleConfig(key: string, raw: Record<string, unknown>): Re
   const definition = getModuleDefinition(key);
   const out: Record<string, string> = {};
   for (const field of definition?.configFields ?? []) {
-    const value = String(raw[field.key] ?? "").trim().slice(0, 500);
+    const given = raw[field.key];
+    // A yes/no select also takes a JSON boolean (e.g. from a setup plan).
+    const yesNo = typeof given === "boolean" && field.type === "select" && field.options?.some((o) => o.value === "yes") && field.options?.some((o) => o.value === "no");
+    const value = (yesNo ? (given ? "yes" : "no") : String(given ?? "")).trim().slice(0, 500);
     if (field.type === "url" && value && !/^https?:\/\//i.test(value)) throw ActionError.validation(`${field.label} must start with https://`);
     if (field.type === "select" && value && !field.options?.some((option) => option.value === value)) throw ActionError.validation(`Choose a valid ${field.label}.`);
     out[field.key] = value;

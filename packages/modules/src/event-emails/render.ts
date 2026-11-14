@@ -81,7 +81,10 @@ export function renderEventEmail(template: { subject: string; body: string }, va
   const usesQr = QR_TOKEN.test(template.body);
   QR_TOKEN.lastIndex = 0;
   const marker = "\u0000QR\u0000";
-  const body = fillBookingEmailPlaceholders(template.body.replace(QR_TOKEN, marker), values, "html");
+  // A multi-line value (e.g. {{bus.captainInfo}}: captain name, then phone) keeps its line breaks.
+  const lineBreak = "\u0000BR\u0000";
+  const htmlValues = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, typeof value === "string" ? value.replace(/\r?\n/g, lineBreak) : value]));
+  const body = fillBookingEmailPlaceholders(template.body.replace(QR_TOKEN, marker), htmlValues, "html").split(lineBreak).join("<br>");
   const qrTag = withQr
     ? `<img src="cid:${QR_CID}" alt="QR" width="220" height="220" style="display:block;width:220px;height:220px;margin:12px 0" />`
     : "";

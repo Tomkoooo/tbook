@@ -143,7 +143,7 @@ async function CaptainView(eventId: string, routeId: string | undefined, href: (
         </header>
         <PassengerList
           lang="hu"
-          passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, outbound: p.outbound, return: p.return }))}
+          passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, stop: route.stops?.length ? p.stop : "", outbound: p.outbound, return: p.return }))}
           onSet={previewNoSaveAction}
         />
       </div>

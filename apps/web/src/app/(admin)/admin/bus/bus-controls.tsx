@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Link2, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Unlink } from "lucide-react";
+import { Copy, Link2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Unlink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -16,6 +16,7 @@ import {
   revokeCaptainLinkAction,
   rotateCaptainLinkAction,
   saveBusRouteAction,
+  sendCaptainNoticeAction,
   type BusActionResult,
 } from "../bus-actions";
 
@@ -32,6 +33,45 @@ export interface BusRouteFormValues {
   notes: string;
   active: boolean;
   sortOrder: number;
+  /** Pickup stops; departureAt as a datetime-local value. */
+  stops: BusStopFormValues[];
+}
+
+export interface BusStopFormValues {
+  city: string;
+  pickupPoint: string;
+  departureAt: string;
+}
+
+/** Repeatable stop rows: a multi-stop bus whose stops share its seats. No rows = a single-stop bus. */
+function BusStopsEditor({ initial }: { initial: BusStopFormValues[] }) {
+  const [stops, setStops] = useState<Array<BusStopFormValues & { key: number }>>(() => initial.map((stop, index) => ({ ...stop, key: index })));
+  const add = () => setStops((current) => [...current, { city: "", pickupPoint: "", departureAt: "", key: Date.now() }]);
+  const remove = (key: number) => setStops((current) => current.filter((stop) => stop.key !== key));
+  return (
+    <fieldset className="grid gap-2 rounded-lg border p-3">
+      <legend className="px-1 text-sm font-medium">Stops</legend>
+      <p className="text-muted-foreground text-xs">
+        Optional. A bus with several pickup stops (e.g. 13:30 Szombathely, 15:00 Győr, 16:00 Tatabánya): guests pick a stop, all stops share the seats. Then
+        the City above is the bus&apos;s name. No stops = guests board at the pickup point above.
+      </p>
+      {stops.map((stop, index) => (
+        <div key={stop.key} className="grid items-end gap-2 sm:grid-cols-[1fr_1.4fr_1.2fr_auto]">
+          <Input name="stopCity" aria-label={`Stop ${index + 1} city`} placeholder="City" defaultValue={stop.city} required />
+          <Input name="stopPickupPoint" aria-label={`Stop ${index + 1} pickup point`} placeholder="Pickup point" defaultValue={stop.pickupPoint} />
+          <Input name="stopDepartureAt" aria-label={`Stop ${index + 1} departure`} type="datetime-local" defaultValue={stop.departureAt} />
+          <Button type="button" variant="ghost" size="icon" aria-label={`Remove stop ${index + 1}`} onClick={() => remove(stop.key)}>
+            <X />
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button type="button" variant="outline" size="sm" onClick={add}>
+          <Plus /> Add stop
+        </Button>
+      </div>
+    </fieldset>
+  );
 }
 
 export function BusEventPicker({ events, value }: { events: Array<{ id: string; name: string }>; value: string }) {
@@ -114,6 +154,7 @@ export function BusRouteDialog({
               <Input id="bus-capacity" name="capacity" type="number" min={1} defaultValue={route?.capacity ?? 50} required />
             </FormField>
           </div>
+          <BusStopsEditor initial={route?.stops ?? []} />
           <FormField label="Return trip" htmlFor="bus-return" hint="Shown in the bus email, e.g. “00:00–02:00, coordinated by the captain”.">
             <Input id="bus-return" name="returnInfo" defaultValue={route?.returnInfo} />
           </FormField>
@@ -146,9 +187,21 @@ export function BusRouteDialog({
   );
 }
 
-export function BusRouteRowActions({ eventId, route, hasLink }: { eventId: string; route: BusRouteFormValues; hasLink: boolean }) {
+export function BusRouteRowActions({
+  eventId,
+  route,
+  hasLink,
+  captainNoticePending,
+}: {
+  eventId: string;
+  route: BusRouteFormValues;
+  hasLink: boolean;
+  /** Passengers of this bus without its current captain's details (null: the bus has no captain name/phone). */
+  captainNoticePending: number | null;
+}) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   const [result, setResult] = useState<BusActionResult | null>(null);
   const [pending, startTransition] = useTransition();
   const run = (fn: () => Promise<BusActionResult>) => startTransition(async () => setResult(await fn()));
@@ -173,6 +226,10 @@ export function BusRouteRowActions({ eventId, route, hasLink }: { eventId: strin
               <Unlink /> Revoke captain link
             </DropdownMenuItem>
           ) : null}
+          <DropdownMenuItem disabled={!captainNoticePending} onSelect={() => setNoticeOpen(true)}>
+            <Mail /> Send captain details to passengers
+            {captainNoticePending == null ? " (no captain yet)" : ` (${captainNoticePending})`}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
             <Trash2 /> Delete
@@ -204,6 +261,35 @@ export function BusRouteRowActions({ eventId, route, hasLink }: { eventId: strin
               }
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={noticeOpen} onOpenChange={setNoticeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send captain details — bus {route.code}</DialogTitle>
+            <DialogDescription>
+              {captainNoticePending ?? 0} passengers of this bus haven&apos;t received the details of {route.captainName} ({route.captainPhone}) yet. They get the
+              “Bus: captain&apos;s details” email (Emails page) and are then marked informed. Test registrations are not included.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNoticeOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pending || !captainNoticePending}
+              onClick={() =>
+                startTransition(async () => {
+                  const outcome = await sendCaptainNoticeAction(route.id);
+                  setNoticeOpen(false);
+                  setResult(outcome);
+                })
+              }
+            >
+              <Mail /> Send to {captainNoticePending ?? 0}
             </Button>
           </DialogFooter>
         </DialogContent>

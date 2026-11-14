@@ -1,4 +1,5 @@
 import type { ResolvedModules } from "@tbook/services";
+import { BUS_CAPTAIN_NOTICE_DEFAULTS } from "./bus-transport/captain";
 import { BUS_WAITLIST_DEFAULTS, type BusWaitlistConfig } from "./bus-transport/waitlist";
 import type { SystemEmailTrigger } from "./event-emails/model";
 import { plainTextToTemplateHtml } from "./event-emails/system";
@@ -41,6 +42,9 @@ export function systemEmailDefault(trigger: SystemEmailTrigger, modules: Resolve
       const config = modules.config<BusWaitlistConfig>("bus-transport");
       return pick(config.busWaitlistSubject, config.busWaitlistMessage, BUS_WAITLIST_DEFAULTS.subject, BUS_WAITLIST_DEFAULTS.message);
     }
+    case "bus_captain_notice":
+      // No module settings text: only the built-in one.
+      return pick(undefined, undefined, BUS_CAPTAIN_NOTICE_DEFAULTS.subject, BUS_CAPTAIN_NOTICE_DEFAULTS.message);
     case "booking_cancelled": {
       const config = modules.config<GuestPortalConfig>("guest-portal");
       return pick(config.cancelSubject, config.cancelMessage, GUEST_PORTAL_DEFAULTS.cancelSubject, GUEST_PORTAL_DEFAULTS.cancelMessage);

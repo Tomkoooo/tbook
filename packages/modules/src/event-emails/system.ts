@@ -77,6 +77,16 @@ export const SYSTEM_EMAILS: SystemEmailInfo[] = [
     qr: false,
   },
   {
+    trigger: "bus_captain_notice",
+    label: "Bus: captain's details",
+    when: "Sent from the Buses page per bus (“Send captain details to passengers”): to the passengers of that bus who haven't received its current captain's name and phone yet. {{bus.captainInfo}} gives both.",
+    moduleKey: "bus-transport",
+    recipient: "attendee",
+    extra: [],
+    answers: true,
+    qr: false,
+  },
+  {
     trigger: "booking_cancelled",
     label: "Registration cancelled",
     when: "A guest's registration was cancelled — by the guest on the website or by an organizer. One per cancelled guest.",

@@ -123,7 +123,15 @@ export async function replaceBookingAttendees(bookingId: string, incoming: Booki
     const after = normalizedIncoming[index];
     return Boolean(before && after) && diffAttendee(schema, memberSchema, before!, after!).length === 0;
   };
-  const issues = allIssues.filter((issue) => issue.index < 0 || !untouched(issue.index));
+  // Nor to a module-fed option they already hold that is no longer offered as such (e.g. a bus answer
+  // given before the bus got stops), while they leave that answer as it was.
+  const keptModuleAnswer = (issue: (typeof allIssues)[number]) => {
+    if (issue.reason !== "field_invalid" || issue.memberIndex != null || !issue.fieldKey) return false;
+    if (!schema.find((field) => field.key === issue.fieldKey)?.choicesSource) return false;
+    const before = previous[issue.index]?.fields?.[issue.fieldKey];
+    return before != null && before !== "" && String(before) === String(incoming[issue.index]?.fields?.[issue.fieldKey] ?? "");
+  };
+  const issues = allIssues.filter((issue) => issue.index < 0 || (!untouched(issue.index) && !keptModuleAnswer(issue)));
   if (issues.length > 0) throw ActionError.validation(attendeeIssuesMessage(issues, schema), { issues });
 
   const next = normalizeAttendeePayload(schema, incoming, memberSchema).map((attendee, index) => {

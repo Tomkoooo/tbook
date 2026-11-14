@@ -4,7 +4,7 @@ import { isFieldVisible } from "@tbook/domain";
 import { bookingEventContext, cancelBookingAttendee, editBookingAttendee, editableFieldSchema, resolveModules } from "@tbook/services";
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
 import { BUS_TRANSPORT } from "../bus-transport";
-import { formatDeparture, routeForAttendee } from "../bus-transport/service";
+import { busForAttendee, formatDeparture } from "../bus-transport/service";
 import { busWaitlistPosition } from "../bus-transport/waitlist";
 import { attendeeKeyOf, findAttendeeByCode, toEventAttendees } from "../shared/attendees";
 import { sendSystemEmailToAttendee, systemEmailPlan } from "../event-emails/service";
@@ -17,7 +17,8 @@ export const GUEST_PORTAL = "guest-portal";
  * registration with their registration number or their identifying answer
  * (e.g. employee ID), sees its details (bus, captain, rules), changes
  * answers, or cancels. No login: the code is the key, so lookups are
- * rate-limited by the API, contact details are masked, and the
+ * rate-limited by the API, contact details are masked (unless the module
+ * setting `showContactUnmasked` is "yes"), and the
  * identifying answers themselves can't be changed here.
  */
 export interface GuestPortalConfig {
@@ -25,6 +26,8 @@ export interface GuestPortalConfig {
   allowCancel?: "yes" | "no";
   /** Comma-separated question keys guests may not change (identifying/unique ones never can). */
   lockedFields?: string;
+  /** "yes": the guest sees their own email and phone unmasked (`masked: false`). Default: masked. */
+  showContactUnmasked?: "yes" | "no";
   cancelSubject?: string;
   cancelMessage?: string;
 }
@@ -109,10 +112,15 @@ export interface GuestView {
   form: Array<AttendeeFieldDef & { editable: boolean; masked: boolean }>;
   bus: {
     code: string;
+    /** The guest's stop (multi-stop bus) or the bus's own pickup. */
     city: string;
     pickupPoint: string;
     departureAt: string | null;
     departure: string;
+    /** Added: the bus's name (its own city field), e.g. "Szombathely–Győr–Tatabánya". */
+    routeName: string;
+    /** Added: the chosen stop's index on a multi-stop bus, else null. */
+    stopIndex: number | null;
     returnInfo: string;
     captainName: string;
     captainPhone: string;
@@ -135,13 +143,16 @@ export async function guestView(found: Found): Promise<GuestView> {
   const row = toEventAttendees(booking)[attendeeIndex]!;
   const locked = new Set(lockedKeys(schema, config));
   const open = changesOpen(event);
+  const unmasked = ["yes", "true"].includes(String(config.showContactUnmasked ?? ""));
+  const masked = (field: AttendeeFieldDef) => !unmasked && isContactField(field);
   const fields: Record<string, AttendeeFieldValue> = {};
   for (const field of schema) {
     const value = attendee.fields?.[field.key];
     if (value == null) continue;
-    fields[field.key] = isContactField(field) ? (field.type === "email" || /mail/i.test(field.key) ? maskEmail(String(value)) : maskPhone(String(value))) : value;
+    fields[field.key] = masked(field) ? (field.type === "email" || /mail/i.test(field.key) ? maskEmail(String(value)) : maskPhone(String(value))) : value;
   }
-  const route = await routeForAttendee(booking, attendeeIndex);
+  const bus = await busForAttendee(booking, attendeeIndex);
+  const route = bus?.route ?? null;
   const busOn = ctx.modules.isOn(BUS_TRANSPORT);
   const waitPosition = busOn ? await busWaitlistPosition(String(event._id), attendeeKeyOf(booking, attendee, attendeeIndex), Boolean(booking.isTest)) : null;
   return {
@@ -150,15 +161,18 @@ export async function guestView(found: Found): Promise<GuestView> {
     registrationNumber: attendee.registrationNumber ?? null,
     name: row.displayName,
     fields,
-    form: schema.map((field) => ({ ...field, editable: open && config.allowEdit !== "no" && !locked.has(field.key), masked: isContactField(field) })),
+    form: schema.map((field) => ({ ...field, editable: open && config.allowEdit !== "no" && !locked.has(field.key), masked: masked(field) })),
     bus:
       route && busOn
         ? {
             code: route.code,
-            city: route.city,
-            pickupPoint: route.pickupPoint,
-            departureAt: route.departureAt ? route.departureAt.toISOString() : null,
-            departure: formatDeparture(route.departureAt),
+            // The guest's stop on a multi-stop bus.
+            city: bus!.stop.city,
+            pickupPoint: bus!.stop.pickupPoint,
+            departureAt: bus!.stop.departureAt ? bus!.stop.departureAt.toISOString() : null,
+            departure: formatDeparture(bus!.stop.departureAt),
+            routeName: route.city,
+            stopIndex: bus!.stop.index,
             returnInfo: route.returnInfo,
             captainName: route.captainName,
             captainPhone: route.captainPhone,

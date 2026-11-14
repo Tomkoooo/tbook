@@ -152,6 +152,25 @@ The organizer switches between them on the console's Buses page; the site reads 
 - `{{bus.transfer}}` in emails: "Foglalt" (bus booked), "Várólistán (értesítünk)" (bus waitlist), "Igényelt (járat még nincs kiválasztva)" (bus question shown, i.e. transfer wanted, but no bus yet), otherwise "Nem igényelt".
 - Emails: after a change (`/guest/update` or an organizer edit) an automatic email goes to that guest again only if they match its conditions now **and** a question its conditions look at changed, or their email address changed (an email without conditions: only on an address change). Picking a bus, or switching bus, therefore sends the bus email (conditions e.g. `busz is_not_empty` and `busz not_equals "waitlist"`), not the general confirmation.
 
+### Multi-stop buses (added 2026-11-14)
+
+A bus can have several pickup stops sharing its seats (e.g. "Szombathely–Győr–Tatabánya", 50 seats: 13:30 Szombathely, 15:00 Győr, 16:00 Tatabánya). The bus question then offers **one choice per stop**:
+
+```json
+{
+  "value": "665f…a1~1",
+  "label": "Győr – Puskás Tivadar utca 37., indulás 15:00 (Szombathely–Győr–Tatabánya, B01)",
+  "remaining": 12,
+  "disabled": false,
+  "meta": { "code": "B01", "routeName": "Szombathely–Győr–Tatabánya", "stopIndex": 1, "city": "Győr", "pickupPoint": "Puskás Tivadar utca 37.", "departure": "2026. december 4. 15:00", "departureAt": "2026-12-04T14:00:00.000Z", "returnInfo": "…" }
+}
+```
+
+- **Value**: `"<routeId>~<stopIndex>"` (0-based, in departure order). Send it back unchanged in `fields.busz` (booking, `/guest/update`, `/waitlist/join`). A bus without stops keeps the plain `"<routeId>"` value, label `"<city> – <pickup point> (<code>), <HH:MM>"` and its meta (plus `routeName`). A plain `"<routeId>"` stored before a bus got stops stays valid while the guest leaves it unchanged.
+- **Seats** are the bus's: every stop shows the same `remaining`, and all stops of a full bus are `disabled` together (a full bus is a 400, as before). Moving to another stop of the same bus never fails for lack of seats.
+- `meta.city` / `pickupPoint` / `departure` are the stop's; `meta.routeName` is the bus's name (its own city field).
+- In `/guest/lookup` the `bus` object gives the guest's stop as `city` / `pickupPoint` / `departureAt` / `departure`, plus `routeName` and `stopIndex` (null for a bus without stops). Emails: `{{bus.city}}`, `{{bus.pickupPoint}}`, `{{bus.departure}}` are the guest's stop, `{{bus.routeName}}` the bus's name.
+
 ### Bus waitlist ("értesítést kérek")
 
 While at least one bus is active, a select fed by the bus module (`choicesSource: "bus-transport:routes"`) always accepts the value `"waitlist"`, listed last in both `attendeeFieldSchema[].choices` and `fieldChoiceDetails`:
@@ -182,9 +201,9 @@ This endpoint returns a person's details for an ID, so it allows 30 calls per cl
 
 Rate-limited per client. The lookup returns `{ guest }`:
 
-- `registrationNumber`, `name`, `fields` (answers; email and phone are masked);
+- `registrationNumber`, `name`, `fields` (answers; email and phone are masked — unless the event's guest-portal module setting `showContactUnmasked` is `"yes"`: then they come in full and their `form[]` entries have `masked: false`);
 - `form`: every question with live options and `editable` (identifying questions and the module's locked questions are never editable; nothing is editable once the event has started);
-- `bus`: `{ code, city, pickupPoint, departure, returnInfo, captainName, captainPhone }`, or `null`;
+- `bus`: `{ code, city, pickupPoint, departureAt, departure, routeName, stopIndex, returnInfo, captainName, captainPhone }` (city / pickup / departure = the guest's stop on a multi-stop bus), or `null`;
 - `transferRules`: the bus module's rules text (e.g. the 15-minute wait rule);
 - `busWaitlist`: `{ position }` (1 = next) when the guest asked to be notified about a bus seat, otherwise `null`;
 - `canEdit`, `canCancel`.

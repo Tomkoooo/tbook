@@ -45,14 +45,16 @@ export default async function CaptainPage({ params }: { params: Promise<{ token:
           {route.code} · {route.city}
         </h1>
         <p className="text-muted-foreground text-sm">
-          {[route.pickupPoint, busTransport.formatDeparture(route.departureAt)].filter(Boolean).join(" · ")}
+          {route.stops?.length
+            ? busTransport.routeStops(route).map((stop) => busTransport.stopShortLabel(stop)).join(" · ")
+            : [route.pickupPoint, busTransport.formatDeparture(route.departureAt)].filter(Boolean).join(" · ")}
           {route.returnInfo ? ` · vissza: ${route.returnInfo}` : ""}
         </p>
       </header>
       <PassengerList
         lang="hu"
         refreshSeconds={20}
-        passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, outbound: p.outbound, return: p.return }))}
+        passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, stop: route.stops?.length ? p.stop : "", outbound: p.outbound, return: p.return }))}
         onSet={setBoarding}
       />
     </main>

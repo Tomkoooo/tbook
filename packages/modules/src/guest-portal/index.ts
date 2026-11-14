@@ -25,6 +25,13 @@ export function registerGuestPortalModule(): void {
         hint: "Comma-separated question keys, e.g. nev,munkaltato. Identifying questions (ID) are always locked.",
       },
       {
+        key: "showContactUnmasked",
+        label: "Show the guest's own email and phone unmasked",
+        type: "select",
+        hint: "Default: masked (e.g. t***@example.com, ***567). “Yes” returns them in full with masked: false in the guest API.",
+        options: [{ value: "no", label: "No (masked)" }, { value: "yes", label: "Yes" }],
+      },
+      {
         key: "cancelSubject",
         deprecated: "Deprecated: edit this email on the Emails page (system email “Registration cancelled”). An email there overrides this field.",
         label: "Cancellation email subject",

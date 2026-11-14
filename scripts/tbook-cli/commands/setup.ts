@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { parseInput } from "@tbook/actions";
-import { eventEmails } from "@tbook/modules";
+import { busTransport, eventEmails } from "@tbook/modules";
 import { adminEventGroupInputSchema, adminEventInputSchema, dataListKeyNormalizations } from "@tbook/schemas";
 import {
   cleanModuleConfig,
@@ -48,7 +48,29 @@ import { confirmPhrase } from "../lib/interact";
  * the group or the data lists. Plan settings left empty ("") don't erase
  * a value set in the console. Dry run first, then --apply --prod-ack and
  * the UPDATE phrase; the restore point holds everything it changed.
+ *
+ * `busRoutes` (optional) are the event's buses, matched by `code`: missing
+ * ones are created, listed ones updated (city, capacity, stops always from
+ * the plan; other fields only when the plan gives a non-empty value, so a
+ * captain entered in the console stays). Booked seats are never touched and
+ * buses not in the plan are left alone. Stop times are ISO date-times.
  */
+
+const isoDateTime = z.string().refine((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) && !Number.isNaN(Date.parse(value)), "an ISO date-time, e.g. 2026-12-05T13:30:00+01:00");
+
+const busRouteSchema = z.object({
+  code: z.string().trim().min(1),
+  city: z.string().trim().min(1),
+  capacity: z.number().int().min(1),
+  returnInfo: z.string().optional(),
+  captainName: z.string().optional(),
+  captainPhone: z.string().optional(),
+  active: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+  notes: z.string().optional(),
+  stops: z.array(z.object({ city: z.string().trim().min(1), pickupPoint: z.string().default(""), departureAt: isoDateTime })).default([]),
+});
+type PlanBusRoute = z.infer<typeof busRouteSchema>;
 
 const listRefPattern = /^\$list:(.+)$/;
 
@@ -76,6 +98,7 @@ const planSchema = z.object({
   event: z.record(z.string(), z.unknown()),
   eventModules: z.record(z.string(), z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).optional() })).default({}),
   emails: z.array(z.record(z.string(), z.unknown())).default([]),
+  busRoutes: z.array(busRouteSchema).default([]),
 });
 type Plan = z.infer<typeof planSchema>;
 
@@ -90,6 +113,11 @@ function readPlan(file: string): Plan {
   }
   const parsed = planSchema.safeParse(raw);
   if (!parsed.success) throw new CliError(`Plan file is invalid:\n${parsed.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n")}`);
+  const codes = new Set<string>();
+  for (const route of parsed.data.busRoutes) {
+    if (codes.has(route.code)) throw new CliError(`Plan file is invalid: bus code "${route.code}" appears twice in busRoutes.`);
+    codes.add(route.code);
+  }
   return parsed.data;
 }
 
@@ -187,6 +215,7 @@ async function setupApply(flags: Flags): Promise<void> {
   console.log(`    Rules: ${eventPreview.eligibilityPreset ?? "none"} (${eventPreview.eligibilityFormRules?.rules.length ?? 0})`);
   console.log(`  Event modules: ${Object.entries(plan.eventModules).map(([k, v]) => `${k}=${v.enabled ? "on" : "off"}`).join(", ") || "(none)"}`);
   for (const email of plan.emails) console.log(`  Email "${String(email.name)}" (${String(email.trigger)}${email.audience ? `, ${String(email.audience)}` : ""})`);
+  for (const route of plan.busRoutes) console.log(`  Bus ${route.code} "${route.city}" (${route.capacity} seats, ${route.stops.length} stops)`);
 
   if (dryRun) {
     console.log("\nDRY RUN — nothing written. Re-run with --apply --prod-ack to set it up.");
@@ -238,6 +267,7 @@ async function setupApply(flags: Flags): Promise<void> {
       (created.emails as string[]).push(String(email._id));
       console.log(`  ✓ email "${email.name}"`);
     }
+    if (plan.busRoutes.length > 0) created.busRoutes = await applyRouteChanges(org.id, eventId, (await planBusRoutes(eventId, plan.busRoutes)).changes);
   } finally {
     const dir = writeRestorePoint({
       entity: "setup",
@@ -283,7 +313,7 @@ function mergedConfig(key: string, stored: Record<string, unknown> | undefined, 
 /**
  * Triggers: "on_registration", "manual", or a system trigger
  * (waitlist_joined, waitlist_offer, waitlist_registered, bus_seat_freed,
- * booking_cancelled) — the event's text for a module's own guest email;
+ * bus_captain_notice, booking_cancelled) — the event's text for a module's own guest email;
  * at most one email per system trigger.
  */
 export function validateEmailTriggers(emails: Array<Record<string, unknown>>): void {
@@ -320,6 +350,105 @@ function emailComparable(email: Record<string, unknown>): Record<string, unknown
 function short(value: unknown): string {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+}
+
+// ---- Bus routes ------------------------------------------------------------------------
+
+interface RouteChange {
+  code: string;
+  id: string | null;
+  input: busTransport.BusRouteInput;
+  lines: string[];
+  before: unknown;
+}
+
+function stopsText(stops: Array<{ city: string; pickupPoint: string; departureAt: Date | null }>): string {
+  return stops.length === 0 ? "(none)" : stops.map((stop) => `${stop.departureAt ? stop.departureAt.toISOString() : "?"} ${stop.city}${stop.pickupPoint ? ` – ${stop.pickupPoint}` : ""}`).join("; ");
+}
+
+/** An ISO date-time; without an offset ("2026-12-05T13:30") it is Budapest time. */
+function stopTime(value: string): Date {
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) return new Date(value);
+  const [, y, m, d, hh, mm] = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value)!.map(Number) as number[];
+  return busTransport.budapestToUtc(y!, m!, d!, hh!, mm!);
+}
+
+/** The plan's buses against the stored ones: what to create / update, with a readable diff. */
+export async function planBusRoutes(eventId: string, planned: PlanBusRoute[]): Promise<{ changes: RouteChange[]; untouched: string[]; kept: string[] }> {
+  const stored = await busTransport.listRoutes(eventId);
+  const changes: RouteChange[] = [];
+  const untouched: string[] = [];
+  const keep = (value: string | undefined, current: string) => (value != null && value.trim() !== "" ? value.trim() : current);
+  for (const [index, route] of planned.entries()) {
+    const stops = route.stops.map((stop) => ({ city: stop.city.trim(), pickupPoint: stop.pickupPoint.trim(), departureAt: stopTime(stop.departureAt) }));
+    const existing = stored.find((r) => r.code === route.code);
+    const input: busTransport.BusRouteInput = {
+      code: route.code,
+      city: route.city,
+      // The bus's own pickup = its first stop (what an answer without a stop shows).
+      pickupPoint: stops[0]?.pickupPoint ?? existing?.pickupPoint ?? "",
+      departureAt: stops[0]?.departureAt ?? existing?.departureAt ?? null,
+      capacity: route.capacity,
+      returnInfo: keep(route.returnInfo, existing?.returnInfo ?? ""),
+      captainName: keep(route.captainName, existing?.captainName ?? ""),
+      captainPhone: keep(route.captainPhone, existing?.captainPhone ?? ""),
+      notes: keep(route.notes, existing?.notes ?? ""),
+      active: route.active ?? existing?.active ?? true,
+      sortOrder: route.sortOrder ?? existing?.sortOrder ?? index,
+      stops,
+    };
+    if (!existing) {
+      changes.push({
+        code: route.code,
+        id: null,
+        input,
+        lines: [`city ${input.city}, ${input.capacity} seats, captain ${input.captainName || "—"} ${input.captainPhone || ""}`.trim(), `stops: ${stopsText(stops)}`],
+        before: null,
+      });
+      continue;
+    }
+    const lines: string[] = [];
+    const compare = (label: string, before: unknown, after: unknown) => {
+      if (JSON.stringify(before ?? null) !== JSON.stringify(after ?? null)) lines.push(`${label}: ${short(before ?? "")} -> ${short(after ?? "")}`);
+    };
+    compare("city", existing.city, input.city);
+    compare("capacity", existing.capacity, input.capacity);
+    compare("pickupPoint", existing.pickupPoint, input.pickupPoint);
+    compare("departureAt", existing.departureAt?.toISOString() ?? null, input.departureAt?.toISOString() ?? null);
+    compare("returnInfo", existing.returnInfo, input.returnInfo);
+    compare("captainName", existing.captainName, input.captainName);
+    compare("captainPhone", existing.captainPhone, input.captainPhone);
+    compare("notes", existing.notes, input.notes);
+    compare("active", existing.active, input.active);
+    compare("sortOrder", existing.sortOrder, input.sortOrder);
+    const before = stopsText(busTransport.routeStops(existing));
+    const after = stopsText(stops);
+    if (before !== after) lines.push(`stops: ${before}`, `    -> ${after}`);
+    if (input.capacity < existing.seatsTaken) throw new CliError(`Bus ${route.code}: ${existing.seatsTaken} seats are booked; the plan's capacity ${input.capacity} is below that.`);
+    if (lines.length === 0) untouched.push(route.code);
+    else changes.push({ code: route.code, id: String(existing._id), input, lines, before: existing.toObject() });
+  }
+  const kept = stored.filter((r) => !planned.some((p) => p.code === r.code)).map((r) => r.code);
+  return { changes, untouched, kept };
+}
+
+function printRouteChanges(plan: { changes: RouteChange[]; untouched: string[]; kept: string[] }): void {
+  for (const change of plan.changes) {
+    console.log(`  Bus ${change.code}: ${change.id ? "update" : "create"}`);
+    for (const line of change.lines) console.log(`      ${line}`);
+  }
+  if (plan.untouched.length) console.log(`  Buses unchanged: ${plan.untouched.join(", ")}`);
+  if (plan.kept.length) console.log(`  Buses not in the plan (left as they are): ${plan.kept.join(", ")}`);
+}
+
+async function applyRouteChanges(orgId: string, eventId: string, changes: RouteChange[]): Promise<string[]> {
+  const ids: string[] = [];
+  for (const change of changes) {
+    const route = change.id ? await busTransport.updateRoute(orgId, change.id, change.input) : await busTransport.createRoute(orgId, eventId, change.input);
+    ids.push(String(route._id));
+    console.log(`  ✓ bus ${route.code}`);
+  }
+  return ids;
 }
 
 async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: string; slug: string }, dbName: string, dryRun: boolean): Promise<void> {
@@ -376,6 +505,7 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
     if (fields.length > 0) emailChanges.push({ name, id: String(existing._id), input: { ...resolved, name }, fields: [...fields], before: existing.toObject() });
   }
   if (only.size > 0) for (const name of only) if (!plan.emails.some((e) => e.name === name)) throw new CliError(`The plan has no email named "${name}".`);
+  const routePlan = await planBusRoutes(eventId, plan.busRoutes);
 
   console.log(`\nEvent "${event.name}" ${eventId} [${event.status}] — its own fields are left as they are.`);
   console.log("Changes:");
@@ -399,7 +529,8 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
       console.log(`                         -> …${short(after.slice(Math.max(0, i - 40), i + 200))}`);
     }
   }
-  if (grants.length === 0 && moduleChanges.length === 0 && emailChanges.length === 0) {
+  printRouteChanges(routePlan);
+  if (grants.length === 0 && moduleChanges.length === 0 && emailChanges.length === 0 && routePlan.changes.length === 0) {
     console.log("\nNothing to change — the event already matches the plan.");
     return;
   }
@@ -409,8 +540,8 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
   }
   await confirmPhrase("UPDATE", flags, "confirm", `Write the changes above to "${dbName}"`);
 
-  const before = { organizationModules: entitled.enabledKeys(), eventModules: storedModules, emails: emailChanges.map((c) => c.before) };
-  const done: Record<string, unknown> = { grantedModules: [] as string[], eventModules: [] as string[], emails: [] as string[] };
+  const before = { organizationModules: entitled.enabledKeys(), eventModules: storedModules, emails: emailChanges.map((c) => c.before), busRoutes: routePlan.changes.map((c) => c.before) };
+  const done: Record<string, unknown> = { grantedModules: [] as string[], eventModules: [] as string[], emails: [] as string[], busRoutes: [] as string[] };
   try {
     for (const key of grants) {
       await setOrganizationModule(org.id, key, { enabled: true }, null);
@@ -427,6 +558,7 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
       (done.emails as string[]).push(String(email._id));
       console.log(`  ✓ email "${email.name}"`);
     }
+    (done.busRoutes as string[]).push(...(await applyRouteChanges(org.id, eventId, routePlan.changes)));
   } finally {
     const after = {
       ...done,
@@ -451,6 +583,7 @@ async function setupUpdate(flags: Flags, plan: Plan, org: { id: string; name: st
           ...grants.map((key) => ({ field: `org module ${key}`, before: false, after: true })),
           ...moduleChanges.map((c) => ({ field: `event module ${c.key}`, before: c.before, after: { enabled: c.enabled, config: c.config } })),
           ...emailChanges.map((c) => ({ field: `email ${c.name}`, before: c.fields, after: "updated" })),
+          ...routePlan.changes.map((c) => ({ field: `bus ${c.code}`, before: c.before ? "existing" : null, after: c.id ? "updated" : "created" })),
         ],
         reversible: false,
         note: "before.json holds the event modules and the emails as they were; restore them from the console if needed.",

@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
 import { BookingModel, FieldClaimModel, VoucherModel, eventRepository } from "@tbook/db";
-import { BusBoardingModel, BusWaitlistEntryModel } from "./bus-transport/model";
+import { BusBoardingModel, BusCaptainInformModel, BusWaitlistEntryModel } from "./bus-transport/model";
 import { EmailDeliveryModel } from "./event-emails/model";
 import { SurveyModel, SurveyRespondentModel, SurveyResponseModel } from "./feedback/model";
 import { WaitlistEntryModel } from "./waitlist/model";
@@ -23,6 +23,7 @@ export interface TestDataCounts {
   fieldClaims: number;
   busWaitlistEntries: number;
   busBoardings: number;
+  busCaptainInforms: number;
   emailDeliveries: number;
   waitlistEntries: number;
   surveyResponses: number;
@@ -54,6 +55,7 @@ async function filters(eventId: Types.ObjectId) {
     fieldClaims: { $or: [byBooking, { eventId, isTest: true }] },
     busWaitlistEntries: { eventId, ...byBooking },
     busBoardings: { eventId, ...byBooking },
+    busCaptainInforms: { eventId, ...byBooking },
     emailDeliveries: { eventId, ...byBooking },
     waitlistEntries: { eventId, isTest: true },
     surveyResponses: { eventId, isTest: true },
@@ -70,6 +72,7 @@ const MODELS: Record<CollectionKey, LooseModel> = {
   fieldClaims: FieldClaimModel as unknown as LooseModel,
   busWaitlistEntries: BusWaitlistEntryModel as unknown as LooseModel,
   busBoardings: BusBoardingModel as unknown as LooseModel,
+  busCaptainInforms: BusCaptainInformModel as unknown as LooseModel,
   emailDeliveries: EmailDeliveryModel as unknown as LooseModel,
   waitlistEntries: WaitlistEntryModel as unknown as LooseModel,
   surveyResponses: SurveyResponseModel as unknown as LooseModel,

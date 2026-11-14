@@ -33,7 +33,9 @@ export default async function BusRoutePage({ params }: { params: Promise<{ route
     <>
       <PageTitle
         title={`${route.code} · ${route.city}`}
-        description={[route.pickupPoint, busTransport.formatDeparture(route.departureAt), route.captainName && `captain: ${route.captainName} ${route.captainPhone}`].filter(Boolean).join(" · ")}
+        description={[
+          ...(route.stops?.length ? busTransport.routeStops(route).map((stop) => busTransport.stopShortLabel(stop)) : [route.pickupPoint, busTransport.formatDeparture(route.departureAt)]),
+          route.captainName && `captain: ${route.captainName} ${route.captainPhone}`].filter(Boolean).join(" · ")}
         back={{ href: `/admin/bus?eventId=${String(route.eventId)}`, label: "Buses" }}
         actions={
           canManage ? (
@@ -47,7 +49,7 @@ export default async function BusRoutePage({ params }: { params: Promise<{ route
       />
       <SectionCard title={`Passengers (${passengers.length} / ${route.capacity})`}>
         <PassengerList
-          passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, outbound: p.outbound, return: p.return }))}
+          passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, stop: route.stops?.length ? p.stop : "", outbound: p.outbound, return: p.return }))}
           onSet={setBoarding}
           refreshSeconds={30}
         />

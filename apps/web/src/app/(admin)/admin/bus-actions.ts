@@ -39,6 +39,16 @@ function departureFromInput(raw: string): Date | null {
   return match ? busTransport.budapestToUtc(Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4]), Number(match[5])) : null;
 }
 
+/** The repeatable stop rows of the bus form (rows without a city are dropped). */
+function stopsFromForm(formData: FormData) {
+  const cities = formData.getAll("stopCity").map((value) => String(value).trim());
+  const points = formData.getAll("stopPickupPoint").map((value) => String(value).trim());
+  const times = formData.getAll("stopDepartureAt").map((value) => String(value).trim());
+  return cities
+    .map((city, index) => ({ city, pickupPoint: points[index] ?? "", departureAt: departureFromInput(times[index] ?? "") }))
+    .filter((stop) => stop.city);
+}
+
 export async function saveBusRouteAction(eventId: string, routeId: string | null, formData: FormData): Promise<BusActionResult> {
   try {
     const { organizationId } = await requireBusEvent(eventId);
@@ -54,6 +64,7 @@ export async function saveBusRouteAction(eventId: string, routeId: string | null
       notes: text(formData, "notes"),
       active: formData.get("active") !== null,
       sortOrder: Number.parseInt(text(formData, "sortOrder") || "0", 10) || 0,
+      stops: stopsFromForm(formData),
     };
     if (!input.code || !input.city) throw ActionError.validation("Give the bus a code and a city.");
     if (!Number.isFinite(input.capacity) || input.capacity < 1) throw ActionError.validation("Seats must be at least 1.");
@@ -121,6 +132,23 @@ export async function recountBusSeatsAction(eventId: string): Promise<BusActionR
     return { ok: true, message: `Seats recounted from the registrations on ${routes} buses.` };
   } catch (error) {
     return fail(error, "recountBusSeatsAction");
+  }
+}
+
+/** Emails the bus's passengers who haven't had its current captain's details yet ("bus_captain_notice"). */
+export async function sendCaptainNoticeAction(routeId: string): Promise<BusActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("bus:manage");
+    const route = await busTransport.getRouteForOrg(organizationId, routeId);
+    await requireBusEvent(String(route.eventId));
+    const result = await busTransport.sendCaptainNotice(organizationId, routeId);
+    revalidatePath("/admin/bus");
+    const parts = [`${result.sent} of ${result.total} passengers emailed the captain's details.`];
+    if (result.failed > 0) parts.push(`${result.failed} failed (see the email's delivery log on the Emails page).`);
+    if (result.createdTemplate) parts.push("The “Bus: captain's details” email was created from the built-in text; edit it on the Emails page.");
+    return { ok: result.failed === 0, message: parts.join(" ") };
+  } catch (error) {
+    return fail(error, "sendCaptainNoticeAction");
   }
 }
 

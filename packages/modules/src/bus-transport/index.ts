@@ -6,16 +6,18 @@ import {
   BUS_WAITLIST_VALUE,
   attendeeAwaitsBus,
   attendeeOnBusWaitlist,
+  busForAttendee,
   busRouteFields,
   formatDeparture,
   listRoutes,
   releaseSeatsForBooking,
   reserveSeats,
-  routeForAttendee,
-  routeLabel,
+  routeChoices,
   seatsByRoute,
   upsertRoutesByCode,
 } from "./service";
+import { onAttendeeEmailDelivered } from "../event-emails/service";
+import { captainDetailsDelivered, captainInfo } from "./captain";
 import { BUS_WAITLIST_DEFAULTS, notifyBusWaitlist, removeFromBusWaitlist, seatsFreed, syncBusWaitlist } from "./waitlist";
 
 /**
@@ -74,29 +76,15 @@ export function registerBusTransportModule(): void {
       const routes = (await listRoutes(String(ctx.event._id))).filter((route) => route.active);
       // Without buses there is nothing to wait for either: no "notify me" option, so "waitlist" is refused like any unknown answer.
       if (routes.length === 0) return [];
-      const choices = routes
-        .map((route) => {
-          const remaining = Math.max(route.capacity - route.seatsTaken, 0);
-          return {
-            value: String(route._id),
-            label: routeLabel(route),
-            remaining,
-            disabled: remaining <= 0,
-            // Display details only; the captain's phone goes to booked guests by email, not to the public.
-            meta: {
-              code: route.code,
-              city: route.city,
-              pickupPoint: route.pickupPoint,
-              departureAt: route.departureAt ? route.departureAt.toISOString() : null,
-              departure: formatDeparture(route.departureAt),
-              returnInfo: route.returnInfo,
-            },
-          };
-        });
+      // One choice per stop of a multi-stop bus ("<routeId>~<stop index>"), all sharing the bus's seats.
+      const choices = routes.flatMap((route) => routeChoices(route));
       // Always offered: no seat, the guest waits for one and is emailed when one frees up.
       return [...choices, { value: BUS_WAITLIST_VALUE, label: BUS_WAITLIST_LABEL, remaining: null, disabled: false, meta: { waitlist: true } }];
     },
   });
+
+  // An email carrying the captain's details marks its guest "informed" about that bus's captain.
+  onAttendeeEmailDelivered(captainDetailsDelivered);
 
   extensions.registerRegistrationReserver(BUS_TRANSPORT, async (ctx) => {
     if (!ctx.modules.isOn(BUS_TRANSPORT)) return null;
@@ -147,17 +135,24 @@ export function registerBusTransportModule(): void {
         label: "Transfer (Foglalt / Várólistán (értesítünk) / Igényelt (járat még nincs kiválasztva) / Nem igényelt)",
         sample: "Foglalt",
       },
-      { key: "bus.city", label: "Bus: departure city", sample: "Szeged" },
-      { key: "bus.pickupPoint", label: "Bus: pickup point", sample: "Mars tér, buszpályaudvar" },
+      { key: "bus.city", label: "Bus: departure city (the guest's stop)", sample: "Szeged" },
+      { key: "bus.pickupPoint", label: "Bus: pickup point (the guest's stop)", sample: "Mars tér, buszpályaudvar" },
       { key: "bus.code", label: "Bus: identifier", sample: "B03" },
-      { key: "bus.departure", label: "Bus: departure date and time", sample: "2026. december 4. 15:30" },
+      { key: "bus.routeName", label: "Bus: route name (e.g. Szombathely–Győr–Tatabánya)", sample: "Szeged" },
+      { key: "bus.departure", label: "Bus: departure date and time (the guest's stop)", sample: "2026. december 4. 15:30" },
       { key: "bus.returnInfo", label: "Bus: return trip", sample: "00:00–02:00 között, a csoport igényeihez igazodva" },
       { key: "bus.captainName", label: "Bus: captain's name", sample: "Kapitány Kázmér" },
       { key: "bus.captainPhone", label: "Bus: captain's phone", sample: "+36 30 123 4567" },
+      {
+        key: "bus.captainInfo",
+        label: "Bus: captain's name and phone (two lines), or “we'll tell you later” while the bus has no captain",
+        sample: "Buszkapitány neve: Kapitány Kázmér\nBuszkapitány telefonszáma: +36 30 123 4567",
+      },
       { key: "bus.rules", label: "Bus: transfer rules (module setting)", sample: "A busz legfeljebb 15 percet vár." },
     ],
     async values(ctx, booking, attendeeIndex) {
-      const route = await routeForAttendee(booking, attendeeIndex);
+      const bus = await busForAttendee(booking, attendeeIndex);
+      const route = bus?.route ?? null;
       const rules = route ? (ctx.modules.config<{ transferRules?: string }>(BUS_TRANSPORT).transferRules ?? "") : "";
       if (!route) {
         return {
@@ -169,22 +164,26 @@ export function registerBusTransportModule(): void {
           "bus.city": "",
           "bus.pickupPoint": "",
           "bus.code": "",
+          "bus.routeName": "",
           "bus.departure": "",
           "bus.returnInfo": "",
           "bus.captainName": "",
           "bus.captainPhone": "",
+          "bus.captainInfo": "",
           "bus.rules": "",
         };
       }
       return {
         "bus.transfer": "Foglalt",
-        "bus.city": route.city,
-        "bus.pickupPoint": route.pickupPoint,
+        "bus.city": bus!.stop.city,
+        "bus.pickupPoint": bus!.stop.pickupPoint,
         "bus.code": route.code,
-        "bus.departure": formatDeparture(route.departureAt),
+        "bus.routeName": route.city,
+        "bus.departure": formatDeparture(bus!.stop.departureAt),
         "bus.returnInfo": route.returnInfo,
         "bus.captainName": route.captainName,
         "bus.captainPhone": route.captainPhone,
+        "bus.captainInfo": captainInfo(route),
         "bus.rules": rules,
       };
     },
@@ -271,3 +270,4 @@ export function budapestToUtc(year: number, month: number, day: number, hour: nu
 export * from "./service";
 export * from "./model";
 export * from "./waitlist";
+export * from "./captain";
