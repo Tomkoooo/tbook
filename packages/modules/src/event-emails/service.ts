@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import QRCode from "qrcode";
 import { Types } from "mongoose";
 import { ActionError } from "@tbook/actions";
@@ -28,6 +29,7 @@ import {
   type IEventEmail,
   type SystemEmailTrigger,
 } from "./model";
+import { MAX_CONSECUTIVE_THROTTLES, MAX_TEMPORARY_ATTEMPTS, isTemporaryMailError, sendBatchSettings, throttlePauseSeconds } from "./batching";
 import { QR_CID, fieldValues, renderEventEmail } from "./render";
 import { systemEmailInfo, systemEmailSampleValues } from "./system";
 
@@ -41,13 +43,19 @@ export interface EventEmailsConfig {
   galleryUrl?: string;
   /** Greeting name order; Hungarian names are family-name first. */
   nameOrder?: "family_first" | "given_first";
+  /** Manual sends: messages per batch (default 50, 1–1000). Strings from the console. */
+  sendBatchSize?: string | number;
+  /** Manual sends: seconds to wait between batches (default 60, 0–3600). */
+  sendBatchPauseSeconds?: string | number;
 }
 
 const TIME_ZONE = "Europe/Budapest";
-/** Pause between messages of a manual send, to stay under SMTP providers' rate limits. */
+/** Pause between messages inside a batch of a manual send, to stay under SMTP providers' rate limits. */
 const SEND_DELAY_MS = Number(process.env.TBOOK_EMAIL_SEND_DELAY_MS ?? 250);
-/** A "running" send whose heartbeat is older than this was interrupted (e.g. a restart). */
-const STALE_AFTER_MS = 2 * 60 * 1000;
+/** A "running" send whose heartbeat is older than this was interrupted (e.g. a restart) and is continued by the resume job. */
+export const STALE_AFTER_MS = 2 * 60 * 1000;
+/** While pausing between batches the runner still beats (and notices a Stop) this often. */
+const HEARTBEAT_MS = 15 * 1000;
 
 /** Test seam: a transport used when a caller passes none (tests and scripts; production uses SMTP). */
 let defaultTransporter: MailTransporter | undefined;
@@ -346,8 +354,20 @@ export async function countEmailRecipients(organizationId: string, emailId: stri
 
 // ---- Sending --------------------------------------------------------------------
 
-async function deliver(email: IEventEmail, message: OutgoingMessage, mode: DeliveryMode, transporter?: MailTransporter): Promise<boolean> {
+interface DeliveryResult {
+  ok: boolean;
+  /** The provider refused it for now (4xx, connection error): worth retrying later. */
+  temporary: boolean;
+  error: string | null;
+}
+
+/**
+ * Sends one message and logs it. With `deferTemporary`, a temporary
+ * failure is not logged (the caller retries it later in the same run).
+ */
+async function deliverDetailed(email: IEventEmail, message: OutgoingMessage, mode: DeliveryMode, transporter?: MailTransporter, opts: { deferTemporary?: boolean } = {}): Promise<DeliveryResult> {
   let error: string | null = null;
+  let temporary = false;
   if (!message.to) error = "No email address.";
   else {
     try {
@@ -358,29 +378,44 @@ async function deliver(email: IEventEmail, message: OutgoingMessage, mode: Deliv
       );
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
+      temporary = isTemporaryMailError(err);
     }
   }
-  if (mode !== "test") {
-    await EmailDeliveryModel.updateOne(
-      { emailId: email._id, recipientKey: message.recipientKey },
-      {
-        $set: {
-          organizationId: email.organizationId,
-          eventId: email.eventId,
-          to: message.to || "—",
-          name: message.name,
-          status: error ? "failed" : "sent",
-          error,
-          mode,
-          bookingId: message.bookingId ? new Types.ObjectId(message.bookingId) : null,
-          sentAt: new Date(),
-        },
-        $inc: { attempts: 1 },
+  if (mode !== "test" && !(temporary && opts.deferTemporary)) await logDelivery(email, message, mode, error, temporary);
+  return { ok: !error, temporary, error };
+}
+
+async function logDelivery(
+  email: IEventEmail,
+  message: Pick<OutgoingMessage, "recipientKey" | "to" | "name" | "bookingId"> | { key: string; to: string; name: string; bookingId: string | null },
+  mode: DeliveryMode,
+  error: string | null,
+  temporary = false,
+): Promise<void> {
+  const recipientKey = "recipientKey" in message ? message.recipientKey : message.key;
+  await EmailDeliveryModel.updateOne(
+    { emailId: email._id, recipientKey },
+    {
+      $set: {
+        organizationId: email.organizationId,
+        eventId: email.eventId,
+        to: message.to || "—",
+        name: message.name,
+        status: error ? "failed" : "sent",
+        error,
+        temporary: Boolean(error) && temporary,
+        mode,
+        bookingId: message.bookingId ? new Types.ObjectId(message.bookingId) : null,
+        sentAt: new Date(),
       },
-      { upsert: true },
-    ).exec();
-  }
-  return !error;
+      $inc: { attempts: 1 },
+    },
+    { upsert: true },
+  ).exec();
+}
+
+async function deliver(email: IEventEmail, message: OutgoingMessage, mode: DeliveryMode, transporter?: MailTransporter): Promise<boolean> {
+  return (await deliverDetailed(email, message, mode, transporter)).ok;
 }
 
 /**
@@ -419,93 +454,317 @@ export async function hasAutomaticConfirmation(booking: IBooking): Promise<boole
   return Boolean(await EventEmailModel.exists({ eventId: event._id, trigger: "on_registration", active: true }));
 }
 
-function isStale(email: IEventEmail): boolean {
+function isStale(email: Pick<IEventEmail, "sendState">): boolean {
   const beat = email.sendState?.heartbeatAt ? new Date(email.sendState.heartbeatAt).getTime() : 0;
   return Date.now() - beat > STALE_AFTER_MS;
 }
 
-export interface StartSendOptions {
+/** A send interrupted longer ago than this is not continued on its own (it is marked stopped instead). */
+const RESUME_MAX_AGE_MS = Number(process.env.TBOOK_EMAIL_RESUME_MAX_AGE_HOURS ?? 24) * 60 * 60 * 1000;
+
+export type SleepFn = (ms: number) => Promise<void>;
+const realSleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface RunOptions {
+  transporter?: MailTransporter;
+  /** Test seam: replaces the waits between batches (and between messages). */
+  sleep?: SleepFn;
+}
+
+export interface StartSendOptions extends RunOptions {
   /** Send again to people who already received it. Default: only those not yet sent (and failed ones). */
   resendAll?: boolean;
-  transporter?: MailTransporter;
+  /** Also retry people whose earlier attempt failed permanently (5xx, bad address). Default: true. */
+  resendFailed?: boolean;
   /** Await the whole send (tests, scripts). The console starts it in the background. */
   wait?: boolean;
 }
 
 /**
- * Starts a manual send. Runs in the server process in the background; the
- * console polls the progress. Recipients already sent successfully are
- * skipped, so pressing Send again (or after an interruption) only finishes
- * the remainder.
+ * Starts a manual send. Runs in the server process in the background, in
+ * batches (see `sendBatchSettings`); the console polls the progress.
+ * Recipients already sent successfully are skipped, so pressing Send again
+ * only finishes the remainder. An interrupted run is continued by
+ * `resumeInterruptedEventEmailSends` (the server's resume job).
  */
 export async function startEventEmailSend(organizationId: string, emailId: string, userId: string | null, opts: StartSendOptions = {}): Promise<void> {
   const email = await getEventEmailForOrg(organizationId, emailId);
   if (email.trigger !== "manual") throw ActionError.validation("Automatic emails are sent on registration. Use a test send to check one.");
   if (email.sendState?.status === "running" && !isStale(email)) throw ActionError.validation("This email is already being sent.");
+  const runnerId = randomUUID();
+  const now = new Date();
+  // Atomic claim: of two concurrent Sends (or a Send and the resume job) only one gets the run.
   const claimed = await EventEmailModel.findOneAndUpdate(
     { _id: email._id, $or: [{ "sendState.status": { $ne: "running" } }, { "sendState.heartbeatAt": { $lt: new Date(Date.now() - STALE_AFTER_MS) } }] },
-    { $set: { sendState: { ...idleState(), status: "running", startedAt: new Date(), heartbeatAt: new Date(), startedBy: userId } } },
+    {
+      $set: {
+        sendState: {
+          ...idleState(),
+          status: "running",
+          startedAt: now,
+          heartbeatAt: now,
+          startedBy: userId,
+          runnerId,
+          phase: "sending",
+          resendAll: Boolean(opts.resendAll),
+          resendFailed: opts.resendFailed ?? true,
+        },
+      },
+    },
     { returnDocument: "after" },
   ).exec();
   if (!claimed) throw ActionError.validation("This email is already being sent.");
-  const run = runSend(claimed, opts).catch(async (error) => {
-    console.error("[tbook] event email send failed", emailId, error);
-    await EventEmailModel.updateOne({ _id: emailId }, { $set: { "sendState.status": "stopped", "sendState.finishedAt": new Date() } }).exec();
-  });
+  const run = launchRun(claimed, runnerId, opts);
   if (opts.wait) await run;
+}
+
+function launchRun(email: IEventEmail, runnerId: string, opts: RunOptions): Promise<void> {
+  return runSend(email, runnerId, opts).catch(async (error) => {
+    console.error("[tbook] event email send failed", String(email._id), error);
+    await EventEmailModel.updateOne(
+      { _id: email._id, "sendState.status": "running", "sendState.runnerId": runnerId },
+      {
+        $set: {
+          "sendState.status": "stopped",
+          "sendState.finishedAt": new Date(),
+          "sendState.phase": null,
+          "sendState.nextBatchAt": null,
+          "sendState.lastError": error instanceof Error ? error.message : String(error),
+        },
+      },
+    ).exec();
+  });
 }
 
 export async function stopEventEmailSend(organizationId: string, emailId: string): Promise<void> {
   await getEventEmailForOrg(organizationId, emailId);
-  await EventEmailModel.updateOne({ _id: emailId, "sendState.status": "running" }, { $set: { "sendState.status": "stopped", "sendState.finishedAt": new Date() } }).exec();
+  await EventEmailModel.updateOne(
+    { _id: emailId, "sendState.status": "running" },
+    { $set: { "sendState.status": "stopped", "sendState.finishedAt": new Date(), "sendState.phase": null, "sendState.nextBatchAt": null } },
+  ).exec();
 }
 
-async function runSend(email: IEventEmail, opts: StartSendOptions): Promise<void> {
+export interface ResumeOptions extends RunOptions {
+  /** Await the resumed runs (tests). */
+  wait?: boolean;
+}
+
+/**
+ * The resume job: continues every manual send left "running" by a process
+ * that died (heartbeat older than STALE_AFTER_MS). Each one is claimed
+ * atomically with a fresh runner id and heartbeat, so of several server
+ * instances (or ticks) only one continues it; recipients with a "sent"
+ * delivery are skipped. A send interrupted longer ago than
+ * TBOOK_EMAIL_RESUME_MAX_AGE_HOURS (default 24) is marked stopped instead.
+ * Returns the ids of the sends it continued.
+ */
+export async function resumeInterruptedEventEmailSends(opts: ResumeOptions = {}): Promise<string[]> {
+  const now = Date.now();
+  const staleBefore = new Date(now - STALE_AFTER_MS);
+  const tooOld = new Date(now - RESUME_MAX_AGE_MS);
+  await EventEmailModel.updateMany(
+    { trigger: "manual", "sendState.status": "running", $or: [{ "sendState.heartbeatAt": { $lt: tooOld } }, { "sendState.heartbeatAt": null }] },
+    {
+      $set: {
+        "sendState.status": "stopped",
+        "sendState.finishedAt": new Date(),
+        "sendState.phase": null,
+        "sendState.nextBatchAt": null,
+        "sendState.lastError": "Interrupted too long ago to continue on its own. Press Send to finish the rest.",
+      },
+    },
+  ).exec();
+  const candidates = await EventEmailModel.find({ trigger: "manual", "sendState.status": "running", "sendState.heartbeatAt": { $lt: staleBefore } }, { _id: 1 }).lean().exec();
+  const resumed: string[] = [];
+  const runs: Promise<void>[] = [];
+  for (const candidate of candidates) {
+    const runnerId = randomUUID();
+    const claimed = await EventEmailModel.findOneAndUpdate(
+      { _id: candidate._id, "sendState.status": "running", "sendState.heartbeatAt": { $lt: staleBefore } },
+      {
+        $set: { "sendState.runnerId": runnerId, "sendState.heartbeatAt": new Date(), "sendState.resumedAt": new Date(), "sendState.phase": "sending", "sendState.nextBatchAt": null },
+        $inc: { "sendState.resumeCount": 1 },
+      },
+      { returnDocument: "after" },
+    ).exec();
+    if (!claimed) continue; // another instance got it
+    console.info("[tbook] continuing interrupted event email send", String(candidate._id));
+    resumed.push(String(candidate._id));
+    runs.push(launchRun(claimed, runnerId, opts));
+  }
+  if (opts.wait) await Promise.all(runs);
+  return resumed;
+}
+
+interface SendItem {
+  key: string;
+  to: string;
+  name: string;
+  bookingId: string | null;
+  build: () => Promise<OutgoingMessage>;
+  row?: EventAttendee;
+}
+
+/**
+ * One run of a manual send (started by Send or continued by the resume
+ * job). Every progress write is conditional on this runner still owning
+ * the send, so a Stop or a takeover ends it before the next message.
+ */
+async function runSend(email: IEventEmail, runnerId: string, opts: RunOptions): Promise<void> {
   const event = await eventRepository.findById(String(email.eventId));
   if (!event) throw new Error("Event not found");
   const ctx = await renderContextFor(event);
+  const { batchSize, batchPauseSeconds } = sendBatchSettings(ctx.config);
+  const sleep = opts.sleep ?? realSleep;
+  const perMessageDelay = SEND_DELAY_MS > 0 && !opts.transporter && !defaultTransporter ? SEND_DELAY_MS : 0;
 
-  const builders: Array<{ key: string; build: () => Promise<OutgoingMessage>; row?: EventAttendee }> = [];
+  const items: SendItem[] = [];
   if (email.audience === "registered") {
     for (const row of await listEventAttendees(String(event._id))) {
-      if (matchesConditions(email, row)) builders.push({ key: row.attendeeKey, build: () => attendeeMessage(email, ctx, row), row });
+      if (matchesConditions(email, row)) {
+        items.push({ key: row.attendeeKey, to: attendeeEmailAddress(row), name: row.displayName, bookingId: String(row.booking._id), build: () => attendeeMessage(email, ctx, row), row });
+      }
     }
   } else {
     for (const recipient of await listRecipients(email, event)) {
-      builders.push({ key: `list:${recipient.key}`, build: async () => listMessage(email, ctx, recipient) });
+      items.push({ key: `list:${recipient.key}`, to: recipient.to, name: recipient.name, bookingId: null, build: async () => listMessage(email, ctx, recipient) });
     }
   }
 
-  const alreadySent = opts.resendAll
-    ? new Set<string>()
-    : new Set((await EmailDeliveryModel.find({ emailId: email._id, status: "sent" }, { recipientKey: 1 }).lean().exec()).map((d) => d.recipientKey));
-
-  const state = { total: builders.length, sent: 0, failed: 0, skipped: 0 };
-  await EventEmailModel.updateOne({ _id: email._id }, { $set: { "sendState.total": state.total } }).exec();
-
-  for (const [index, builder] of builders.entries()) {
-    if (alreadySent.has(builder.key)) {
-      state.skipped += 1;
+  // The delivery log is the source of truth: what this run (before an interruption) or an earlier one already did.
+  const sendState = email.sendState ?? idleState();
+  const runStartedAt = sendState.startedAt ? new Date(sendState.startedAt).getTime() : 0;
+  const resendAll = Boolean(sendState.resendAll);
+  const resendFailed = sendState.resendFailed !== false;
+  const previous = new Map(
+    (await EmailDeliveryModel.find({ emailId: email._id }, { recipientKey: 1, status: 1, temporary: 1, sentAt: 1 }).lean().exec()).map((d) => [d.recipientKey, d]),
+  );
+  const state = { total: items.length, sent: 0, failed: 0, skipped: 0 };
+  const queue: SendItem[] = [];
+  for (const item of items) {
+    const done = previous.get(item.key);
+    const thisRun = done ? new Date(done.sentAt).getTime() >= runStartedAt : false;
+    if (done?.status === "sent" && (thisRun || !resendAll)) {
+      if (thisRun) state.sent += 1;
+      else state.skipped += 1;
+    } else if (done?.status === "failed" && !done.temporary && (thisRun || !resendFailed)) {
+      state.failed += 1;
     } else {
-      const ok = await deliver(email, await builder.build(), "manual", opts.transporter).catch(() => false);
-      if (builder.row) await deliveredToAttendee(email, builder.row, ok);
-      if (ok) state.sent += 1;
-      else state.failed += 1;
-      if (SEND_DELAY_MS > 0 && !opts.transporter && !defaultTransporter) await new Promise((resolve) => setTimeout(resolve, SEND_DELAY_MS));
-    }
-    if (index % 10 === 9 || index === builders.length - 1) {
-      const current = await EventEmailModel.findById(email._id, { sendState: 1 }).lean().exec();
-      if (current?.sendState?.status !== "running") return; // stopped by an organizer
-      await EventEmailModel.updateOne(
-        { _id: email._id },
-        { $set: { "sendState.sent": state.sent, "sendState.failed": state.failed, "sendState.skipped": state.skipped, "sendState.heartbeatAt": new Date() } },
-      ).exec();
+      queue.push(item);
     }
   }
-  await EventEmailModel.updateOne(
-    { _id: email._id },
-    { $set: { "sendState.status": "done", "sendState.sent": state.sent, "sendState.failed": state.failed, "sendState.skipped": state.skipped, "sendState.finishedAt": new Date(), "sendState.heartbeatAt": new Date() } },
-  ).exec();
+
+  const owned = { _id: email._id, "sendState.status": "running" as const, "sendState.runnerId": runnerId };
+  const deferred = new Set<string>();
+  const write = async (extra: Record<string, unknown> = {}): Promise<boolean> => {
+    const result = await EventEmailModel.updateOne(owned, {
+      $set: {
+        "sendState.total": state.total,
+        "sendState.sent": state.sent,
+        "sendState.failed": state.failed,
+        "sendState.skipped": state.skipped,
+        "sendState.deferred": deferred.size,
+        "sendState.heartbeatAt": new Date(),
+        ...Object.fromEntries(Object.entries(extra).map(([key, value]) => [`sendState.${key}`, value])),
+      },
+    }).exec();
+    return result.matchedCount === 1;
+  };
+  /** Waits between batches, still beating (so it isn't taken for dead) and noticing a Stop. */
+  const pause = async (seconds: number, phase: "pausing" | "throttled"): Promise<boolean> => {
+    let remaining = seconds * 1000;
+    if (!(await write({ phase, nextBatchAt: new Date(Date.now() + remaining) }))) return false;
+    while (remaining > 0) {
+      const step = Math.min(remaining, HEARTBEAT_MS);
+      await sleep(step);
+      remaining -= step;
+      if (!(await write())) return false;
+    }
+    return write({ phase: "sending", nextBatchAt: null });
+  };
+
+  if (!(await write({ batchSize, batchPauseSeconds, phase: "sending", nextBatchAt: null }))) return;
+
+  const temporaryAttempts = new Map<string, number>();
+  let inBatch = 0;
+  let throttleLevel = 0;
+  let throttlesInARow = 0;
+  while (queue.length > 0) {
+    const item = queue.shift()!;
+    let result: DeliveryResult;
+    try {
+      result = await deliverDetailed(email, await item.build(), "manual", opts.transporter, { deferTemporary: true });
+    } catch (error) {
+      // Building the message failed (e.g. the ticket PDF): a failure for this recipient.
+      const message = error instanceof Error ? error.message : String(error);
+      await logDelivery(email, item, "manual", message).catch(() => undefined);
+      result = { ok: false, temporary: false, error: message };
+    }
+    if (item.row) await deliveredToAttendee(email, item.row, result.ok);
+
+    if (result.ok) {
+      state.sent += 1;
+      deferred.delete(item.key);
+      throttlesInARow = 0;
+      inBatch += 1;
+    } else if (result.temporary) {
+      const attempts = (temporaryAttempts.get(item.key) ?? 0) + 1;
+      temporaryAttempts.set(item.key, attempts);
+      if (attempts >= MAX_TEMPORARY_ATTEMPTS) {
+        // Logged as failed, but marked temporary: any later run (Send, resume) tries it again.
+        await logDelivery(email, item, "manual", result.error, true);
+        state.failed += 1;
+        deferred.delete(item.key);
+      } else {
+        queue.push(item); // retried later in this run
+        deferred.add(item.key);
+      }
+    } else {
+      state.failed += 1;
+      deferred.delete(item.key);
+      inBatch += 1;
+    }
+    if (!(await write(result.error ? { lastError: result.error } : {}))) return; // stopped, or another runner took over
+
+    if (result.temporary) {
+      // The provider is throttling: end this batch, back off (doubling, capped) and start a new batch.
+      throttleLevel += 1;
+      throttlesInARow += 1;
+      if (throttlesInARow >= MAX_CONSECUTIVE_THROTTLES) {
+        await EventEmailModel.updateOne(owned, {
+          $set: {
+            "sendState.status": "stopped",
+            "sendState.finishedAt": new Date(),
+            "sendState.phase": null,
+            "sendState.nextBatchAt": null,
+            "sendState.lastError": `The SMTP server kept refusing messages (${result.error}). Press Send later to finish the rest.`,
+          },
+        }).exec();
+        return;
+      }
+      if (queue.length > 0 && !(await pause(throttlePauseSeconds(batchPauseSeconds, throttleLevel), "throttled"))) return;
+      inBatch = 0;
+    } else if (inBatch >= batchSize && queue.length > 0) {
+      throttleLevel = 0; // a whole batch went through
+      if (!(await pause(batchPauseSeconds, "pausing"))) return;
+      inBatch = 0;
+    } else if (perMessageDelay > 0 && queue.length > 0) {
+      await sleep(perMessageDelay);
+    }
+  }
+  await EventEmailModel.updateOne(owned, {
+    $set: {
+      "sendState.status": "done",
+      "sendState.sent": state.sent,
+      "sendState.failed": state.failed,
+      "sendState.skipped": state.skipped,
+      "sendState.deferred": 0,
+      "sendState.finishedAt": new Date(),
+      "sendState.heartbeatAt": new Date(),
+      "sendState.phase": null,
+      "sendState.nextBatchAt": null,
+    },
+  }).exec();
 }
 
 /**

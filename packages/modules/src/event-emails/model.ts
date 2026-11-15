@@ -5,8 +5,10 @@ import mongoose, { Schema, type Document, type Model, Types } from "mongoose";
  *  - "on_registration": sent automatically to each attendee when a
  *    registration is confirmed (optionally only to attendees matching
  *    `conditions`, e.g. those who chose a bus);
- *  - "manual": sent when an organizer presses Send (there is no scheduler:
- *    "Nov 20 reminder" means pressing Send on Nov 20);
+ *  - "manual": sent when an organizer presses Send (there is no scheduled
+ *    send: "Nov 20 reminder" means pressing Send on Nov 20). It goes out in
+ *    batches (module settings `sendBatchSize` / `sendBatchPauseSeconds`),
+ *    and an interrupted send is continued by the server on its own;
  *  - a system trigger (see `systemEmailTriggers`): the event's own text for
  *    a message a module sends (waitlist, bus seat freed, bus captain
  *    notice, cancellation). At
@@ -35,6 +37,13 @@ export type EmailAudience = (typeof emailAudiences)[number];
 export const sendStatuses = ["idle", "running", "done", "stopped"] as const;
 export type SendStatus = (typeof sendStatuses)[number];
 
+/**
+ * What a running send is doing: sending, waiting for the next batch, or
+ * backing off because the SMTP provider refused messages temporarily.
+ */
+export const sendPhases = ["sending", "pausing", "throttled"] as const;
+export type SendPhase = (typeof sendPhases)[number];
+
 export interface EmailSendState {
   status: SendStatus;
   total: number;
@@ -47,6 +56,23 @@ export interface EmailSendState {
   /** Updated while sending; a "running" state with an old heartbeat was interrupted (server restart). */
   heartbeatAt: Date | null;
   startedBy: string | null;
+  /** The process running the send; every progress write checks it, so only one runner continues a send. */
+  runnerId?: string | null;
+  phase?: SendPhase | null;
+  /** When the next batch starts (while pausing or throttled). */
+  nextBatchAt?: Date | null;
+  /** The pacing this run uses (from the module settings when it started or resumed). */
+  batchSize?: number;
+  batchPauseSeconds?: number;
+  /** Recipients refused temporarily, waiting for a retry later in this run. */
+  deferred?: number;
+  lastError?: string | null;
+  /** Options of the Send that started the run, kept so a resumed run behaves the same. */
+  resendAll?: boolean;
+  resendFailed?: boolean;
+  /** How many times the server continued the send after an interruption. */
+  resumeCount?: number;
+  resumedAt?: Date | null;
 }
 
 export interface IEventEmail extends Document {
@@ -81,6 +107,15 @@ const idleState = (): EmailSendState => ({
   finishedAt: null,
   heartbeatAt: null,
   startedBy: null,
+  runnerId: null,
+  phase: null,
+  nextBatchAt: null,
+  deferred: 0,
+  lastError: null,
+  resendAll: false,
+  resendFailed: true,
+  resumeCount: 0,
+  resumedAt: null,
 });
 
 const EventEmailSchema = new Schema<IEventEmail>(
@@ -127,6 +162,8 @@ export interface IEmailDelivery extends Document {
   mode: DeliveryMode;
   bookingId: Types.ObjectId | null;
   attempts: number;
+  /** A failure the provider called temporary (4xx, connection): retried by any later run. */
+  temporary?: boolean;
   sentAt: Date;
 }
 
@@ -143,6 +180,7 @@ const EmailDeliverySchema = new Schema<IEmailDelivery>(
     mode: { type: String, enum: deliveryModes, required: true },
     bookingId: { type: Schema.Types.ObjectId, ref: "TBookBooking", default: null },
     attempts: { type: Number, default: 1 },
+    temporary: { type: Boolean, default: false },
     sentAt: { type: Date, required: true },
   },
   { timestamps: false },

@@ -116,12 +116,12 @@ export async function countRecipientsAction(emailId: string): Promise<EmailActio
   }
 }
 
-export async function startEmailSendAction(emailId: string, resendAll: boolean): Promise<EmailActionResult> {
+export async function startEmailSendAction(emailId: string, resendAll: boolean, resendFailed = true): Promise<EmailActionResult> {
   try {
     const { organizationId, userId } = await requireOrgPermission("email:send");
     const email = await eventEmails.getEventEmailForOrg(organizationId, emailId);
     await requireEmailEvent(String(email.eventId));
-    await eventEmails.startEventEmailSend(organizationId, emailId, userId, { resendAll });
+    await eventEmails.startEventEmailSend(organizationId, emailId, userId, { resendAll, resendFailed });
     return { ok: true, message: "Sending started. You can leave this page — it keeps going." };
   } catch (error) {
     return fail(error, "startEmailSendAction");
@@ -132,18 +132,29 @@ export async function stopEmailSendAction(emailId: string): Promise<EmailActionR
   try {
     const { organizationId } = await requireOrgPermission("email:send");
     await eventEmails.stopEventEmailSend(organizationId, emailId);
-    return { ok: true, message: "Stopping after the current message. Send again later to finish the rest." };
+    return { ok: true, message: "Stopped after the current message. Send again later to finish the rest." };
   } catch (error) {
     return fail(error, "stopEmailSendAction");
   }
 }
 
 export interface SendProgress {
-  status: "idle" | "running" | "done" | "stopped";
+  /** "interrupted": the server running it went away; the resume job continues it within a few minutes. */
+  status: "idle" | "running" | "interrupted" | "done" | "stopped";
+  /** While running: sending, waiting for the next batch, or backing off because the SMTP server throttles. */
+  phase: "sending" | "pausing" | "throttled" | null;
   total: number;
   sent: number;
   failed: number;
   skipped: number;
+  /** Refused temporarily, retried later in this run. */
+  deferred: number;
+  batchSize: number | null;
+  batchPauseSeconds: number | null;
+  /** ISO time of the next batch (while pausing / throttled). */
+  nextBatchAt: string | null;
+  lastError: string | null;
+  resumeCount: number;
   logSent: number;
   logFailed: number;
 }
@@ -154,9 +165,25 @@ export async function emailProgressAction(emailId: string): Promise<SendProgress
     const email = await eventEmails.getEventEmailForOrg(organizationId, emailId);
     const log = await eventEmails.listEmailDeliveries(organizationId, emailId, { limit: 1 });
     const state = email.sendState ?? eventEmails.idleState();
-    // A send whose heartbeat stopped (server restart) shows as stopped; Send resumes it.
-    const stale = state.status === "running" && (!state.heartbeatAt || Date.now() - new Date(state.heartbeatAt).getTime() > 2 * 60 * 1000);
-    return { status: stale ? "stopped" : state.status, total: state.total, sent: state.sent, failed: state.failed, skipped: state.skipped, logSent: log.sent, logFailed: log.failed };
+    // A send whose heartbeat stopped (server restart) is continued by the server's resume job.
+    const stale = state.status === "running" && (!state.heartbeatAt || Date.now() - new Date(state.heartbeatAt).getTime() > eventEmails.STALE_AFTER_MS);
+    const running = state.status === "running" && !stale;
+    return {
+      status: stale ? "interrupted" : state.status,
+      phase: running ? (state.phase ?? "sending") : null,
+      total: state.total,
+      sent: state.sent,
+      failed: state.failed,
+      skipped: state.skipped,
+      deferred: state.deferred ?? 0,
+      batchSize: state.batchSize ?? null,
+      batchPauseSeconds: state.batchPauseSeconds ?? null,
+      nextBatchAt: running && state.nextBatchAt ? new Date(state.nextBatchAt).toISOString() : null,
+      lastError: state.lastError ?? null,
+      resumeCount: state.resumeCount ?? 0,
+      logSent: log.sent,
+      logFailed: log.failed,
+    };
   } catch {
     return null;
   }

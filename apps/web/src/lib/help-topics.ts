@@ -245,6 +245,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         text: [
           "Az automatikus e-mail regisztrációkor megy ki, vendégenként, a vendég saját adataival (pl. visszaigazolás QR-kóddal). Ha a vendég módosítja az adatait, csak ő kapja meg újra.",
           "A kézi e-mail (pl. emlékeztető) akkor megy ki, amikor megnyomod a Send gombot. Időzítés nincs, ezért a megfelelő napon küldd ki.",
+          "A kézi küldés csomagokban megy (alapból 50 levél, utána 60 mp szünet; az Event emails modul beállításaiban állítható: „Send batch size”, „Pause between batches”). Ha az SMTP szerver lassításra kér, a rendszer hosszabb szünetet tart, és később újrapróbálja azokat a címzetteket. A folyamatjelző mutatja az elküldött / összes számot és a következő csomag idejét.",
+          "Ha a szerver újraindul küldés közben, a küldés néhány percen belül magától folytatódik; aki már megkapta, nem kapja meg újra. Stop után a Send csak a maradékot küldi ki (a „Retry the ones that failed” jelölővel a hibásakat is).",
         ],
       },
       {

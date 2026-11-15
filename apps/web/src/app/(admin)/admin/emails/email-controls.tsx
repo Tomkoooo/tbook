@@ -366,9 +366,12 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
   const [progress, setProgress] = useState<SendProgress | null>(null);
   const [confirm, setConfirm] = useState<{ count: number } | null>(null);
   const [resendAll, setResendAll] = useState(false);
+  const [resendFailed, setResendFailed] = useState(true);
   const [pending, startTransition] = useTransition();
 
   const running = progress?.status === "running";
+  // Running, or interrupted (the server continues it on its own): keep polling, offer Stop.
+  const active = running || progress?.status === "interrupted";
 
   useEffect(() => {
     let cancelled = false;
@@ -377,25 +380,25 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
       if (!cancelled) setProgress(next);
     };
     void load();
-    if (!running) return () => void (cancelled = true);
-    const timer = setInterval(load, 2000);
+    if (!active) return () => void (cancelled = true);
+    const timer = setInterval(load, running ? 2000 : 5000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [emailId, running]);
+  }, [emailId, running, active]);
 
   // Refresh the delivery log once a send finishes.
   const wasRunning = useRef(false);
   useEffect(() => {
-    if (wasRunning.current && !running) router.refresh();
-    wasRunning.current = running;
-  }, [running, router]);
+    if (wasRunning.current && !active) router.refresh();
+    wasRunning.current = active;
+  }, [active, router]);
 
   const done = progress ? progress.sent + progress.failed + progress.skipped : 0;
 
   return (
-    <SectionCard title={manual ? "Send" : "Test"} description={manual ? "Check it with a test first. Send only reaches people who haven’t received it yet, so pressing it again after a stop or a failure only finishes the rest." : system
+    <SectionCard title={manual ? "Send" : "Test"} description={manual ? "Check it with a test first. It goes out in batches (batch size and pause: the event emails module settings). Send only reaches people who haven’t received it yet, so pressing it again after a stop only finishes the rest; an interrupted send continues on its own." : system
             ? "The module sends this when it happens. Send yourself a copy to check it ({{position}}, {{link}} and similar get sample values)."
             : "Automatic emails go out on each registration. Send yourself a copy to check it."}>
       <div className="grid gap-5">
@@ -410,22 +413,20 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
 
         {manual ? (
           <div className="grid gap-3 border-t pt-4">
-            {progress && progress.status !== "idle" ? (
-              <div className="grid gap-1.5">
-                <div className="flex flex-wrap justify-between gap-2 text-sm">
-                  <span className="font-medium">
-                    {progress.status === "running" ? "Sending…" : progress.status === "done" ? "Finished" : "Stopped"}
-                  </span>
-                  <span className="text-muted-foreground tabular-nums">
-                    {done} / {progress.total} · {progress.sent} sent · {progress.failed} failed · {progress.skipped} already had it
-                  </span>
-                </div>
-                <progress className="accent-primary h-2 w-full" value={done} max={Math.max(progress.total, 1)} />
-              </div>
-            ) : null}
+            {progress && progress.status !== "idle" ? <SendProgressView progress={progress} done={done} /> : null}
             <div className="flex flex-wrap items-center gap-3">
-              {running ? (
-                <Button type="button" variant="destructive" disabled={pending} onClick={() => startTransition(async () => setResult(await stopEmailSendAction(emailId)))}>
+              {active ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={pending}
+                  onClick={() =>
+                    startTransition(async () => {
+                      setResult(await stopEmailSendAction(emailId));
+                      setProgress(await emailProgressAction(emailId));
+                    })
+                  }
+                >
                   <Square /> Stop
                 </Button>
               ) : (
@@ -443,7 +444,8 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
                   <Send /> Send now…
                 </Button>
               )}
-              <CheckboxField label="Also resend to people who already received it" checked={resendAll} onCheckedChange={setResendAll} disabled={running} />
+              <CheckboxField label="Retry the ones that failed" checked={resendFailed} onCheckedChange={setResendFailed} disabled={active} />
+              <CheckboxField label="Also resend to people who already received it" checked={resendAll} onCheckedChange={setResendAll} disabled={active} />
             </div>
           </div>
         ) : null}
@@ -457,7 +459,8 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
             <DialogTitle>Send this email now?</DialogTitle>
             <DialogDescription>
               {confirm?.count ?? 0} recipients match right now.{" "}
-              {resendAll ? "Everyone gets it, including those who already received it." : "Those who already received it are skipped."} This can’t be undone.
+              {resendAll ? "Everyone gets it, including those who already received it." : "Those who already received it are skipped."}{" "}
+              {resendFailed ? "Earlier failures are tried again." : "Earlier failures are left out."} It goes out in batches with a pause between them. This can’t be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -469,7 +472,7 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
               disabled={pending || !confirm?.count}
               onClick={() =>
                 startTransition(async () => {
-                  const outcome = await startEmailSendAction(emailId, resendAll);
+                  const outcome = await startEmailSendAction(emailId, resendAll, resendFailed);
                   setConfirm(null);
                   setResult(outcome);
                   setProgress(await emailProgressAction(emailId));
@@ -482,5 +485,46 @@ export function SendPanel({ emailId, manual, system = false }: { emailId: string
         </DialogContent>
       </Dialog>
     </SectionCard>
+  );
+}
+
+const timeFormat = new Intl.DateTimeFormat("hu-HU", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Budapest" });
+
+/** Progress of a manual send: counts, pacing, and what it is doing right now. */
+function SendProgressView({ progress, done }: { progress: SendProgress; done: number }) {
+  const nextBatch = progress.nextBatchAt ? timeFormat.format(new Date(progress.nextBatchAt)) : null;
+  const label =
+    progress.status === "interrupted"
+      ? "Interrupted — the server continues it within a few minutes"
+      : progress.status === "running"
+        ? progress.phase === "throttled"
+          ? "Paused: the SMTP server is throttling"
+          : progress.phase === "pausing"
+            ? "Sending — pausing between batches"
+            : "Sending…"
+        : progress.status === "done"
+          ? "Finished"
+          : "Stopped";
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex flex-wrap justify-between gap-2 text-sm">
+        <span className="font-medium">{label}</span>
+        <span className="text-muted-foreground tabular-nums">
+          {done} / {progress.total} · {progress.sent} sent · {progress.failed} failed · {progress.skipped} already had it
+          {progress.deferred > 0 ? ` · ${progress.deferred} to retry` : ""}
+        </span>
+      </div>
+      <progress className="accent-primary h-2 w-full" value={done} max={Math.max(progress.total, 1)} />
+      <div className="text-muted-foreground flex flex-wrap justify-between gap-2 text-xs tabular-nums">
+        <span>
+          {progress.batchSize ? `Batches of ${progress.batchSize}, ${progress.batchPauseSeconds ?? 0} s pause` : null}
+          {progress.resumeCount > 0 ? ` · continued after an interruption ${progress.resumeCount}×` : ""}
+        </span>
+        {nextBatch ? <span>Next batch at {nextBatch}</span> : null}
+      </div>
+      {progress.lastError && (progress.phase === "throttled" || progress.status === "stopped") ? (
+        <p className="text-muted-foreground text-xs">Last error: {progress.lastError}</p>
+      ) : null}
+    </div>
   );
 }
