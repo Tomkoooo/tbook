@@ -246,7 +246,7 @@
     {
       "name": "1. Regisztráció megnyitása (nov. 16.)",
       "subject": "MVM Hálózatok Ünnepe 2026 – Elindult a regisztráció!",
-      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán!<br><a href=\"{{siteUrl}}\">{{siteUrl}}</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során kiválaszthatod a számodra megfelelő buszjáratot, amennyiben transzfert igényelsz, valamint jelezheted esetleges ételérzékenységedet is.</p><p>Várunk szeretettel!</p>",
+      "body": "<h3>Készülj az MVM Hálózatok Ünnepére!</h3><p>Decemberben ismét együtt ünnepeljük az elmúlt év eredményeit egy különleges este keretében.</p><p><strong>Időpont:</strong> 2026. december 4., 18:00<br><strong>Helyszín:</strong> BOK Csarnok, Budapest</p><p>Az este során díjátadóval, vacsorával, izgalmas programokkal és Wellhello-koncerttel várunk!</p><p>Regisztrálj az esemény weboldalán!<br><a href=\"http://www.halozatokunnepe2026.hu\">http://www.halozatokunnepe2026.hu</a></p><p>Weboldal jelszava: <strong>HalozatokUnnepe2026</strong></p><p>A jelentkezés során kiválaszthatod a számodra megfelelő buszjáratot, amennyiben transzfert igényelsz, valamint jelezheted esetleges ételérzékenységedet is.</p><p>Várunk szeretettel!</p>",
       "trigger": "manual",
       "audience": "list_all",
       "listId": "$list:dso",
