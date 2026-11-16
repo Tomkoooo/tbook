@@ -472,6 +472,31 @@ export async function listPassengers(route: IBusRoute): Promise<Passenger[]> {
     .sort((a, b) => (a.stopIndex ?? -1) - (b.stopIndex ?? -1) || a.name.localeCompare(b.name, "hu"));
 }
 
+/**
+ * Who has picked each bus choice, for the public "who's on this bus" list:
+ * names only (no contact details, no registration numbers), keyed by the
+ * choice value the bus question offers (`"<routeId>~<stopIndex>"`, or the
+ * plain route id for a bus without stops), sorted by name. Live bookings
+ * only; `includeTest` adds test bookings (preview + test-mode site).
+ * Inactive routes are skipped, like in the choices.
+ */
+export async function publicRiders(eventId: string, opts: { includeTest?: boolean } = {}): Promise<Record<string, string[]>> {
+  const riders: Record<string, string[]> = {};
+  for (const route of await listRoutes(eventId)) {
+    if (!route.active) continue;
+    const hasStops = routeStops(route).length > 0;
+    const rows = await routeAttendees(route, { test: opts.includeTest ? null : false });
+    for (const row of rows) {
+      const name = row.displayName.trim();
+      if (!name) continue;
+      const key = busChoiceValue(String(route._id), hasStops ? row.stopIndex : null);
+      (riders[key] ??= []).push(name);
+    }
+  }
+  for (const names of Object.values(riders)) names.sort((a, b) => a.localeCompare(b, "hu"));
+  return riders;
+}
+
 export interface LegCounts {
   booked: number;
   boarded: number;

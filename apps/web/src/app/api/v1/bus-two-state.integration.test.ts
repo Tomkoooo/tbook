@@ -3,6 +3,7 @@ import { BookingModel, EventGroupModel, EventModel, FieldClaimModel, Organizatio
 import { busTransport, eventEmails, setModuleMailTransporter, waitlist } from "@tbook/modules";
 import { generateApiKey, hashApiKey, rotateEventGroupPreviewKey, updateBookingDetails } from "@tbook/services";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { GET as getBusRiders } from "./events/[eventId]/bus-riders/route";
 import { GET as getEvent } from "./events/[eventId]/route";
 import { POST as postBooking } from "./bookings/route";
 import { POST as guestCancel } from "./guest/cancel/route";
@@ -341,5 +342,23 @@ describe("v1: two bus states (no buses yet / bus booking open)", () => {
     const promoted = (await BookingModel.findById(entry!.bookingId))!;
     expect(promoted.attendees[0]!.fields.busz).toBe("waitlist");
     expect((await post(guestLookup, "guest/lookup", { eventId, code: "6002" })).body.guest.busWaitlist).toEqual({ position: 1 });
+  });
+
+  it("bus-riders lists names per bus choice (no contact data), skips cancelled guests and test bookings", async () => {
+    const { busA, busB } = await openBuses();
+    await book([guest("7002", { transzfer: "igen", busz: busB }), guest("7001", { transzfer: "igen", busz: busB }), guest("7003", { transzfer: "igen", busz: busA })]);
+    await book([guest("7004", { transzfer: "igen", busz: busB })], { "X-TBook-Preview": previewKey, "X-TBook-Test": "1" });
+    const read = async (extra: Record<string, string> = {}, id = eventId) => {
+      const response = await getBusRiders(new Request(`https://tbook.test/api/v1/events/${id}/bus-riders`, { headers: headers(extra) }), { params: Promise.resolve({ eventId: id }) });
+      return { status: response.status, body: (await response.json()) as Json };
+    };
+    const live = await read();
+    expect(live.body).toMatchObject({ riders: { [busB]: ["Vendég 7001", "Vendég 7002"], [busA]: ["Vendég 7003"] } });
+    expect(JSON.stringify(live.body)).not.toContain("@");
+    expect((await read({ "X-TBook-Preview": previewKey, "X-TBook-Test": "1" })).body.riders[busB]).toEqual(["Vendég 7001", "Vendég 7002", "Vendég 7004"]);
+
+    await post(guestCancel, "guest/cancel", { eventId, code: "7001" });
+    expect((await read()).body.riders[busB]).toEqual(["Vendég 7002"]);
+    expect((await read({}, "000000000000000000000000")).status).toBe(404);
   });
 });

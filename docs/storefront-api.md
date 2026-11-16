@@ -171,6 +171,10 @@ A bus can have several pickup stops sharing its seats (e.g. "Szombathely–Győr
 - `meta.city` / `pickupPoint` / `departure` are the stop's; `meta.routeName` is the bus's name (its own city field).
 - In `/guest/lookup` the `bus` object gives the guest's stop as `city` / `pickupPoint` / `departureAt` / `departure`, plus `routeName` and `stopIndex` (null for a bus without stops). Emails: `{{bus.city}}`, `{{bus.pickupPoint}}`, `{{bus.departure}}` are the guest's stop, `{{bus.routeName}}` the bus's name.
 
+### Who is on which bus (added 2026-11-16)
+
+`GET /events/{eventId}/bus-riders` → `{ "riders": { "<choice value>": ["Name", …] } }`. The key is the value the bus question offers (`"<routeId>~<stopIndex>"`, or the plain `"<routeId>"` for a bus without stops); names are sorted (Hungarian collation). Names only — no email, phone or registration number. Cancelled guests, the bus waitlist and inactive buses are not listed; test registrations only with the preview key and `X-TBook-Test: 1`. A choice nobody has picked is absent. Rate limited (60/min per client). The site uses it so friends can pick the same bus.
+
 ### Bus waitlist ("értesítést kérek")
 
 While at least one bus is active, a select fed by the bus module (`choicesSource: "bus-transport:routes"`) always accepts the value `"waitlist"`, listed last in both `attendeeFieldSchema[].choices` and `fieldChoiceDetails`:
