@@ -29,6 +29,11 @@ describe("registration field helpers", () => {
     expect(normalizeListKey(" 6000-0001 ", "digits_only")).toBe("60000001");
     expect(normalizeListKey("AB 12", "alnum")).toBe("ab12");
     expect(normalizeListKey("  Teszt  Elek ")).toBe("teszt elek");
+    // Names: accents, titles, hyphens and spacing don't matter.
+    expect(normalizeListKey("Dr. Németh  András", "name")).toBe("nemeth andras");
+    expect(normalizeListKey("nemeth andras", "name")).toBe("nemeth andras");
+    expect(normalizeListKey("Gáborjáni-Szabó Szabolcs", "name")).toBe(normalizeListKey("gaborjani szabo szabolcs", "name"));
+    expect(normalizeListKey("dr Kiss Csaba", "name")).toBe(normalizeListKey("Dr. Kiss Csaba", "name"));
   });
 
   it("normalises unique values ignoring case, spaces and dashes", () => {

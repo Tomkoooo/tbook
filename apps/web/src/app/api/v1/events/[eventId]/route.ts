@@ -27,6 +27,8 @@ export async function GET(request: Request, context: { params: Promise<{ eventId
       registrationPrefill: prefill ? { fieldKey: prefill.fieldKey, label: prefill.label, helpText: prefill.helpText } : null,
       remainingPlaces: event?.capacity == null ? null : Math.max(event.capacity - (event.soldGuestCount ?? 0), 0),
       salesState: event ? publicSalesState(event) : "closed",
+      // VIP guests register by name on their own list and seat pool (POST /events/{id}/vip-lookup).
+      vip: event?.vipListId ? { enabled: true, remainingPlaces: event.vipCapacity == null ? null : Math.max(event.vipCapacity - (event.vipSoldCount ?? 0), 0) } : { enabled: false, remainingPlaces: null },
       ...(preview ? { preview: true } : {}),
     };
   });

@@ -21,6 +21,7 @@ import {
   Building2,
   Package,
   Settings,
+  Star,
   Tablet,
   Ticket,
   Users,
@@ -88,6 +89,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/admin/emails", label: "Emails", icon: Mail, permission: ["email:send", "booking:manage"], module: "event-emails" },
       { href: "/admin/bus", label: "Buses", icon: Bus, permission: ["bus:manage", "bus:board", "booking:manage"], module: "bus-transport" },
+      { href: "/admin/vip", label: "VIP guests", icon: Star, permission: "booking:read" },
       { href: "/admin/waitlist", label: "Waitlist", icon: ListOrdered, permission: ["waitlist:manage", "booking:manage"], module: "waitlist" },
       { href: "/admin/feedback", label: "Feedback", icon: MessageSquareHeart, permission: ["feedback:manage", "event:write"], module: "feedback" },
       { href: "/admin/kiosk", label: "Kiosk", icon: Tablet, permission: ["feedback:kiosk", "feedback:manage", "event:write"], module: "feedback" },

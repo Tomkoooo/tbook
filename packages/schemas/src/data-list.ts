@@ -15,7 +15,7 @@ export const dataListColumnSchema = z.object({
 export type DataListColumn = z.infer<typeof dataListColumnSchema>;
 
 /** How keys are compared: what is stripped before matching a submitted value. */
-export const dataListKeyNormalizations = ["trim_case", "digits_only", "alnum"] as const;
+export const dataListKeyNormalizations = ["trim_case", "digits_only", "alnum", "name"] as const;
 export const dataListKeyNormalizationSchema = z.enum(dataListKeyNormalizations);
 export type DataListKeyNormalization = z.infer<typeof dataListKeyNormalizationSchema>;
 

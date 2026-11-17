@@ -163,6 +163,11 @@ export const eventSchema = z.object({
   daySold: z.record(dayKeySchema, z.number().min(0)).default({}),
   capacity: z.number().nullable().default(null),
   soldGuestCount: z.number().min(0).default(0),
+  /** Data list of VIP guests (matched by name). VIPs skip the registration rules and use their own seat pool. */
+  vipListId: objectIdSchema.nullable().default(null),
+  /** Seats reserved for VIPs on top of `capacity` (null: unlimited). */
+  vipCapacity: z.number().nullable().default(null),
+  vipSoldCount: z.number().min(0).default(0),
   heroImage: z.string().default(""),
   voucherHeaderImage: z.string().default(""),
   vouchersEnabled: z.boolean().default(true),

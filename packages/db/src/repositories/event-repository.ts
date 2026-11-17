@@ -85,6 +85,24 @@ export const eventRepository = {
       { updatePipeline: true },
     );
   },
+  /** VIP seat pool: same atomic guard as reserveCapacity, on vipCapacity / vipSoldCount. */
+  reserveVipCapacity(eventId: string, guests: number): Promise<IEvent | null> {
+    return EventModel.findOneAndUpdate(
+      { _id: eventId, $or: [{ vipCapacity: null }, { $expr: { $lte: [{ $add: ["$vipSoldCount", guests] }, "$vipCapacity"] } }] },
+      { $inc: { vipSoldCount: guests } },
+      { returnDocument: "after" },
+    ).exec();
+  },
+  reserveVipCapacityUnchecked(eventId: string, guests: number): Promise<IEvent | null> {
+    return EventModel.findOneAndUpdate({ _id: eventId }, { $inc: { vipSoldCount: guests } }, { returnDocument: "after" }).exec();
+  },
+  async releaseVipCapacity(eventId: string, guests: number): Promise<void> {
+    await EventModel.updateOne(
+      { _id: eventId },
+      [{ $set: { vipSoldCount: { $max: [0, { $subtract: [{ $ifNull: ["$vipSoldCount", 0] }, guests] }] } } }],
+      { updatePipeline: true },
+    );
+  },
   /**
    * Reserves passes on several days of a day-pass event, all-or-nothing.
    *

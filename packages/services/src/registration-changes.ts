@@ -7,6 +7,7 @@ import { attendeeIssuesMessage, eligibilityIssuesMessage, normalizeAttendeePaylo
 import { loadDataListMembership } from "./data-list-service";
 import { extensions, type EventContext } from "./extensions";
 import { resolveModules } from "./module-registry";
+import { attendeesSubjectToRules, vipAttendeeFlags } from "./vip-service";
 import { refreshVoucherNames } from "./registration-admin-service";
 import { claimUniqueFieldValues, releaseHooksOnly, resolveFieldChoices, runRegistrationReservers } from "./registration-pipeline";
 
@@ -141,8 +142,9 @@ export async function replaceBookingAttendees(bookingId: string, incoming: Booki
 
   if (!opts.skipEligibility) {
     const eligibilityEvent = { ...plain(event), eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null };
-    const eligibilityIssues = validateEligibility(eligibilityEvent, next, schema, memberSchema, null, {
-      listMembership: await loadDataListMembership(ctx.organizationId, collectListLookups(eligibilityEvent, next)),
+    const ruled = await attendeesSubjectToRules(event, schema, next);
+    const eligibilityIssues = ruled.length === 0 ? [] : validateEligibility(eligibilityEvent, ruled, schema, memberSchema, null, {
+      listMembership: await loadDataListMembership(ctx.organizationId, collectListLookups(eligibilityEvent, ruled)),
     });
     if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
   }
@@ -276,7 +278,15 @@ export async function cancelBookingAttendee(bookingId: string, attendeeIndex: nu
   if (!updated) throw ActionError.conflict("The registration changed meanwhile. Please try again.");
 
   const event = await eventRepository.findById(String(booking.eventId));
-  if (event?.capacity != null && !booking.isTest) await eventRepository.releaseCapacity(String(booking.eventId), 1);
+  if (event && !booking.isTest) {
+    const wasVip = (await vipAttendeeFlags(event, (booking.attendeeFieldSchema ?? []) as never, [removed]))[0] === true;
+    if (wasVip) {
+      await eventRepository.releaseVipCapacity(String(booking.eventId), 1);
+      await BookingModel.updateOne({ _id: booking._id, vipGuests: { $gt: 0 } }, { $inc: { vipGuests: -1 } }).exec();
+    } else if (event.capacity != null) {
+      await eventRepository.releaseCapacity(String(booking.eventId), 1);
+    }
+  }
   await voucherRepository.removeAttendeeIndex(bookingId, attendeeIndex);
   const schema = (booking.attendeeFieldSchema ?? []).map((f) => plain(f) as AttendeeFieldDef);
   await fieldClaimRepository.releaseValues(bookingId, uniqueClaimsOf(schema, [removed]));
@@ -321,8 +331,9 @@ export async function checkRegistrationAnswers(eventId: string, guests: number, 
   if (issues.length > 0) throw ActionError.validation(attendeeIssuesMessage(issues, fullSchema), { issues });
   const normalized = normalizeAttendeePayload(fullSchema, attendees, memberSchema);
   const eligibilityEvent = { ...plain(event), eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null };
-  const eligibilityIssues = validateEligibility(eligibilityEvent, normalized, fullSchema, memberSchema, null, {
-    listMembership: await loadDataListMembership(organizationId, collectListLookups(eligibilityEvent, normalized)),
+  const ruled = await attendeesSubjectToRules(event, fullSchema, normalized);
+  const eligibilityIssues = ruled.length === 0 ? [] : validateEligibility(eligibilityEvent, ruled, fullSchema, memberSchema, null, {
+    listMembership: await loadDataListMembership(organizationId, collectListLookups(eligibilityEvent, ruled)),
   });
   if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
   for (const claim of uniqueClaimsOf(fullSchema, normalized)) {

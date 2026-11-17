@@ -96,4 +96,5 @@ export * from "./spreadsheet-import";
 export * from "./registration-changes";
 export * from "./registration-prefill";
 export * from "./guest-tags";
+export * from "./vip-service";
 export * from "./event-report-service";

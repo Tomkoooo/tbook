@@ -134,6 +134,8 @@ const BookingSchema = new Schema<IBooking>(
     playersPerTicket: { type: Number, default: 1, min: 1 },
     attendees: { type: [bookingAttendeeSchema], default: [] },
     guests: { type: Number, required: true, min: 1 },
+    /** How many of `guests` are VIPs: they sit in the event's VIP seat pool, not the general one. */
+    vipGuests: { type: Number, default: 0, min: 0 },
     nights: { type: Number, default: 0, min: 0 },
     selections: { type: Schema.Types.Mixed, default: {} },
     discountCode: { type: String, default: null },

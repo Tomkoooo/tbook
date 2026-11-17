@@ -171,6 +171,15 @@ A bus can have several pickup stops sharing its seats (e.g. "Szombathely–Győr
 - `meta.city` / `pickupPoint` / `departure` are the stop's; `meta.routeName` is the bus's name (its own city field).
 - In `/guest/lookup` the `bus` object gives the guest's stop as `city` / `pickupPoint` / `departureAt` / `departure`, plus `routeName` and `stopIndex` (null for a bus without stops). Emails: `{{bus.city}}`, `{{bus.pickupPoint}}`, `{{bus.departure}}` are the guest's stop, `{{bus.routeName}}` the bus's name.
 
+### VIP guests (added 2026-11-17)
+
+An event can have a VIP name list (`vipListId`, a data list with key normalisation `name`) and its own VIP seat pool (`vipCapacity`, on top of `capacity`). VIPs have no employee ID: they register with their **name in the identifying question** (the one employees answer with their ID), written as the list has it.
+
+- `GET /events/{eventId}` adds `vip: { enabled, remainingPlaces }` (`remainingPlaces` null = unlimited). The general `remainingPlaces` / `waitlistOpen` describe the general pool only.
+- `POST /events/{eventId}/vip-lookup` `{ name }` → `{ found, alreadyRegistered, name }`. Matching ignores accents, case, "dr."/"prof." and spacing; `name` is the list's spelling — send it back as the identifying answer in `POST /bookings`, and use it for `/guest/lookup`.
+- A booking whose attendee is on the VIP list skips the registration rules (the employee-list rule), takes VIP seats (`booking.vipGuests`) instead of general ones, and the ticket is tagged `VIP` (shown on the door scan). A full VIP pool answers 400 `capacity_full` with a VIP message. Cancelling a VIP releases a VIP seat.
+- The console's VIP guests page lists the VIP list with who has registered.
+
 ### Who is on which bus (added 2026-11-16)
 
 `GET /events/{eventId}/bus-riders` → `{ "riders": { "<choice value>": ["Name", …] } }`. The key is the value the bus question offers (`"<routeId>~<stopIndex>"`, or the plain `"<routeId>"` for a bus without stops); names are sorted (Hungarian collation). Names only — no email, phone or registration number. Cancelled guests, the bus waitlist and inactive buses are not listed; test registrations only with the preview key and `X-TBook-Test: 1`. A choice nobody has picked is absent. Rate limited (60/min per client). The site uses it so friends can pick the same bus.

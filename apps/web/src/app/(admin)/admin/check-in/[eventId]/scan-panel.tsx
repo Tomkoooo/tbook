@@ -311,7 +311,12 @@ function ScanResult({
         {title ? <p className="text-xl font-bold">{title}</p> : null}
         {name ? <p className="text-base font-medium">{name}</p> : null}
         {validDate ? <p className="text-sm tabular-nums">Pass for {validDate}</p> : null}
-        {tags && tags.length > 0 ? <p className="text-base font-bold uppercase tracking-wide">{tags.join(" · ")}</p> : null}
+        {tags?.some((tag) => tag.toLowerCase() === "vip") ? (
+          <p className="my-1 inline-block rounded-md bg-warning px-3 py-1 text-2xl font-black uppercase tracking-widest text-white">★ VIP pass</p>
+        ) : null}
+        {tags && tags.filter((tag) => tag.toLowerCase() !== "vip").length > 0 ? (
+          <p className="text-base font-bold uppercase tracking-wide">{tags.filter((tag) => tag.toLowerCase() !== "vip").join(" · ")}</p>
+        ) : null}
         {message ? <p className="text-sm">{message}</p> : null}
       </div>
     </div>

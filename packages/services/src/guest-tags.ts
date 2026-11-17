@@ -1,9 +1,10 @@
 import { ActionError } from "@tbook/actions";
-import { BookingModel, GuestTagRuleModel, VoucherModel, type IBooking } from "@tbook/db";
+import { BookingModel, GuestTagRuleModel, VoucherModel, eventRepository, type IBooking } from "@tbook/db";
 import { normalizeUniqueValue } from "@tbook/domain";
 import type { BookingAttendee } from "@tbook/schemas";
 import { extensions } from "./extensions";
 import { registerImportTarget } from "./spreadsheet-import";
+import { VIP_TAG, vipAttendeeFlags } from "./vip-service";
 
 /**
  * Guest tags ("VIP", "Sajtó", "Díjazott", …): labels on one attendee,
@@ -75,7 +76,22 @@ export async function applyPendingGuestTags(booking: IBooking): Promise<void> {
   }
 }
 
+/** Guests on the event's VIP list are tagged "VIP" as soon as they're registered. */
+export async function applyVipTags(booking: IBooking): Promise<void> {
+  const event = await eventRepository.findById(String(booking.eventId));
+  if (!event?.vipListId) return;
+  const attendees = (booking.attendees ?? []) as BookingAttendee[];
+  const flags = await vipAttendeeFlags(event, (booking.attendeeFieldSchema ?? []) as never, attendees);
+  for (const [attendeeIndex, isVip] of flags.entries()) {
+    if (!isVip) continue;
+    const fresh = (await BookingModel.findById(booking._id).exec())!;
+    const current = (fresh.attendees?.[attendeeIndex] as BookingAttendee | undefined)?.tags ?? [];
+    await writeTags(fresh, attendeeIndex, cleanTags([VIP_TAG, ...current]), "system:vip-list");
+  }
+}
+
 extensions.onBookingConfirmed("core:guest-tags", applyPendingGuestTags);
+extensions.onBookingConfirmed("core:vip-tags", applyVipTags);
 
 registerImportTarget({
   key: "core:guest-tags",

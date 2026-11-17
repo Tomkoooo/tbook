@@ -212,6 +212,7 @@ export const bookingSchema = z.object({
   playersPerTicket: z.number().min(1).default(1),
   attendees: z.array(bookingAttendeeSchema).default([]),
   guests: z.number().min(1),
+  vipGuests: z.number().min(0).default(0),
   nights: z.number().min(0).default(0),
   selections: selectionsSchema.default({}),
   /** The day-pass discount code applied at checkout, if any (its `code`, not its label). */

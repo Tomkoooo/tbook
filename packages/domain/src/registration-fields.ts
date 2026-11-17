@@ -41,6 +41,16 @@ export function normalizeListKey(raw: unknown, mode: DataListKeyNormalization = 
       return text.replace(/\D+/g, "");
     case "alnum":
       return text.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+    case "name":
+      // People: ignore accents, case, titles ("dr.", "prof."), hyphens and spacing, so
+      // "Dr. Németh András" and "nemeth andras" find the same row.
+      return text
+        .normalize("NFD")
+        .replace(/\p{M}+/gu, "")
+        .toLowerCase()
+        .replace(/\b(dr|prof)\b\.?/g, " ")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
     default:
       return text.replace(/\s+/g, " ").toLowerCase();
   }

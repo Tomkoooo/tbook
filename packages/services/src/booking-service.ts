@@ -57,6 +57,7 @@ import {
 } from "./booking-validation";
 import { loadDataListMembership } from "./data-list-service";
 import { resolveModules } from "./module-registry";
+import { vipAttendeeFlags } from "./vip-service";
 import {
   assignAttendeeIdentity,
   checkUniqueFieldValues,
@@ -158,6 +159,10 @@ export interface BookingPolicyOverrides {
 }
 
 /** Thrown when the event (or the overall cap) has no room for the requested guests. */
+export function vipCapacityFullError(): ActionError {
+  return new ActionError(400, "capacity_full", "Sajnos betelt a VIP vendégeknek fenntartott keret. Kérjük, keresd a szervezőket.");
+}
+
 export function capacityFullError(): ActionError {
   return new ActionError(400, "capacity_full", "Sajnos elfogytak a szabad helyek erre az eseményre.");
 }
@@ -466,6 +471,11 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
   const ctx = quoted ?? (await quote({ ...input, teamMemberCount: inferredTeamMemberCount }, opts));
   const { event, quote: priceQuote, hotelName, nights, selections, discountCode, currency, registrationFieldSchema, teamMemberFieldSchema, guests } = ctx;
 
+  // VIP guests (on the event's VIP name list) use their own seat pool and skip the registration rules.
+  const vipFlags = await vipAttendeeFlags(event, registrationFieldSchema, input.attendees ?? []);
+  const vipCount = vipFlags.filter(Boolean).length;
+  const generalCount = guests - vipCount;
+
   // Per-day passes are reserved first: it is the stricter, multi-counter
   // reservation, and if the optional overall cap then fails we release it.
   let dayReserved: DayTickets | null = null;
@@ -474,7 +484,8 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
     // Test bookings stand apart from live capacity: nothing to reserve or check.
   } else if (dryRun) {
     // Day baskets were checked against live availability in quote(); only the overall cap is left.
-    if (event.capacity != null && !opts?.allowOverCapacity && event.capacity - (event.soldGuestCount ?? 0) < guests) throw capacityFullError();
+    if (event.capacity != null && !opts?.allowOverCapacity && generalCount > 0 && event.capacity - (event.soldGuestCount ?? 0) < generalCount) throw capacityFullError();
+    if (vipCount > 0 && event.vipCapacity != null && !opts?.allowOverCapacity && event.vipCapacity - (event.vipSoldCount ?? 0) < vipCount) throw vipCapacityFullError();
   } else if (ctx.dayTickets && event.dayPass) {
     const dayConfig = event.dayPass;
     const reservedDays = opts?.allowOverCapacity
@@ -489,17 +500,29 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
   }
 
   let capacityReserved = false;
-  if (event.capacity != null && !dryRun && !isTest) {
+  let vipReserved = false;
+  if (event.capacity != null && generalCount > 0 && !dryRun && !isTest) {
     // The unchecked variant is a separate repository method, so an
     // over-capacity write can only happen when a caller explicitly asks.
     const reserved = opts?.allowOverCapacity
-      ? await eventRepository.reserveCapacityUnchecked(String(event._id), guests)
-      : await eventRepository.reserveCapacity(String(event._id), guests);
+      ? await eventRepository.reserveCapacityUnchecked(String(event._id), generalCount)
+      : await eventRepository.reserveCapacity(String(event._id), generalCount);
     if (!reserved) {
       if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
       throw capacityFullError();
     }
     capacityReserved = true;
+  }
+  if (vipCount > 0 && !dryRun && !isTest) {
+    const reserved = opts?.allowOverCapacity
+      ? await eventRepository.reserveVipCapacityUnchecked(String(event._id), vipCount)
+      : await eventRepository.reserveVipCapacity(String(event._id), vipCount);
+    if (!reserved) {
+      if (capacityReserved) await eventRepository.releaseCapacity(String(event._id), generalCount);
+      if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
+      throw vipCapacityFullError();
+    }
+    vipReserved = true;
   }
 
   let releaseClaims: (() => Promise<void>) | null = null;
@@ -542,10 +565,12 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
     // every eligibility rule here before (rules were never enforced).
     const eventFields = typeof (event as { toObject?: () => unknown }).toObject === "function" ? (event as unknown as { toObject: () => typeof event }).toObject() : event;
     const eligibilityEvent = { ...eventFields, eligibilityFormRules: event.eligibilityFormRules as EligibilityRulesConfig | null };
-    const eligibilityIssues = opts?.skipEligibility
+    // VIPs are on the organizers' own list: the employee-list rules don't apply to them.
+    const rulesAttendees = (input.attendees ?? []).filter((_, index) => !vipFlags[index]);
+    const eligibilityIssues = opts?.skipEligibility || (vipCount > 0 && rulesAttendees.length === 0)
       ? []
-      : validateEligibility(eligibilityEvent, input.attendees, fieldSchema, teamMemberFieldSchema, playersPerTicket > 1 ? playersPerTicket : null, {
-          listMembership: await loadDataListMembership(extensionCtx.organizationId, collectListLookups(eligibilityEvent, input.attendees)),
+      : validateEligibility(eligibilityEvent, vipCount > 0 ? rulesAttendees : input.attendees, fieldSchema, teamMemberFieldSchema, playersPerTicket > 1 ? playersPerTicket : null, {
+          listMembership: await loadDataListMembership(extensionCtx.organizationId, collectListLookups(eligibilityEvent, vipCount > 0 ? rulesAttendees : input.attendees)),
         });
     if (eligibilityIssues.length > 0) throw ActionError.validation(eligibilityIssuesMessage(eligibilityIssues), { issues: eligibilityIssues });
 
@@ -583,6 +608,7 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
       playersPerTicket,
       attendees,
       guests: guests,
+      vipGuests: vipCount,
       nights,
       selections,
       discountCode,
@@ -595,7 +621,8 @@ async function buildPendingBooking(input: CreateBookingInput, opts: QuoteOptions
   } catch (error) {
     if (releaseReservations) await releaseReservations();
     if (releaseClaims) await releaseClaims();
-    if (capacityReserved) await eventRepository.releaseCapacity(String(event._id), guests);
+    if (capacityReserved) await eventRepository.releaseCapacity(String(event._id), generalCount);
+    if (vipReserved) await eventRepository.releaseVipCapacity(String(event._id), vipCount);
     if (dayReserved) await eventRepository.releaseDayCapacity(String(event._id), dayReserved);
     throw error;
   }
@@ -613,9 +640,11 @@ async function releaseBookingCapacity(booking: IBooking): Promise<void> {
   const event = await eventRepository.findById(String(booking.eventId));
   if (!event) return;
 
-  if (event.capacity != null) {
-    await eventRepository.releaseCapacity(String(booking.eventId), booking.guests);
+  const vipGuests = Math.min(booking.vipGuests ?? 0, booking.guests);
+  if (event.capacity != null && booking.guests - vipGuests > 0) {
+    await eventRepository.releaseCapacity(String(booking.eventId), booking.guests - vipGuests);
   }
+  if (vipGuests > 0) await eventRepository.releaseVipCapacity(String(booking.eventId), vipGuests);
   if (event.kind === "day_pass") {
     const { tickets } = parseDayTickets(booking.selections as Record<string, unknown>);
     if (Object.keys(tickets).length > 0) await eventRepository.releaseDayCapacity(String(booking.eventId), tickets);
