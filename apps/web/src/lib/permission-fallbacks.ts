@@ -14,6 +14,8 @@ export const PERMISSION_FALLBACKS: Partial<Record<Permission, Permission[]>> = {
   "feedback:manage": ["event:write"],
   "bus:board": ["bus:manage", "booking:manage"],
   "feedback:kiosk": ["feedback:manage", "event:write"],
+  "stand:manage": ["event:write"],
+  "stand:operate": ["stand:manage", "sale:create", "event:write"],
 };
 
 /** The permission itself followed by its fallbacks. */

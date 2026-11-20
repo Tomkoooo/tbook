@@ -42,6 +42,10 @@ export const TBOOK_PERMISSIONS = [
   "feedback:manage",
   /** Run the rating kiosk on a venue tablet while signed in. Falls back to feedback:manage, event:write. */
   "feedback:kiosk",
+  /** Run a stand day: open, sell, restock, record internal use, close. Falls back to sale:create, event:write. */
+  "stand:operate",
+  /** Stand products and prices, past days, stats and report settings. Falls back to event:write. */
+  "stand:manage",
 ] as const;
 
 export const permissionSchema = z.enum(TBOOK_PERMISSIONS);

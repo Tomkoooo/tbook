@@ -32,6 +32,12 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     permissions: ["event:read", "feedback:kiosk"],
   },
   {
+    key: "stand-seller",
+    name: "Pultos",
+    description: "Sells at the stand: opens the day, sells, restocks, records internal use and closes",
+    permissions: ["event:read", "stand:operate"],
+  },
+  {
     key: "organizer",
     name: "Szervező",
     description: "Runs the event day to day: guests, buses, emails, waitlist, check-in",
