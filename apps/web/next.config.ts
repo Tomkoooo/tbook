@@ -18,6 +18,12 @@ const nextConfig: NextConfig = {
   experimental: { serverActions: { bodySizeLimit: "15mb" } },
   // The workspace root sits two levels up from this app.
   outputFileTracingRoot: new URL("../..", import.meta.url).pathname,
+  async headers() {
+    return [
+      // The worker must always be revalidated, or a broken one can't be replaced.
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }, { key: "Service-Worker-Allowed", value: "/" }] },
+    ];
+  },
   async rewrites() {
     return [
       // Legacy path alias so the still-running Sörfeszt / World Darts
