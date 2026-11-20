@@ -29,7 +29,9 @@ export default async function StandPage({ searchParams }: { searchParams: Promis
   }
   const eventId = String(event._id);
   const manage = hasPermissionOrFallback(permissions, "stand:manage");
-  const [openDay, settings] = await Promise.all([stand.getOpenDay(eventId), stand.standSettings(event)]);
+  const [realDay, sandboxDay, settings] = await Promise.all([stand.getOpenDay(eventId), stand.getSandboxDay(eventId), stand.standSettings(event)]);
+  // A real open day always wins; the practice run is only shown while there is none.
+  const openDay = realDay ?? sandboxDay;
   const today = stand.todayKey();
   const proposal = openDay ? null : await stand.proposeOpening(eventId, today);
   const products = openDay ? await stand.listProducts(eventId, { activeOnly: true }) : [];
@@ -39,7 +41,7 @@ export default async function StandPage({ searchParams }: { searchParams: Promis
     <>
       <PageTitle
         title={event.name}
-        description={openDay ? `Nyitva: ${openDay.date}` : "Nincs nyitott nap"}
+        description={openDay ? (openDay.sandbox ? "Gyakorló mód" : `Nyitva: ${openDay.date}`) : "Nincs nyitott nap"}
         actions={events.length > 1 ? <EventPicker basePath="/admin/stand" events={events.map((e) => ({ id: String(e._id), name: e.name }))} value={eventId} /> : null}
       />
       <StandTabs active="sell" eventId={eventId} manage={manage} />

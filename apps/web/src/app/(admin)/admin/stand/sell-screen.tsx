@@ -12,7 +12,7 @@ import { FormField, ResultNotice } from "@/components/form-bits";
 import { Notice } from "@/components/notice";
 import { Stat, StatGrid } from "@/components/stat";
 import { cn } from "@/lib/utils";
-import { addProductToDayAction, changeStandAction, closeDayAction, type StandChange, type StandResult } from "./actions";
+import { addProductToDayAction, changeStandAction, closeDayAction, endSandboxAction, type StandChange, type StandResult } from "./actions";
 import type { StandDayDto, StandLineDto } from "./dto";
 
 type Mode = "cash" | "card" | "internal" | "restock";
@@ -45,6 +45,7 @@ export function SellScreen({
   missing: Array<{ id: string; name: string }>;
 }) {
   void eventId;
+  const router = useRouter();
   const [day, setDay] = useState(initial);
   const [mode, setMode] = useState<Mode>("cash");
   const [error, setError] = useState<string | null>(null);
@@ -93,11 +94,30 @@ export function SellScreen({
           </Button>
         ))}
         {day.devices ? <Badge variant="outline">Nyomtató + kártyaolvasó</Badge> : null}
-        <Button className="ml-auto" variant="outline" size="lg" onClick={() => setClosing(true)}>
-          Nap zárása
-        </Button>
+        {day.sandbox ? (
+          <Button
+            className="ml-auto"
+            variant="outline"
+            size="lg"
+            disabled={pending}
+            onClick={() =>
+              start(async () => {
+                const r = await endSandboxAction(day.id);
+                if (r.ok) router.refresh();
+                else setError(r.message ?? "Failed.");
+              })
+            }
+          >
+            Gyakorlás vége
+          </Button>
+        ) : (
+          <Button className="ml-auto" variant="outline" size="lg" onClick={() => setClosing(true)}>
+            Nap zárása
+          </Button>
+        )}
       </div>
 
+      {day.sandbox ? <Notice tone="warning">Gyakorló mód: semmi sem kerül a statisztikába vagy a készletbe, a végén az egész törlődik.</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {missing.length > 0 ? (
         <Notice tone="info">

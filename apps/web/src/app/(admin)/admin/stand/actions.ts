@@ -22,10 +22,10 @@ function fail(error: unknown, label: string): StandResult {
 
 const refresh = () => revalidatePath("/admin/stand", "layout");
 
-export async function openDayAction(eventId: string, devices: boolean, openings: Record<string, number>): Promise<StandResult> {
+export async function openDayAction(eventId: string, devices: boolean, openings: Record<string, number>, sandbox = false): Promise<StandResult> {
   try {
     const { organizationId } = await requireOrgPermission("stand:operate");
-    const day = await stand.openDay(organizationId, eventId, { devices, openings });
+    const day = await stand.openDay(organizationId, eventId, { devices, openings, sandbox });
     refresh();
     return { ok: true, day: toDayDto(day) };
   } catch (error) {
@@ -62,6 +62,18 @@ export async function closeDayAction(dayId: string, counted: Record<string, numb
     return { ok: true, message: `Day closed.${mail}` };
   } catch (error) {
     return fail(error, "closeDayAction");
+  }
+}
+
+/** Ends the practice run and throws it away. */
+export async function endSandboxAction(dayId: string): Promise<StandResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("stand:operate");
+    await stand.endSandbox(organizationId, dayId);
+    refresh();
+    return { ok: true, message: "Practice ended." };
+  } catch (error) {
+    return fail(error, "endSandboxAction");
   }
 }
 

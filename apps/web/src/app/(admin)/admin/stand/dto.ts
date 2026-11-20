@@ -22,6 +22,8 @@ export interface StandDayDto {
   id: string;
   date: string;
   devices: boolean;
+  /** Practice day: not in stats or inventory. */
+  sandbox: boolean;
   lines: StandLineDto[];
 }
 
@@ -30,6 +32,7 @@ export function toDayDto(day: Day): StandDayDto {
     id: String(day._id),
     date: day.date,
     devices: day.devices,
+    sandbox: day.sandbox,
     lines: day.lines.map((l) => ({
       productId: String(l.productId),
       name: l.name,

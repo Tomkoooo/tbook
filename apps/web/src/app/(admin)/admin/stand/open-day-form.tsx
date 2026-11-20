@@ -22,6 +22,7 @@ export function OpenDayForm({ eventId, date, previousDate, items, manage }: { ev
   const router = useRouter();
   const [counts, setCounts] = useState<Record<string, string>>(() => Object.fromEntries(items.map((i) => [i.productId, String(i.opening)])));
   const [devices, setDevices] = useState(false);
+  const [sandbox, setSandbox] = useState(false);
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
   const numbers = () => Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Number(v) || 0]));
@@ -43,6 +44,7 @@ export function OpenDayForm({ eventId, date, previousDate, items, manage }: { ev
             ))}
           </div>
           <CheckboxField label="Nyomtató és kártyaolvasó kezelése" hint="Ki: csak készletkezelés. Be: az eladásokhoz nyomtatás és kártyaolvasó is tartozik." checked={devices} onCheckedChange={setDevices} />
+          <CheckboxField label="Gyakorló mód" hint="Kipróbálás éles nyitás nélkül: a meglévő termékekkel, a megadott mennyiségekkel. Nem kerül a statisztikába és a készletbe, a végén törlődik." checked={sandbox} onCheckedChange={setSandbox} />
           <ResultNotice result={result} />
           <div>
             <Button
@@ -50,13 +52,13 @@ export function OpenDayForm({ eventId, date, previousDate, items, manage }: { ev
               disabled={pending}
               onClick={() =>
                 start(async () => {
-                  const r = await openDayAction(eventId, devices, numbers());
+                  const r = await openDayAction(eventId, devices, numbers(), sandbox);
                   setResult(r);
                   if (r.ok) router.refresh();
                 })
               }
             >
-              Nap megnyitása
+              {sandbox ? "Gyakorlás indítása" : "Nap megnyitása"}
             </Button>
           </div>
         </div>
