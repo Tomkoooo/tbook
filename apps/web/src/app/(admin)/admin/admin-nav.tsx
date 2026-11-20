@@ -22,6 +22,7 @@ import {
   Package,
   Settings,
   Star,
+  Store,
   Tablet,
   Ticket,
   Users,
@@ -80,6 +81,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     label: "Sales",
     items: [
       { href: "/admin/sales", label: "Point of sale", icon: ShoppingCart, permission: ["sale:create", "booking:manage"] },
+      { href: "/admin/stand", label: "Stand", icon: Store, permission: ["stand:operate", "stand:manage", "sale:create", "event:write"], module: "stand-mode", alsoActiveOn: ["/admin/stand/products", "/admin/stand/stats"] },
       { href: "/admin/bookings", label: "Bookings", icon: Ticket, permission: "booking:read" },
       { href: "/admin/check-in", label: "Check-in", icon: ScanLine, permission: "voucher:read" },
     ],

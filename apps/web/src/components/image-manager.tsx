@@ -17,6 +17,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronLeft, ChevronRight, Crop, GripVertical, ImagePlus, Loader2, Star, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { Notice } from "@/components/notice";
@@ -61,6 +62,7 @@ export function ImageManager({
   const [job, setJob] = useState<CropJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [link, setLink] = useState("");
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 6 } }),
@@ -124,6 +126,17 @@ export function ImageManager({
     onChange(arrayMove(images, images.indexOf(String(active.id)), images.indexOf(String(over.id))));
   }
 
+  function addLink() {
+    const url = link.trim();
+    if (!/^https?:\/\/\S+$/.test(url)) {
+      setError("The link must start with http:// or https://");
+      return;
+    }
+    setError(null);
+    if (!images.includes(url)) onChange([...images, url]);
+    setLink("");
+  }
+
   const move = (index: number, by: number) => onChange(arrayMove(images, index, index + by));
   const canAdd = !disabled && images.length + queue.length < max;
 
@@ -172,6 +185,26 @@ export function ImageManager({
           event.target.value = "";
         }}
       />
+      {canAdd ? (
+        <div className="flex gap-2">
+          <Input
+            type="url"
+            inputMode="url"
+            placeholder="…or paste an image link (https://…)"
+            value={link}
+            onChange={(event) => setLink(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addLink();
+              }
+            }}
+          />
+          <Button type="button" variant="outline" disabled={!link.trim()} onClick={addLink}>
+            Add link
+          </Button>
+        </div>
+      ) : null}
       <p className="text-muted-foreground text-xs">
         Drag to reorder (or use the arrows). The first image is the main one. JPG, PNG, WebP or HEIC, up to 15 MB — saved as optimised WebP.
       </p>

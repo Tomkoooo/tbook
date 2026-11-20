@@ -62,6 +62,8 @@ export const PERMISSION_GROUPS: Array<{ label: string; permissions: Array<{ key:
       { key: "waitlist:manage", label: "Manage the waitlist" },
       { key: "feedback:manage", label: "Surveys, kiosk ratings and their results" },
       { key: "feedback:kiosk", label: "Run the rating kiosk on a tablet" },
+      { key: "stand:operate", label: "Run the stand: open, sell, restock, close" },
+      { key: "stand:manage", label: "Stand products, past days, stats and report settings" },
     ],
   },
 ];
