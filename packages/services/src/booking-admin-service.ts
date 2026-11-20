@@ -251,6 +251,8 @@ export async function listBookingFilterOptions(organizationId: string): Promise<
   events: Array<{ id: string; name: string; groupId: string | null }>;
   hotels: Array<{ id: string; name: string }>;
   tags: string[];
+  /** Every guest answer asked on any of the org's events — selectable as a bookings-table column. */
+  guestFields: Array<{ key: string; label: string; identifier: boolean }>;
 }> {
   const groups = await eventGroupRepository.findByOrganizationId(organizationId);
   const groupIds = groups.map((group) => String(group._id));
@@ -258,7 +260,16 @@ export async function listBookingFilterOptions(organizationId: string): Promise<
   const eventsPerGroup = await Promise.all(groupIds.map((groupId) => eventRepository.findByGroupId(groupId)));
   const hotelsPerGroup = await Promise.all(groupIds.map((groupId) => hotelRepository.findByGroupId(groupId)));
 
+  const guestFields = new Map<string, { key: string; label: string; identifier: boolean }>();
+  for (const event of eventsPerGroup.flat()) {
+    for (const field of event.attendeeFieldSchema ?? []) {
+      const known = guestFields.get(field.key);
+      guestFields.set(field.key, { key: field.key, label: known?.label || field.label || field.key, identifier: Boolean(known?.identifier || field.identifier || field.unique) });
+    }
+  }
+
   return {
+    guestFields: [...guestFields.values()],
     groups: groups.map((group) => ({ id: String(group._id), name: group.name })),
     events: eventsPerGroup.flat().map((event) => ({
       id: String(event._id),

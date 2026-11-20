@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { WALK_IN_CUSTOMER_EMAIL, bookingStatuses, invoiceStatuses } from "@tbook/schemas";
 import { listBookingFilterOptions, listBookingsForOrg, summarizeBookingGuests } from "@tbook/services";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, Plus } from "lucide-react";
@@ -13,6 +14,8 @@ import { Stat } from "@/components/stat";
 import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
 import { BookingFilters } from "./booking-filters";
+import { ColumnPicker } from "./column-picker";
+import { BOOKING_COLUMNS_COOKIE, FIELD_PREFIX, TOGGLEABLE_COLUMNS, parseColumns } from "./columns";
 
 /**
  * The booking console. All table state (filters, sort, page) lives in the
@@ -88,6 +91,12 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     listBookingsForOrg(organizationId, { ...filter, page, pageSize: 25, sortBy, sortDir }),
     listBookingFilterOptions(organizationId),
   ]);
+  // Columns: the saved choice, or by default everything plus the guests' identifying answer (e.g. employee ID).
+  const identifierKeys = options.guestFields.filter((field) => field.identifier).map((field) => field.key);
+  const saved = parseColumns((await cookies()).get(BOOKING_COLUMNS_COOKIE)?.value, options.guestFields.map((field) => field.key));
+  const columns = saved ?? [...TOGGLEABLE_COLUMNS.map((column) => column.key as string), ...identifierKeys.map((key) => FIELD_PREFIX + key)];
+  const show = (key: string) => columns.includes(key);
+  const shownFields = options.guestFields.filter((field) => show(FIELD_PREFIX + field.key));
   const guestSummaries = await summarizeBookingGuests(result.bookings.map((booking) => String(booking._id)));
 
   /** Rebuilds the current URL with some params replaced — keeps filters when paging or sorting. */
@@ -122,6 +131,11 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
         description="Every booking in this organization, including those made through the legacy storefronts."
         actions={
           <>
+            <ColumnPicker
+              builtIn={TOGGLEABLE_COLUMNS.map((column) => ({ key: column.key, label: column.label }))}
+              fields={options.guestFields.map((field) => ({ key: FIELD_PREFIX + field.key, label: field.label }))}
+              selected={columns}
+            />
             {permissions.has("booking:export") ? (
               <Button variant="outline" asChild>
                 <a href={`/api/v2/admin/bookings/export?${exportQuery.toString()}`}>
@@ -158,7 +172,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
             <Table>
               <TableHeader>
                 <TableRow>
-                  {SORTABLE.map((column) => {
+                  {SORTABLE.filter((column) => column.key === "createdAt" || column.key === "customerName" || (column.key === "eventName" && show("event")) || (column.key === "totalHuf" && show("total"))).map((column) => {
                     const active = sortBy === column.key;
                     const nextDir = active && sortDir === "desc" ? "asc" : "desc";
                     const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
@@ -178,10 +192,13 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                       </TableHead>
                     );
                   })}
-                  <TableHead className="text-right">Guests</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Paid via</TableHead>
-                  <TableHead>Invoice</TableHead>
+                  {shownFields.map((field) => (
+                    <TableHead key={field.key}>{field.label}</TableHead>
+                  ))}
+                  {show("guests") ? <TableHead className="text-right">Guests</TableHead> : null}
+                  {show("status") ? <TableHead>Status</TableHead> : null}
+                  {show("paidVia") ? <TableHead>Paid via</TableHead> : null}
+                  {show("invoice") ? <TableHead>Invoice</TableHead> : null}
                   <TableHead>
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -202,11 +219,23 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                           {booking.customer?.email === WALK_IN_CUSTOMER_EMAIL ? "walk-in · printed receipt" : booking.customer?.email}
                         </div>
                       </TableCell>
+                      {show("event") ? (
                       <TableCell className="min-w-48 whitespace-normal">
                         {booking.eventName}
                         {booking.hotelName ? <div className="text-muted-foreground text-xs">{booking.hotelName}</div> : null}
                       </TableCell>
-                      <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell>
+                      ) : null}
+                      {show("total") ? <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell> : null}
+                      {shownFields.map((field) => (
+                        <TableCell key={field.key} className="whitespace-normal">
+                          {(booking.attendees ?? [])
+                            .map((attendee) => attendee.fields?.[field.key])
+                            .filter((value) => value !== undefined && value !== null && String(value) !== "")
+                            .map(String)
+                            .join(", ") || <span className="text-muted-foreground">–</span>}
+                        </TableCell>
+                      ))}
+                      {show("guests") ? (
                       <TableCell className="text-right">
                         {booking.guests}
                         {summary ? (
@@ -215,6 +244,8 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                           </div>
                         ) : null}
                       </TableCell>
+                      ) : null}
+                      {show("status") ? (
                       <TableCell>
                         <div className="flex gap-1">
                           <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
@@ -229,13 +260,16 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                           </div>
                         ) : null}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{booking.paymentMethod ?? "stripe"}</TableCell>
+                      ) : null}
+                      {show("paidVia") ? <TableCell className="text-muted-foreground">{booking.paymentMethod ?? "stripe"}</TableCell> : null}
+                      {show("invoice") ? (
                       <TableCell>
                         <div className="flex gap-1">
                           <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>{booking.invoiceStatus}</Badge>
                           {booking.invoiceSource === "manual" ? <Badge variant="neutral">manual</Badge> : null}
                         </div>
                       </TableCell>
+                      ) : null}
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" asChild>
                           <Link href={`/admin/bookings/${id}`}>Open</Link>
