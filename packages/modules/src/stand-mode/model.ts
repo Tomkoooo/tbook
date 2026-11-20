@@ -66,6 +66,8 @@ export interface IStandDay extends Document {
   status: "open" | "closed";
   /** Sales also drive the printer and card reader (set when opening). */
   devices: boolean;
+  /** A practice day: never in stats, history or the next day's opening. One per event, under date SANDBOX_DATE. */
+  sandbox: boolean;
   /** Recorded after the fact: closing counts and money only. */
   manual: { cashHuf: number; cardHuf: number } | null;
   lines: IStandLine[];
@@ -103,6 +105,7 @@ const StandDaySchema = new Schema<IStandDay>(
     date: { type: String, required: true },
     status: { type: String, enum: ["open", "closed"], default: "open" },
     devices: { type: Boolean, default: false },
+    sandbox: { type: Boolean, default: false },
     manual: { type: new Schema({ cashHuf: Number, cardHuf: Number }, { _id: false }), default: null },
     lines: { type: [StandLineSchema], default: [] },
     note: { type: String, default: "" },

@@ -3,6 +3,7 @@ import type { LoginRequestPurpose } from "@tbook/schemas";
 import { LoginRequestModel, type ILoginRequest } from "../models/login-request";
 
 const QR_TTL_MS = 5 * 60 * 1000;
+const DEVICE_LINK_TTL_MS = 2 * 60 * 1000;
 const EMAIL_SWITCH_TTL_MS = 15 * 60 * 1000;
 
 export const loginRequestRepository = {
@@ -17,6 +18,29 @@ export const loginRequestRepository = {
       callbackUrl: data.callbackUrl,
       expiresAt: new Date(Date.now() + ttlMs),
     });
+  },
+  /** A sign-in a signed-in device offers to another one: already confirmed as `user`, short-lived. */
+  createDeviceLink(user: { id: string; email: string; name?: string | null; image?: string | null }, requesterLabel: string): Promise<ILoginRequest> {
+    return LoginRequestModel.create({
+      token: crypto.randomBytes(32).toString("base64url"),
+      purpose: "device-link",
+      status: "confirmed",
+      requesterLabel,
+      callbackUrl: "/admin",
+      confirmedUserId: user.id,
+      confirmedEmail: user.email,
+      confirmedName: user.name ?? null,
+      confirmedImage: user.image ?? null,
+      expiresAt: new Date(Date.now() + DEVICE_LINK_TTL_MS),
+    });
+  },
+  /** Single use: only the first claim of an unexpired device link wins. */
+  claimDeviceLink(token: string): Promise<ILoginRequest | null> {
+    return LoginRequestModel.findOneAndUpdate(
+      { token, purpose: "device-link", status: "confirmed", expiresAt: { $gt: new Date() } },
+      { status: "completed" },
+      { returnDocument: "after" },
+    ).exec();
   },
   findByToken(token: string): Promise<ILoginRequest | null> {
     return LoginRequestModel.findOne({ token }).exec();

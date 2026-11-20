@@ -10,6 +10,10 @@ import { StandDayModel, StandProductModel, type IStandDay, type IStandLine, type
 export const STAND_MODE = "stand-mode";
 export const DEFAULT_PACKS = [6, 10, 12, 20];
 
+/** The practice day's key. Not a real date, so it can't collide with (or sort among) real days. */
+export const SANDBOX_DATE = "SANDBOX";
+/** Real days only: everything that reads history, stats or openings uses this. */
+const REAL = { sandbox: { $ne: true } } as const;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const oid = (value: string) => new Types.ObjectId(value);
 
@@ -107,7 +111,7 @@ export async function saveProduct(organizationId: string, eventId: string, produ
 /** Products used on past days are switched off instead of deleted. */
 export async function deleteProduct(organizationId: string, eventId: string, productId: string): Promise<"deleted" | "deactivated"> {
   await standEventForOrg(organizationId, eventId);
-  const used = await StandDayModel.exists({ eventId, "lines.productId": productId });
+  const used = await StandDayModel.exists({ eventId, ...REAL, "lines.productId": productId });
   if (used) {
     await StandProductModel.updateOne({ _id: productId, organizationId, eventId }, { $set: { active: false } }).exec();
     return "deactivated";
@@ -129,16 +133,20 @@ export async function getDayForOrg(organizationId: string, dayId: string): Promi
 }
 
 export function getOpenDay(eventId: string): Promise<IStandDay | null> {
-  return StandDayModel.findOne({ eventId, status: "open" }).sort({ date: -1 }).exec();
+  return StandDayModel.findOne({ eventId, ...REAL, status: "open" }).sort({ date: -1 }).exec();
+}
+
+export function getSandboxDay(eventId: string): Promise<IStandDay | null> {
+  return StandDayModel.findOne({ eventId, sandbox: true }).exec();
 }
 
 export function listDays(eventId: string, limit = 60): Promise<IStandDay[]> {
-  return StandDayModel.find({ eventId }).sort({ date: -1 }).limit(limit).exec();
+  return StandDayModel.find({ eventId, ...REAL }).sort({ date: -1 }).limit(limit).exec();
 }
 
 /** The latest closed day before `date`: where today's opening inventory comes from. */
 export function previousClosedDay(eventId: string, date: string): Promise<IStandDay | null> {
-  return StandDayModel.findOne({ eventId, status: "closed", date: { $lt: date } }).sort({ date: -1 }).exec();
+  return StandDayModel.findOne({ eventId, ...REAL, status: "closed", date: { $lt: date } }).sort({ date: -1 }).exec();
 }
 
 export interface OpeningProposal {
@@ -194,14 +202,18 @@ const count = (v: unknown) => {
 export async function openDay(
   organizationId: string,
   eventId: string,
-  input: { date?: string; devices?: boolean; openings?: Record<string, number> },
+  input: { date?: string; devices?: boolean; sandbox?: boolean; openings?: Record<string, number> },
 ): Promise<IStandDay> {
   await standEventForOrg(organizationId, eventId);
-  const date = input.date ?? todayKey();
-  if (!DATE.test(date)) throw ActionError.validation("Invalid date.");
-  if (await StandDayModel.exists({ eventId, date })) throw ActionError.validation("This day already exists.");
-  if (await StandDayModel.exists({ eventId, status: "open" })) throw ActionError.validation("Close the day that is still open first.");
-  const proposal = await proposeOpening(eventId, date);
+  const sandbox = Boolean(input.sandbox);
+  const date = sandbox ? SANDBOX_DATE : (input.date ?? todayKey());
+  if (!sandbox) {
+    if (!DATE.test(date)) throw ActionError.validation("Invalid date.");
+    if (await StandDayModel.exists({ eventId, date })) throw ActionError.validation("This day already exists.");
+    if (await StandDayModel.exists({ eventId, ...REAL, status: "open" })) throw ActionError.validation("Close the day that is still open first.");
+  }
+  // Practice openings default from the last real closing too; nothing is written back.
+  const proposal = await proposeOpening(eventId, sandbox ? todayKey() : date);
   const products = await listProducts(eventId, { activeOnly: true });
   if (products.length === 0) throw ActionError.validation("Add products first.");
   const lines = products.map((p) => {
@@ -209,7 +221,15 @@ export async function openDay(
     const fallback = proposal.items.find((i) => i.productId === String(p._id))?.opening ?? 0;
     return snapshot(p, given === undefined ? fallback : count(given));
   });
-  return StandDayModel.create({ organizationId, eventId, date, devices: Boolean(input.devices), lines, status: "open" });
+  // A new practice run replaces the previous one.
+  if (sandbox) await StandDayModel.deleteMany({ eventId, sandbox: true }).exec();
+  return StandDayModel.create({ organizationId, eventId, date, devices: Boolean(input.devices), sandbox, lines, status: "open" });
+}
+
+/** Ends the practice run: it is deleted, leaving no trace in stats or inventory. */
+export async function endSandbox(organizationId: string, dayId: string): Promise<void> {
+  const result = await StandDayModel.deleteOne({ _id: dayId, organizationId, sandbox: true }).exec();
+  if (result.deletedCount === 0) throw ActionError.notFound("Practice day not found");
 }
 
 type Counter = "restocked" | "soldCash" | "soldCard" | "internal";
@@ -296,6 +316,7 @@ export interface CloseInput {
 export async function closeDay(organizationId: string, dayId: string, input: CloseInput, transporter?: MailTransporter): Promise<{ day: IStandDay; emailed: boolean; emailError?: string }> {
   const day = await StandDayModel.findOne({ _id: dayId, organizationId }).exec();
   if (!day) throw ActionError.notFound("Day not found");
+  if (day.sandbox) throw ActionError.validation("A practice day isn't closed; end it instead.");
   if (day.status !== "open") throw ActionError.validation("This day is already closed.");
   const lines = (day.toObject() as { lines: IStandLine[] }).lines.map((line) => {
     const given = input.counted?.[String(line.productId)];
@@ -350,17 +371,18 @@ export async function recordManualDay(
 export async function reopenDay(organizationId: string, dayId: string): Promise<void> {
   const day = await StandDayModel.findOne({ _id: dayId, organizationId }).exec();
   if (!day) throw ActionError.notFound("Day not found");
+  if (day.sandbox) throw ActionError.validation("A practice day can't be reopened.");
   if (day.status === "open") return;
   if (day.manual) throw ActionError.validation("A day recorded by hand can't be reopened.");
-  if (await StandDayModel.exists({ eventId: day.eventId, date: { $gt: day.date } })) throw ActionError.validation("Only the latest day can be reopened.");
-  if (await StandDayModel.exists({ eventId: day.eventId, status: "open" })) throw ActionError.validation("Close the day that is open first.");
+  if (await StandDayModel.exists({ eventId: day.eventId, ...REAL, date: { $gt: day.date } })) throw ActionError.validation("Only the latest day can be reopened.");
+  if (await StandDayModel.exists({ eventId: day.eventId, ...REAL, status: "open" })) throw ActionError.validation("Close the day that is open first.");
   await StandDayModel.updateOne({ _id: dayId }, { $set: { status: "open", closedAt: null } }).exec();
 }
 
 // ---- Stats ---------------------------------------------------------------------------
 
 export async function standStats(eventId: string, from?: string, to?: string): Promise<{ summary: StandSummary; days: IStandDay[] }> {
-  const filter: Record<string, unknown> = { eventId };
+  const filter: Record<string, unknown> = { eventId, ...REAL };
   const range: Record<string, string> = {};
   if (from && DATE.test(from)) range.$gte = from;
   if (to && DATE.test(to)) range.$lte = to;
@@ -459,6 +481,7 @@ export function reportHtml(event: IEvent, day: IStandDay): string {
 
 export async function sendDayReport(day: IStandDay, to: string, transporter?: MailTransporter): Promise<void> {
   if (!/^\S+@\S+\.\S+$/.test(to)) throw ActionError.validation("The report email address isn't valid.");
+  if (day.sandbox) throw ActionError.validation("A practice day has no report.");
   const event = await eventRepository.findById(String(day.eventId));
   if (!event) throw ActionError.notFound("Event not found");
   const buffer = await buildReportXlsx([day], `${event.name} — ${day.date}`);

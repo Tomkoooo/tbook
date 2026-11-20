@@ -1,6 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { ensureDbConnection, loginRequestRepository } from "@tbook/db";
 import { generateLoginQrDataUrl } from "@tbook/services";
 import { auth } from "@/auth";
@@ -68,4 +69,27 @@ export async function confirmLoginRequestAction(token: string): Promise<{ ok: bo
 export async function denyLoginRequestAction(token: string): Promise<void> {
   await ensureDbConnection();
   await loginRequestRepository.deny(token);
+}
+
+/** Signed-in device: a QR code another device can scan to be signed in as this user. Two minutes, one use. */
+export async function createDeviceLinkAction(): Promise<{ ok: true; qrDataUrl: string; expiresAt: number } | { ok: false; message: string }> {
+  await ensureDbConnection();
+  const session = await auth();
+  if (!session?.user?.id || !session.user.email) return { ok: false, message: "Sign in first." };
+  const request = await loginRequestRepository.createDeviceLink(
+    { id: session.user.id, email: session.user.email, name: session.user.name, image: session.user.image },
+    describeDevice((await headers()).get("user-agent")),
+  );
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "";
+  const qrDataUrl = await generateLoginQrDataUrl(new URL(`/auth/link?token=${request.token}`, appUrl).toString());
+  return { ok: true, qrDataUrl, expiresAt: request.expiresAt.getTime() };
+}
+
+/** The scanning device presses the button: only now is the link consumed (a page load alone never signs anyone in). */
+export async function claimDeviceLinkAction(token: string): Promise<{ ok: false; message: string }> {
+  await ensureDbConnection();
+  const claimed = await loginRequestRepository.claimDeviceLink(token);
+  if (!claimed?.confirmedUserId || !claimed.confirmedEmail) return { ok: false, message: "This code has expired or was already used. Show a new one." };
+  await issueSessionCookie({ id: String(claimed.confirmedUserId), email: claimed.confirmedEmail, name: claimed.confirmedName, image: claimed.confirmedImage });
+  redirect(claimed.callbackUrl);
 }

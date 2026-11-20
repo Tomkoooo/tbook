@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tBook – nincs kapcsolat</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fff; color: #18181b; }
+  main { max-width: 22rem; padding: 1.5rem; text-align: center; }
+  p { color: #52525b; line-height: 1.5; }
+  button { font: inherit; padding: .6rem 1.2rem; border-radius: .5rem; border: 0; background: #18181b; color: #fff; }
+  @media (prefers-color-scheme: dark) { body { background: #18181b; color: #fafafa; } p { color: #a1a1aa; } button { background: #fafafa; color: #18181b; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Nincs internetkapcsolat</h1>
+  <p>A tBookhoz kapcsolat kell: az eladások és a készlet a szerveren frissül. Nem történt adatvesztés; amint visszatér a kapcsolat, folytathatod.</p>
+  <button onclick="location.reload()">Újrapróbálom</button>
+</main>
+</body>
+</html>

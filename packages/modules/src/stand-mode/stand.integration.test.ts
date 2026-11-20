@@ -2,7 +2,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import { EventGroupModel, EventModel, OrganizationModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import "../index";
-import { closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
+import { endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
 
 const sent: Array<{ to: string; subject: string; attachments?: Array<{ filename: string }> }> = [];
 const transporter = { sendMail: async (m: never) => (sent.push(m), {} as never) };
@@ -79,5 +79,33 @@ describe("stand mode", () => {
     expect(proposal.items.find((i) => i.productId === cola)!.opening).toBe(40);
     const { summary } = await standStats(event, "2026-07-01", "2026-07-01");
     expect(summary).toMatchObject({ cash: 80000, card: 30000, manualDays: 1 });
+  });
+
+  it("practice runs use the products but never reach stats, history or the next opening", async () => {
+    const leftOpen = await getOpenDay(event);
+    if (leftOpen) await closeDay(org, String(leftOpen._id), {});
+    const before = await standStats(event);
+    const practice = await openDay(org, event, { sandbox: true, openings: { [cola]: 100, [lagos]: 50 } });
+    expect(practice.sandbox).toBe(true);
+    await sell(org, String(practice._id), cola, "cash", 40);
+    await recordInternal(org, String(practice._id), lagos, 3);
+    await expect(closeDay(org, String(practice._id), {})).rejects.toThrow(/practice/);
+
+    // A real day can open next to it, and nothing leaks either way.
+    expect(await getOpenDay(event)).toBeNull();
+    expect((await getSandboxDay(event))!.lines.find((l) => String(l.productId) === cola)!.soldCash).toBe(40);
+    const stats = await standStats(event);
+    expect(stats.summary.revenue).toBe(before.summary.revenue);
+    expect(stats.days).toHaveLength(before.days.length);
+    const real = await openDay(org, event, { date: "2026-07-09" });
+    expect(String((await getOpenDay(event))!._id)).toBe(String(real._id));
+    await closeDay(org, String(real._id), {});
+    expect((await proposeOpening(event, "2026-07-10")).previousDate).toBe("2026-07-09");
+
+    // Starting again replaces the old run; ending it leaves nothing.
+    const again = await openDay(org, event, { sandbox: true });
+    expect(await getSandboxDay(event)).not.toBeNull();
+    await endSandbox(org, String(again._id));
+    expect(await getSandboxDay(event)).toBeNull();
   });
 });

@@ -7,8 +7,12 @@ import { objectIdSchema } from "./common";
  * that's waiting/polling) — QR-code sign-in, and choosing to finish a
  * magic-link sign-in on the device that originally requested it rather
  * than the device the email was opened on.
+ *
+ * "device-link" goes the other way round: a signed-in device shows a QR code
+ * and the device that scans and confirms it gets signed in. It is created
+ * already confirmed, lives two minutes and works once.
  */
-export const loginRequestPurposeSchema = z.enum(["qr", "email-switch"]);
+export const loginRequestPurposeSchema = z.enum(["qr", "email-switch", "device-link"]);
 export type LoginRequestPurpose = z.infer<typeof loginRequestPurposeSchema>;
 
 export const loginRequestStatusSchema = z.enum(["pending", "confirmed", "completed", "denied", "expired"]);
