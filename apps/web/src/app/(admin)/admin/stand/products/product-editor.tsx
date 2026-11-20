@@ -25,22 +25,40 @@ export interface StandProductDto {
 export function ProductEditor({ eventId, product }: { eventId: string; product: StandProductDto | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState(product?.name ?? "");
-  const [category, setCategory] = useState(product?.category ?? "drink");
-  const [price, setPrice] = useState(String(product?.priceHuf ?? ""));
-  const [deposit, setDeposit] = useState(String(product?.depositHuf ?? 0));
-  const [cost, setCost] = useState(product?.costHuf === null || product?.costHuf === undefined ? "" : String(product.costHuf));
-  const [images, setImages] = useState<string[]>(product?.image ? [product.image] : []);
-  const [active, setActive] = useState(product?.active ?? true);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState<"drink" | "food">("drink");
+  const [price, setPrice] = useState("");
+  const [deposit, setDeposit] = useState("0");
+  const [cost, setCost] = useState("");
+  const [images, setImages] = useState<string[]>([]);
+  const [active, setActive] = useState(true);
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
+
+  // Every opening starts from the saved product (or blank for a new one), never from the last session's edits.
+  function fill() {
+    setName(product?.name ?? "");
+    setCategory(product?.category ?? "drink");
+    setPrice(product ? String(product.priceHuf) : "");
+    setDeposit(String(product?.depositHuf ?? 0));
+    setCost(product?.costHuf === null || product?.costHuf === undefined ? "" : String(product.costHuf));
+    setImages(product?.image ? [product.image] : []);
+    setActive(product?.active ?? true);
+    setResult(null);
+  }
 
   const priceN = Number(price) || 0;
   const depositN = Number(deposit) || 0;
   const profit = cost === "" ? null : priceN - depositN - Number(cost);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) fill();
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>
         {product ? (
           <Button variant="outline" size="sm">

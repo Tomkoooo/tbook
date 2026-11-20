@@ -257,6 +257,7 @@ function SortableImage({
       ) : null}
       {disabled ? null : (
         <>
+          {count > 1 ? (
           <button
             type="button"
             aria-label="Drag to reorder"
@@ -266,16 +267,19 @@ function SortableImage({
           >
             <GripVertical className="size-4" />
           </button>
+          ) : null}
           <div className="bg-background/90 absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 p-1">
-            <div className="flex">
-              <Button type="button" variant="ghost" size="icon-sm" aria-label="Move left" disabled={index === 0} onClick={() => onMove(index, -1)}>
-                <ChevronLeft />
-              </Button>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label="Move right" disabled={index === count - 1} onClick={() => onMove(index, 1)}>
-                <ChevronRight />
-              </Button>
-            </div>
-            <div className="flex">
+            {count > 1 ? (
+              <div className="flex">
+                <Button type="button" variant="ghost" size="icon-sm" aria-label="Move left" disabled={index === 0} onClick={() => onMove(index, -1)}>
+                  <ChevronLeft />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label="Move right" disabled={index === count - 1} onClick={() => onMove(index, 1)}>
+                  <ChevronRight />
+                </Button>
+              </div>
+            ) : null}
+            <div className="ml-auto flex">
               {index > 0 ? (
                 <Button type="button" variant="ghost" size="icon-sm" aria-label="Make main image" onClick={onMakeMain}>
                   <Star />
