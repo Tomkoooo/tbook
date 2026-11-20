@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { WALK_IN_CUSTOMER_EMAIL, bookingStatuses, invoiceStatuses } from "@tbook/schemas";
-import { listBookingFilterOptions, listBookingsForOrg } from "@tbook/services";
+import { listBookingFilterOptions, listBookingsForOrg, summarizeBookingGuests } from "@tbook/services";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,6 +68,8 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     eventId: one(params, "eventId"),
     groupId: one(params, "groupId"),
     search: one(params, "search"),
+    tag: one(params, "tag") || undefined,
+    checkIn: (one(params, "checkIn") === "in" || one(params, "checkIn") === "not_in" ? one(params, "checkIn") : undefined) as "in" | "not_in" | undefined,
     createdFrom: date(one(params, "createdFrom")),
     // An end date from a date input means "the whole of that day", so it is
     // pushed to the day's last moment — otherwise a same-day filter returns
@@ -86,6 +88,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     listBookingsForOrg(organizationId, { ...filter, page, pageSize: 25, sortBy, sortDir }),
     listBookingFilterOptions(organizationId),
   ]);
+  const guestSummaries = await summarizeBookingGuests(result.bookings.map((booking) => String(booking._id)));
 
   /** Rebuilds the current URL with some params replaced — keeps filters when paging or sorting. */
   function hrefWith(overrides: Record<string, string | undefined>): string {
@@ -187,6 +190,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
               <TableBody>
                 {result.bookings.map((booking) => {
                   const id = String(booking._id);
+                  const summary = guestSummaries.get(id);
                   return (
                     <TableRow key={id}>
                       <TableCell className="text-muted-foreground">{formatDateTime(booking.createdAt)}</TableCell>
@@ -203,13 +207,27 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
                         {booking.hotelName ? <div className="text-muted-foreground text-xs">{booking.hotelName}</div> : null}
                       </TableCell>
                       <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell>
-                      <TableCell className="text-right">{booking.guests}</TableCell>
+                      <TableCell className="text-right">
+                        {booking.guests}
+                        {summary ? (
+                          <div className="text-muted-foreground text-xs whitespace-nowrap">
+                            {summary.checkedIn}/{summary.guests} checked in
+                          </div>
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
                           <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
                           {booking.source === "admin" ? <Badge variant="info">admin</Badge> : null}
                           {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
                         </div>
+                        {summary && summary.tags.length > 0 ? (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {summary.tags.map((tag) => (
+                              <Badge key={tag} variant="info">{tag}</Badge>
+                            ))}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="text-muted-foreground">{booking.paymentMethod ?? "stripe"}</TableCell>
                       <TableCell>

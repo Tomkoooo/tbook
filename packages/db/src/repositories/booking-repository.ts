@@ -26,6 +26,8 @@ export interface BookingListFilter {
   search?: string;
   createdFrom?: Date;
   createdTo?: Date;
+  /** Only these bookings (resolved by the caller, e.g. from guest tags / check-in state). */
+  bookingIds?: string[];
   /**
    * Test bookings (v1 X-TBook-Test): "include" (default: the list shows
    * them with a TESZT badge), "exclude" or "only". Statistics and exports
@@ -60,6 +62,7 @@ export function buildBookingQuery(scope: BookingScope, filter: BookingListFilter
   if (filter.eventId) query.eventId = new Types.ObjectId(filter.eventId);
   if (filter.groupId) query.groupId = new Types.ObjectId(filter.groupId);
   if (filter.hotelId) query.hotelId = new Types.ObjectId(filter.hotelId);
+  if (filter.bookingIds) query._id = { $in: filter.bookingIds.map((id) => new Types.ObjectId(id)) };
   if (filter.test === "exclude") query.isTest = { $ne: true };
   if (filter.test === "only") query.isTest = true;
 

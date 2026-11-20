@@ -3,6 +3,7 @@ import {
   eventGroupRepository,
   eventRepository,
   hotelRepository,
+  VoucherModel,
   voucherRepository,
   type BookingListFilter,
   type BookingScope,
@@ -38,6 +39,10 @@ export async function resolveBookingScope(organizationId: string): Promise<Booki
 }
 
 export interface AdminBookingListQuery extends BookingListFilter {
+  /** Only bookings with a guest carrying this tag (e.g. "Díjazott"). */
+  tag?: string;
+  /** Only bookings with a guest who is checked in ("in") or still expected ("not_in") — combined with `tag`, the same guest. */
+  checkIn?: "in" | "not_in";
   page?: number;
   pageSize?: number;
   sortBy?: BookingSortKey;
@@ -77,7 +82,15 @@ const MAX_PAGE_SIZE = 200;
 
 export async function listBookingsForOrg(organizationId: string, query: AdminBookingListQuery = {}): Promise<AdminBookingListResult> {
   const scope = await resolveBookingScope(organizationId);
-  const { page: rawPage, pageSize: rawPageSize, sortBy, sortDir, ...filter } = query;
+  const { page: rawPage, pageSize: rawPageSize, sortBy, sortDir, tag, checkIn, ...baseFilter } = query;
+  let filter: BookingListFilter = baseFilter;
+  if (tag || checkIn) {
+    const voucherQuery: Record<string, unknown> = { status: checkIn === "in" ? "checked_in" : checkIn === "not_in" ? "active" : { $ne: "void" } };
+    if (tag) voucherQuery.tags = tag;
+    if (baseFilter.eventId) voucherQuery.eventId = baseFilter.eventId;
+    const ids = (await VoucherModel.distinct("bookingId", voucherQuery).exec()).map(String);
+    filter = { ...baseFilter, bookingIds: ids };
+  }
 
   const pageSize = Math.min(Math.max(rawPageSize ?? 25, 1), MAX_PAGE_SIZE);
   const page = Math.max(rawPage ?? 1, 1);
@@ -110,6 +123,28 @@ export async function listBookingsForOrg(organizationId: string, query: AdminBoo
       .sort((a, b) => a.currency.localeCompare(b.currency)),
     paidGuests: collected.reduce((sum, row) => sum + row.guests, 0),
   };
+}
+
+export interface BookingGuestSummary {
+  guests: number;
+  checkedIn: number;
+  tags: string[];
+}
+
+/** Per booking: how many guests hold a ticket, how many are checked in, and their tags — for the bookings list. */
+export async function summarizeBookingGuests(bookingIds: string[]): Promise<Map<string, BookingGuestSummary>> {
+  const out = new Map<string, BookingGuestSummary>();
+  if (bookingIds.length === 0) return out;
+  const vouchers = await VoucherModel.find({ bookingId: { $in: bookingIds }, status: { $ne: "void" } }, { bookingId: 1, status: 1, tags: 1 }).lean().exec();
+  for (const voucher of vouchers) {
+    const id = String(voucher.bookingId);
+    const entry = out.get(id) ?? { guests: 0, checkedIn: 0, tags: [] };
+    entry.guests += 1;
+    if (voucher.status === "checked_in") entry.checkedIn += 1;
+    for (const tag of voucher.tags ?? []) if (!entry.tags.includes(tag)) entry.tags.push(tag);
+    out.set(id, entry);
+  }
+  return out;
 }
 
 export interface AdminBookingDetail {
@@ -215,6 +250,7 @@ export async function listBookingFilterOptions(organizationId: string): Promise<
   groups: Array<{ id: string; name: string }>;
   events: Array<{ id: string; name: string; groupId: string | null }>;
   hotels: Array<{ id: string; name: string }>;
+  tags: string[];
 }> {
   const groups = await eventGroupRepository.findByOrganizationId(organizationId);
   const groupIds = groups.map((group) => String(group._id));
@@ -230,6 +266,9 @@ export async function listBookingFilterOptions(organizationId: string): Promise<
       groupId: event.groupId ? String(event.groupId) : null,
     })),
     hotels: hotelsPerGroup.flat().map((hotel) => ({ id: String(hotel._id), name: hotel.name })),
+    tags: ((await VoucherModel.distinct("tags", { eventId: { $in: eventsPerGroup.flat().map((event) => String(event._id)) } }).exec()) as string[])
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "hu")),
   };
 }
 

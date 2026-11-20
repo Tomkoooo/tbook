@@ -17,6 +17,7 @@ export function BookingFilters({
   options: {
     groups: Array<{ id: string; name: string }>;
     events: Array<{ id: string; name: string; groupId: string | null }>;
+    tags: string[];
   };
   params: Record<string, string | string[] | undefined>;
 }) {
@@ -40,6 +41,11 @@ export function BookingFilters({
         options={options.groups.map((group) => ({ value: group.id, label: group.name }))} />
       <FilterSelect id="eventId" label="Event" placeholder="All events" defaultValue={value("eventId")}
         options={options.events.map((event) => ({ value: event.id, label: event.name }))} />
+
+      <FilterSelect id="tag" label="Guest tag" placeholder="Any tag" defaultValue={value("tag")}
+        options={options.tags.map((tag) => ({ value: tag, label: tag }))} />
+      <FilterSelect id="checkIn" label="Check-in" placeholder="Any" defaultValue={value("checkIn")}
+        options={[{ value: "in", label: "Checked in" }, { value: "not_in", label: "Not checked in yet" }]} />
 
       <FormField label="Booked from" htmlFor="createdFrom">
         <Input id="createdFrom" name="createdFrom" type="date" defaultValue={value("createdFrom")} />

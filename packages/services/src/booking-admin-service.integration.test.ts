@@ -19,6 +19,7 @@ import {
   listBookingsForOrg,
   resolveBookingScope,
   streamBookingExportCsv,
+  summarizeBookingGuests,
 } from "./booking-admin-service";
 
 describe("booking-admin-service", () => {
@@ -423,6 +424,44 @@ describe("booking-admin-service", () => {
     it("does not list another org's groups", async () => {
       const options = await listBookingFilterOptions(orgId);
       expect(options.groups.map((g) => g.name)).not.toContain("Rival Fest");
+    });
+  });
+
+  describe("guest tags and check-in", () => {
+    async function seedVoucher(bookingId: unknown, attendeeIndex: number, extra: Record<string, unknown>) {
+      await VoucherModel.create({
+        eventId: new Types.ObjectId(eventId),
+        bookingId,
+        attendeeIndex,
+        token: `tok-${String(bookingId)}-${attendeeIndex}`,
+        displayName: "Vendég",
+        eventSnapshot: { name: "Nyitónap", startDate: new Date("2026-07-01"), endDate: new Date("2026-07-02") },
+        ...extra,
+      });
+    }
+
+    it("filters by tag and check-in state (same guest) and summarises each booking", async () => {
+      const awardIn = await seedBooking({ customer: { name: "Díjazott Be", email: "a@example.com", phone: "+361" } });
+      const awardOut = await seedBooking({ customer: { name: "Díjazott Ki", email: "b@example.com", phone: "+362" } });
+      const plain = await seedBooking({ customer: { name: "Sima", email: "c@example.com", phone: "+363" } });
+      await seedVoucher(awardIn._id, 0, { tags: ["Díjazott"], status: "checked_in", checkedInAt: new Date() });
+      await seedVoucher(awardOut._id, 0, { tags: ["Díjazott"], status: "active" });
+      await seedVoucher(awardOut._id, 1, { tags: [], status: "checked_in", checkedInAt: new Date() });
+      await seedVoucher(plain._id, 0, { tags: [], status: "checked_in", checkedInAt: new Date() });
+
+      const names = async (query: Record<string, unknown>) =>
+        (await listBookingsForOrg(orgId, query)).bookings.map((booking) => booking.customer.name).sort();
+
+      expect(await names({ tag: "Díjazott" })).toEqual(["Díjazott Be", "Díjazott Ki"]);
+      expect(await names({ tag: "Díjazott", checkIn: "in" })).toEqual(["Díjazott Be"]);
+      expect(await names({ tag: "Díjazott", checkIn: "not_in" })).toEqual(["Díjazott Ki"]);
+      expect(await names({ checkIn: "in" })).toEqual(["Díjazott Be", "Díjazott Ki", "Sima"]);
+      expect(await names({ tag: "Nincs ilyen" })).toEqual([]);
+
+      const summary = await summarizeBookingGuests([String(awardOut._id), String(plain._id)]);
+      expect(summary.get(String(awardOut._id))).toEqual({ guests: 2, checkedIn: 1, tags: ["Díjazott"] });
+      expect(summary.get(String(plain._id))).toEqual({ guests: 1, checkedIn: 1, tags: [] });
+      expect((await listBookingFilterOptions(orgId)).tags).toEqual(["Díjazott"]);
     });
   });
 });
