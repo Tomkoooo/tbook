@@ -15,7 +15,11 @@ import { runSetupCommand } from "./commands/setup";
  * imports the list, creates group/event/emails, and a free registration
  * with a listed employee ID goes through.
  */
-describe("tbook-cli setup apply", () => {
+// The event plan is kept out of git (gitignored); without it these checks have nothing to run on.
+const PLAN_FILE = path.resolve("docs/plans/halozatok-unnepe-2026.setup.json");
+const hasPlan = fs.existsSync(PLAN_FILE);
+
+describe.skipIf(!hasPlan)("tbook-cli setup apply", () => {
   let mongod: MongoMemoryServer;
   let uri: string;
   let orgSlug: string;
@@ -38,7 +42,7 @@ describe("tbook-cli setup apply", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tbook-setup-"));
     const csv = path.join(dir, "dso.csv");
     fs.writeFileSync(csv, "Dolgozó;Név;Vállalat;E-mail cím\n60000001;Teszt Elek;DHEL;teszt@example.com\n60000003;Minta Márta;EHEL;minta@example.com\n");
-    const plan = JSON.parse(fs.readFileSync(path.resolve("docs/plans/halozatok-unnepe-2026.setup.json"), "utf8"));
+    const plan = JSON.parse(fs.readFileSync(PLAN_FILE, "utf8"));
     plan.dataLists[0].file = csv;
     // Open now, so the test can register.
     plan.event.status = "active";

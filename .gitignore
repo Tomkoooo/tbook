@@ -36,3 +36,6 @@ npm-debug.log*
 exports/
 backups/
 *.xlsx
+
+# Hálózatok Ünnepe event plans: local only, never committed
+docs/plans/halozatok-unnepe-*
