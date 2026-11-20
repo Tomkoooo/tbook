@@ -428,7 +428,7 @@ describe("booking-admin-service", () => {
   });
 
   describe("guest tags and check-in", () => {
-    async function seedVoucher(bookingId: unknown, attendeeIndex: number, extra: Record<string, unknown>) {
+    async function seedVoucher(bookingId: Types.ObjectId, attendeeIndex: number, extra: Record<string, unknown>) {
       await VoucherModel.create({
         eventId: new Types.ObjectId(eventId),
         bookingId,
