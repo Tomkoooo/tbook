@@ -42,9 +42,13 @@ export default async function StandPage({ searchParams }: { searchParams: Promis
       <PageTitle
         title={event.name}
         description={openDay ? (openDay.sandbox ? "Gyakorló mód" : `Nyitva: ${openDay.date}`) : "Nincs nyitott nap"}
-        actions={events.length > 1 ? <EventPicker basePath="/admin/stand" events={events.map((e) => ({ id: String(e._id), name: e.name }))} value={eventId} /> : null}
+        actions={
+          <>
+            {events.length > 1 ? <EventPicker basePath="/admin/stand" events={events.map((e) => ({ id: String(e._id), name: e.name }))} value={eventId} /> : null}
+            <StandTabs active="sell" eventId={eventId} manage={manage} />
+          </>
+        }
       />
-      <StandTabs active="sell" eventId={eventId} manage={manage} />
       {openDay ? (
         <SellScreen
           key={String(openDay._id)}

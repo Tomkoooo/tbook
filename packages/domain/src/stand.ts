@@ -20,8 +20,10 @@ export interface StandLine {
   restocked: number;
   soldCash: number;
   soldCard: number;
-  /** Belső fogyasztás: consumed by the team, not sold. */
+  /** Belső fogyasztás from the stand's stock: consumed by the team, not sold; reduces the stand's inventory. */
   internal: number;
+  /** Belső fogyasztás outside the stand (not taken from its stock): counts as internal use, leaves the inventory alone. */
+  internalOutside: number;
   /** The closing count entered by hand; null = trust the calculation. */
   counted: number | null;
 }
@@ -53,8 +55,10 @@ export interface LineTotals {
   cost: number | null;
   /** Net revenue − cost; null when the cost isn't known. */
   profit: number | null;
+  /** All internal use: from the stand plus outside it. */
   internal: number;
-  /** Internal use at shelf price. */
+  internalOutside: number;
+  /** All internal use at shelf price. */
   internalValue: number;
   internalCost: number | null;
   /** counted − expected; 0 when not counted. Negative = missing. */
@@ -64,6 +68,7 @@ export interface LineTotals {
 
 export function lineTotals(line: StandLine): LineTotals {
   const sold = line.soldCash + line.soldCard;
+  const internalAll = line.internal + line.internalOutside;
   const revenue = sold * line.priceHuf;
   const deposit = sold * line.depositHuf;
   const cost = line.costHuf === null ? null : sold * line.costHuf;
@@ -77,9 +82,10 @@ export function lineTotals(line: StandLine): LineTotals {
     netRevenue: revenue - deposit,
     cost,
     profit: cost === null ? null : revenue - deposit - cost,
-    internal: line.internal,
-    internalValue: line.internal * line.priceHuf,
-    internalCost: line.costHuf === null ? null : line.internal * line.costHuf,
+    internal: internalAll,
+    internalOutside: line.internalOutside,
+    internalValue: internalAll * line.priceHuf,
+    internalCost: line.costHuf === null ? null : internalAll * line.costHuf,
     variance,
     varianceValue: variance * (line.costHuf ?? line.priceHuf - line.depositHuf),
   };
@@ -95,7 +101,9 @@ export interface StandProductRow {
   sold: number;
   soldCash: number;
   soldCard: number;
+  /** All internal use (from the stand + outside). */
   internal: number;
+  internalOutside: number;
   /** Last day's closing in the range. */
   closing: number;
   revenue: number;
@@ -117,6 +125,7 @@ export interface StandDayRow {
   internalValue: number;
   itemsSold: number;
   internalItems: number;
+  internalOutsideItems: number;
 }
 
 export interface StandSummary {
@@ -135,6 +144,8 @@ export interface StandSummary {
   /** True when every sold item has a purchase price, so `profit` is complete. */
   profitComplete: boolean;
   internalItems: number;
+  /** Of internalItems, the part consumed outside the stand. */
+  internalOutsideItems: number;
   internalValue: number;
   internalCost: number;
   /** Profit after the cost of internal use. */
@@ -161,6 +172,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     profit: 0,
     profitComplete: true,
     internalItems: 0,
+    internalOutsideItems: 0,
     internalValue: 0,
     internalCost: 0,
     profitAfterInternal: 0,
@@ -172,7 +184,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
   const products = new Map<string, StandProductRow>();
 
   for (const day of days) {
-    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0 };
+    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0 };
     let dayProfitKnown = true;
     let dayCost = 0;
     if (day.manual) {
@@ -190,6 +202,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
       row.internalValue += t.internalValue;
       row.itemsSold += t.sold;
       row.internalItems += t.internal;
+      row.internalOutsideItems += t.internalOutside;
       dayCost += t.cost ?? 0;
       if (t.sold > 0 && t.profit === null) {
         dayProfitKnown = false;
@@ -212,7 +225,8 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
           sold: t.sold,
           soldCash: line.soldCash,
           soldCard: line.soldCard,
-          internal: line.internal,
+          internal: t.internal,
+          internalOutside: line.internalOutside,
           closing: closingOf(line),
           revenue: t.revenue,
           deposit: t.deposit,
@@ -227,7 +241,8 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
         existing.sold += t.sold;
         existing.soldCash += line.soldCash;
         existing.soldCard += line.soldCard;
-        existing.internal += line.internal;
+        existing.internal += t.internal;
+        existing.internalOutside += line.internalOutside;
         existing.closing = closingOf(line);
         existing.revenue += t.revenue;
         existing.deposit += t.deposit;
@@ -245,6 +260,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     summary.deposit += row.deposit;
     summary.itemsSold += row.itemsSold;
     summary.internalItems += row.internalItems;
+    summary.internalOutsideItems += row.internalOutsideItems;
     summary.internalValue += row.internalValue;
     summary.byDay.push(row);
   }

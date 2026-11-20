@@ -79,7 +79,7 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
             <Stat label="Visszaváltási érték" value={ft(s.deposit)} hint="nem nyereség" />
             <Stat label="Nettó bevétel" value={ft(s.netRevenue)} hint="visszaváltási érték nélkül" />
             <Stat label="Nyereség" value={ft(s.profit)} hint={`költség: ${ft(s.cost)}`} />
-            <Stat label="Belső fogyasztás" value={`${s.internalItems} db`} hint={`értéke: ${ft(s.internalValue)}`} />
+            <Stat label="Belső fogyasztás" value={`${s.internalItems} db`} hint={`értéke: ${ft(s.internalValue)}${s.internalOutsideItems ? ` · ebből standon kívül ${s.internalOutsideItems} db` : ""}`} />
             <Stat label="Belső fogy. költsége" value={ft(s.internalCost)} />
             <Stat label="Nyereség belső fogy. után" value={ft(s.profitAfterInternal)} />
             <Stat label="Leltárkülönbség" value={`${s.variance} db`} hint={ft(s.varianceValue)} />
@@ -112,7 +112,10 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
                     <TableCell>
                       {p.soldCash} / {p.soldCard}
                     </TableCell>
-                    <TableCell>{p.internal}</TableCell>
+                    <TableCell>
+                      {p.internal}
+                      {p.internalOutside ? ` (${p.internalOutside} kívül)` : ""}
+                    </TableCell>
                     <TableCell>{p.closing}</TableCell>
                     <TableCell>{ft(p.revenue)}</TableCell>
                     <TableCell>{ft(p.deposit)}</TableCell>

@@ -54,7 +54,10 @@ export interface IStandLine {
   restocked: number;
   soldCash: number;
   soldCard: number;
+  /** Belső fogyasztás from the stand's stock (reduces it). */
   internal: number;
+  /** Belső fogyasztás outside the stand: counted as internal use, not taken from the stand's stock. */
+  internalOutside: number;
   counted: number | null;
 }
 
@@ -93,6 +96,7 @@ const StandLineSchema = new Schema<IStandLine>(
     soldCash: { type: Number, default: 0 },
     soldCard: { type: Number, default: 0 },
     internal: { type: Number, default: 0 },
+    internalOutside: { type: Number, default: 0 },
     counted: { type: Number, default: null },
   },
   { _id: false },

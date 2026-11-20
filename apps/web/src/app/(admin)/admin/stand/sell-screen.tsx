@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Minus, PackagePlus } from "lucide-react";
+import { Minus, PackagePlus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField, ResultNotice } from "@/components/form-bits";
 import { Notice } from "@/components/notice";
-import { Stat, StatGrid } from "@/components/stat";
 import { cn } from "@/lib/utils";
 import { addProductToDayAction, changeStandAction, closeDayAction, endSandboxAction, type StandChange, type StandResult } from "./actions";
 import type { StandDayDto, StandLineDto } from "./dto";
@@ -26,10 +25,21 @@ const MODES: Array<{ key: Mode; label: string }> = [
 
 const ft = (n: number) => `${n.toLocaleString("hu-HU")} Ft`;
 
+/** What the confirm dialog is for. Undo kinds subtract. */
+type TxKind = "sell" | "undo-sell" | "internal" | "undo-internal";
+interface Tx {
+  kind: TxKind;
+  line: StandLineDto;
+}
+
+const QUICK_QUANTITIES = [1, 2, 3, 4, 5, 6, 10];
+
 /**
- * The stand during the day. One tap on a product sells one in the chosen
- * payment mode (or records internal use); the "+" on a tile, or a tap in
- * restock mode, opens the quick-add (6 / 10 / 12 / 20 or any number).
+ * The stand during the day, laid out for a tablet: compact product rows so
+ * a whole menu is visible at once, the totals in the bar above them. A tap
+ * on a product (or its "−") opens a confirmation with a quantity, so
+ * nothing is recorded by accident; the "+" box restocks (6 / 10 / 12 / 20
+ * or any number).
  */
 export function SellScreen({
   eventId,
@@ -49,6 +59,7 @@ export function SellScreen({
   const [day, setDay] = useState(initial);
   const [mode, setMode] = useState<Mode>("cash");
   const [error, setError] = useState<string | null>(null);
+  const [tx, setTx] = useState<Tx | null>(null);
   const [restocking, setRestocking] = useState<StandLineDto | null>(null);
   const [closing, setClosing] = useState(false);
   const [pending, start] = useTransition();
@@ -62,14 +73,10 @@ export function SellScreen({
     });
   }
 
-  const changeFor = (m: Mode): StandChange => (m === "cash" || m === "card" ? { kind: "sell", method: m } : m === "internal" ? { kind: "internal" } : { kind: "restock" });
-
-  function tap(line: StandLineDto, quantity: number) {
-    if (mode === "restock") {
-      setRestocking(line);
-      return;
-    }
-    apply(line.productId, changeFor(mode), quantity);
+  function open(line: StandLineDto, subtract: boolean) {
+    if (mode === "restock") setRestocking(line);
+    else if (mode === "internal") setTx({ kind: subtract ? "undo-internal" : "internal", line });
+    else setTx({ kind: subtract ? "undo-sell" : "sell", line });
   }
 
   const totals = day.lines.reduce(
@@ -78,43 +85,62 @@ export function SellScreen({
       card: t.card + l.soldCard * l.priceHuf,
       deposit: t.deposit + (l.soldCash + l.soldCard) * l.depositHuf,
       items: t.items + l.soldCash + l.soldCard,
-      internal: t.internal + l.internal,
-      internalValue: t.internalValue + l.internal * l.priceHuf,
+      internal: t.internal + l.internal + l.internalOutside,
+      internalValue: t.internalValue + (l.internal + l.internalOutside) * l.priceHuf,
     }),
     { cash: 0, card: 0, deposit: 0, items: 0, internal: 0, internalValue: 0 },
   );
-  const countOf = (l: StandLineDto) => (mode === "cash" ? l.soldCash : mode === "card" ? l.soldCard : mode === "internal" ? l.internal : l.restocked);
+  const countOf = (l: StandLineDto) => (mode === "cash" ? l.soldCash : mode === "card" ? l.soldCard : mode === "internal" ? l.internal + l.internalOutside : l.restocked);
+  const countLabel = mode === "internal" ? "belső" : mode === "restock" ? "bevét." : "eladva";
 
   return (
-    <div className="grid gap-4">
-      <div className="bg-background sticky top-0 z-10 flex flex-wrap items-center gap-2 py-2">
-        {MODES.map((m) => (
-          <Button key={m.key} size="lg" variant={mode === m.key ? "default" : "outline"} onClick={() => setMode(m.key)}>
-            {m.label}
-          </Button>
-        ))}
-        {day.devices ? <Badge variant="outline">Nyomtató + kártyaolvasó</Badge> : null}
-        {day.sandbox ? (
-          <Button
-            className="ml-auto"
-            variant="outline"
-            size="lg"
-            disabled={pending}
-            onClick={() =>
-              start(async () => {
-                const r = await endSandboxAction(day.id);
-                if (r.ok) router.refresh();
-                else setError(r.message ?? "Failed.");
-              })
-            }
-          >
-            Gyakorlás vége
-          </Button>
-        ) : (
-          <Button className="ml-auto" variant="outline" size="lg" onClick={() => setClosing(true)}>
-            Nap zárása
-          </Button>
-        )}
+    <div className="grid gap-3">
+      <div className="bg-background sticky top-14 z-10 grid gap-2 border-b py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {MODES.map((m) => (
+            <Button key={m.key} size="lg" variant={mode === m.key ? "default" : "outline"} onClick={() => setMode(m.key)}>
+              {m.label}
+            </Button>
+          ))}
+          {day.devices ? <Badge variant="outline">Nyomtató + kártyaolvasó</Badge> : null}
+          {day.sandbox ? <Badge variant="warning">Gyakorló mód</Badge> : null}
+          {day.sandbox ? (
+            <Button
+              className="ml-auto"
+              variant="outline"
+              size="lg"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  const r = await endSandboxAction(day.id);
+                  if (r.ok) router.refresh();
+                  else setError(r.message ?? "Failed.");
+                })
+              }
+            >
+              Gyakorlás vége
+            </Button>
+          ) : (
+            <Button className="ml-auto" variant="outline" size="lg" onClick={() => setClosing(true)}>
+              Nap zárása
+            </Button>
+          )}
+        </div>
+        <p className="text-muted-foreground flex flex-wrap gap-x-4 text-sm tabular-nums">
+          <span>
+            Készpénz <strong className="text-foreground">{ft(totals.cash)}</strong>
+          </span>
+          <span>
+            Kártya <strong className="text-foreground">{ft(totals.card)}</strong>
+          </span>
+          <span>
+            Összesen <strong className="text-foreground">{ft(totals.cash + totals.card)}</strong> ({totals.items} db)
+          </span>
+          <span>Visszaváltási érték {ft(totals.deposit)}</span>
+          <span>
+            Belső fogyasztás {totals.internal} db ({ft(totals.internalValue)})
+          </span>
+        </p>
       </div>
 
       {day.sandbox ? <Notice tone="warning">Gyakorló mód: semmi sem kerül a statisztikába vagy a készletbe, a végén az egész törlődik.</Notice> : null}
@@ -140,55 +166,171 @@ export function SellScreen({
         </Notice>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-4">
         {day.lines.map((line) => (
-          <div
-            key={line.productId}
-            className={cn("bg-card relative flex flex-col overflow-hidden rounded-lg border", pending && "opacity-80", mode === "internal" && "border-warning")}
-          >
-            <Button variant="ghost" className="h-auto flex-1 flex-col items-stretch gap-1 rounded-none p-0 text-left whitespace-normal" onClick={() => tap(line, 1)}>
+          <div key={line.productId} className={cn("bg-card flex min-h-16 items-stretch overflow-hidden rounded-lg border", pending && "opacity-80", mode === "internal" && "border-warning")}>
+            <Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none p-2 text-left whitespace-normal" onClick={() => open(line, false)}>
               {line.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={line.image} alt="" className="aspect-[4/3] w-full object-cover" />
+                <img src={line.image} alt="" className="size-12 shrink-0 rounded-md object-cover" />
               ) : null}
-              <span className="grid gap-0.5 p-3">
-                <span className="font-semibold">{line.name}</span>
-                <span className="text-muted-foreground text-sm tabular-nums">
+              <span className="grid min-w-0 flex-1 gap-0.5">
+                <span className="line-clamp-2 leading-tight font-semibold">{line.name}</span>
+                <span className="text-muted-foreground text-xs tabular-nums">
                   {ft(line.priceHuf)}
-                  {line.depositHuf ? ` (ebből ${line.depositHuf} Ft visszaváltási érték)` : ""}
+                  {line.depositHuf ? ` · ${line.depositHuf} Ft visszav.` : ""}
                 </span>
-                <span className="flex items-baseline justify-between pt-1">
-                  <span className={cn("text-2xl font-semibold tabular-nums", line.stock <= 0 && "text-destructive")}>{line.stock} db</span>
-                  <span className="text-muted-foreground text-sm tabular-nums">
-                    {mode === "restock" ? "+" : ""}
-                    {countOf(line)} {mode === "internal" ? "belső" : mode === "restock" ? "bevét." : "eladva"}
-                  </span>
+              </span>
+              <span className="grid shrink-0 justify-items-end">
+                <span className={cn("text-xl leading-none font-semibold tabular-nums", line.stock <= 0 && "text-destructive")}>{line.stock}</span>
+                <span className="text-muted-foreground text-xs tabular-nums">
+                  {countOf(line)} {countLabel}
                 </span>
               </span>
             </Button>
-            <div className="flex border-t">
-              <Button variant="ghost" size="sm" className="flex-1 rounded-none" aria-label={`${line.name}: egy vissza`} disabled={countOf(line) === 0 || mode === "restock"} onClick={() => tap(line, -1)}>
-                <Minus />
+            <div className="flex flex-col border-l">
+              <Button variant="ghost" size="icon" className="h-auto flex-1 rounded-none" aria-label={`${line.name}: bevételezés`} onClick={() => setRestocking(line)}>
+                <PackagePlus />
               </Button>
-              <Button variant="ghost" size="sm" className="flex-1 rounded-none border-l" aria-label={`${line.name}: bevételezés`} onClick={() => setRestocking(line)}>
-                <PackagePlus /> Bevét.
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-auto flex-1 rounded-none border-t"
+                aria-label={`${line.name}: visszavonás`}
+                disabled={countOf(line) === 0 || mode === "restock"}
+                onClick={() => open(line, true)}
+              >
+                <Minus />
               </Button>
             </div>
           </div>
         ))}
       </div>
 
-      <StatGrid>
-        <Stat label="Készpénz" value={ft(totals.cash)} />
-        <Stat label="Kártya" value={ft(totals.card)} />
-        <Stat label="Összesen" value={ft(totals.cash + totals.card)} hint={`${totals.items} db`} />
-        <Stat label="Visszaváltási érték" value={ft(totals.deposit)} hint="nem nyereség" />
-        <Stat label="Belső fogyasztás" value={`${totals.internal} db`} hint={ft(totals.internalValue)} />
-      </StatGrid>
-
+      <TxDialog
+        key={tx ? `${tx.kind}:${tx.line.productId}` : "none"}
+        tx={tx}
+        defaultMethod={mode === "card" ? "card" : "cash"}
+        onClose={() => setTx(null)}
+        onConfirm={(t, quantity, options) => {
+          const sign = t.kind.startsWith("undo") ? -1 : 1;
+          const change: StandChange = t.kind === "sell" || t.kind === "undo-sell" ? { kind: "sell", method: options.method } : { kind: "internal", outside: options.outside };
+          apply(t.line.productId, change, sign * quantity);
+          setTx(null);
+        }}
+      />
       <RestockDialog line={restocking} packs={packs} onClose={() => setRestocking(null)} onAdd={(line, qty) => apply(line.productId, { kind: "restock" }, qty)} />
       <CloseDialog open={closing} onOpenChange={setClosing} day={day} defaultEmail={defaultEmail} />
     </div>
+  );
+}
+
+const TITLES: Record<TxKind, string> = {
+  sell: "Eladás",
+  "undo-sell": "Eladás visszavonása",
+  internal: "Belső fogyasztás",
+  "undo-internal": "Belső fogyasztás visszavonása",
+};
+
+/** Confirmation with a quantity: used for selling, internal use and their undo. */
+function TxDialog({
+  tx,
+  defaultMethod,
+  onClose,
+  onConfirm,
+}: {
+  tx: Tx | null;
+  defaultMethod: "cash" | "card";
+  onClose: () => void;
+  onConfirm: (tx: Tx, quantity: number, options: { method: "cash" | "card"; outside: boolean }) => void;
+}) {
+  const [quantity, setQuantity] = useState(1);
+  const [method, setMethod] = useState(defaultMethod);
+  const [outside, setOutside] = useState(false);
+  if (!tx) return null;
+
+  const { kind, line } = tx;
+  const undo = kind.startsWith("undo");
+  const isSale = kind === "sell" || kind === "undo-sell";
+  // An undo can't take back more than was recorded.
+  const max = !undo ? 9999 : isSale ? (method === "card" ? line.soldCard : line.soldCash) : outside ? line.internalOutside : line.internal;
+  const clamp = (n: number) => Math.min(Math.max(1, Math.floor(n) || 1), Math.max(1, max));
+  const q = clamp(quantity);
+  const overStock = !undo && (isSale || !outside) && q > line.stock;
+  const confirmLabel = isSale ? `${undo ? "Visszavonás" : "Eladás"} – ${ft(q * line.priceHuf)}` : undo ? "Visszavonás" : "Rögzítés";
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {line.name} – {TITLES[kind]}
+          </DialogTitle>
+          <DialogDescription>
+            Készleten: {line.stock} db · {ft(line.priceHuf)}/db
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          {isSale ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button size="lg" variant={method === "cash" ? "default" : "outline"} onClick={() => setMethod("cash")}>
+                Készpénz
+              </Button>
+              <Button size="lg" variant={method === "card" ? "default" : "outline"} onClick={() => setMethod("card")}>
+                Kártya
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="lg" variant={!outside ? "default" : "outline"} onClick={() => setOutside(false)}>
+                  Standból
+                </Button>
+                <Button size="lg" variant={outside ? "default" : "outline"} onClick={() => setOutside(true)}>
+                  Standon kívül
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-xs">{outside ? "Belső fogyasztásként számít, de nem vonódik le a stand készletéből." : "Levonódik a stand készletéből."}</p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-3">
+            <Button size="icon-lg" variant="outline" aria-label="Kevesebb" disabled={q <= 1} onClick={() => setQuantity(clamp(q - 1))}>
+              <Minus />
+            </Button>
+            <Input
+              className="h-14 w-28 text-center text-3xl font-semibold tabular-nums"
+              type="number"
+              inputMode="numeric"
+              aria-label="Mennyiség"
+              value={q}
+              onChange={(e) => setQuantity(clamp(Number(e.target.value)))}
+              onKeyDown={(e) => e.key === "Enter" && onConfirm(tx, q, { method, outside })}
+            />
+            <Button size="icon-lg" variant="outline" aria-label="Több" disabled={q >= max} onClick={() => setQuantity(clamp(q + 1))}>
+              <Plus />
+            </Button>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            {QUICK_QUANTITIES.filter((n) => n <= max).map((n) => (
+              <Button key={n} variant={q === n ? "default" : "outline"} onClick={() => setQuantity(n)}>
+                {n}
+              </Button>
+            ))}
+          </div>
+          {undo && max === 0 ? <p className="text-muted-foreground text-center text-sm">Ebből most nincs mit visszavonni.</p> : null}
+          {overStock ? <p className="text-destructive text-center text-sm">Több, mint a készlet ({line.stock} db).</p> : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Mégse
+          </Button>
+          <Button size="lg" disabled={undo && max === 0} onClick={() => onConfirm(tx, q, { method, outside })}>
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -47,6 +47,9 @@ describe("stand mode", () => {
     await restock(org, id, cola, 12);
     await recordInternal(org, id, lagos, 1);
     await sell(org, id, lagos, "card", 2);
+    // Consumed outside the stand: internal use, but the stand's stock is untouched.
+    await recordInternal(org, id, lagos, 2, true);
+    await expect(recordInternal(org, id, lagos, -3, true)).rejects.toThrow(/Nothing to undo/);
 
     const result = await closeDay(org, id, { counted: { [cola]: 32 }, emailTo: "boss@example.com" }, transporter as never);
     expect(result.emailed).toBe(true);
@@ -57,7 +60,7 @@ describe("stand mode", () => {
     const next = await proposeOpening(event, "2026-07-03");
     expect(next.previousDate).toBe("2026-07-02");
     expect(next.items.find((i) => i.productId === cola)).toMatchObject({ opening: 32, fromPrevious: true });
-    expect(next.items.find((i) => i.productId === lagos)!.opening).toBe(7);
+    expect(next.items.find((i) => i.productId === lagos)!.opening).toBe(7); // 10 − 2 sold − 1 internal; the 2 outside don't count
 
     const day2 = await openDay(org, event, { date: "2026-07-03" });
     await setOpening(org, String(day2._id), cola, 30);
@@ -68,7 +71,9 @@ describe("stand mode", () => {
     expect(summary.cash).toBe(3 * 600);
     expect(summary.card).toBe(2 * 1500);
     expect(summary.deposit).toBe(150);
-    expect(summary.internalValue).toBe(1500);
+    expect(summary.internalItems).toBe(3);
+    expect(summary.internalOutsideItems).toBe(2);
+    expect(summary.internalValue).toBe(3 * 1500);
     expect(summary.variance).toBe(32 - (24 + 12 - 3));
     expect((await buildReportXlsx(days, "t")).length).toBeGreaterThan(1000);
   });

@@ -33,7 +33,7 @@ export async function openDayAction(eventId: string, devices: boolean, openings:
   }
 }
 
-export type StandChange = { kind: "sell"; method: "cash" | "card" } | { kind: "restock" } | { kind: "internal" } | { kind: "opening" };
+export type StandChange = { kind: "sell"; method: "cash" | "card" } | { kind: "restock" } | { kind: "internal"; outside: boolean } | { kind: "opening" };
 
 /** One tap: sell / restock / internal use / fix the opening count. Negative `quantity` undoes. */
 export async function changeStandAction(dayId: string, productId: string, change: StandChange, quantity: number): Promise<StandResult> {
@@ -45,7 +45,7 @@ export async function changeStandAction(dayId: string, productId: string, change
         : change.kind === "restock"
           ? await stand.restock(organizationId, dayId, productId, quantity)
           : change.kind === "internal"
-            ? await stand.recordInternal(organizationId, dayId, productId, quantity)
+            ? await stand.recordInternal(organizationId, dayId, productId, quantity, change.outside)
             : await stand.setOpening(organizationId, dayId, productId, quantity);
     return { ok: true, day: toDayDto(day) };
   } catch (error) {

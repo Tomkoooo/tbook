@@ -13,6 +13,7 @@ const can = (over: Partial<StandLine> = {}): StandLine => ({
   soldCash: 10,
   soldCard: 6,
   internal: 2,
+  internalOutside: 0,
   counted: null,
   ...over,
 });
@@ -42,6 +43,16 @@ describe("stand lines", () => {
     expect(t.internalCost).toBeNull();
   });
 
+  it("counts consumption outside the stand as internal use without touching the stand's stock", () => {
+    const line = can({ internal: 2, internalOutside: 3 });
+    expect(expectedClosing(line)).toBe(24 + 12 - 16 - 2);
+    const t = lineTotals(line);
+    expect(t.internal).toBe(5);
+    expect(t.internalOutside).toBe(3);
+    expect(t.internalValue).toBe(5 * 600);
+    expect(t.internalCost).toBe(5 * 350);
+  });
+
   it("reports a negative variance when fewer were counted than expected", () => {
     expect(lineTotals(can({ counted: 15 })).variance).toBe(-3);
     expect(lineTotals(can()).variance).toBe(0);
@@ -49,7 +60,7 @@ describe("stand lines", () => {
 });
 
 describe("summarizeStand", () => {
-  const lagos = can({ productId: "lagos", name: "Lángos", category: "food", priceHuf: 1500, depositHuf: 0, costHuf: null, opening: 10, restocked: 0, soldCash: 4, soldCard: 0, internal: 1 });
+  const lagos = can({ productId: "lagos", name: "Lángos", category: "food", priceHuf: 1500, depositHuf: 0, costHuf: null, opening: 10, restocked: 0, soldCash: 4, soldCard: 0, internal: 1, internalOutside: 0 });
   const day1 = { date: "2026-07-02", manual: null, lines: [can(), lagos] };
   const day2 = { date: "2026-07-03", manual: null, lines: [can({ opening: 18, restocked: 0, soldCash: 5, soldCard: 5, internal: 0 })] };
 

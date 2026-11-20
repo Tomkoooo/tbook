@@ -13,7 +13,10 @@ export interface StandLineDto {
   restocked: number;
   soldCash: number;
   soldCard: number;
+  /** Internal use from the stand's stock. */
   internal: number;
+  /** Internal use outside the stand (stock untouched). */
+  internalOutside: number;
   /** opening + restocked − sold − internal */
   stock: number;
 }
@@ -45,6 +48,7 @@ export function toDayDto(day: Day): StandDayDto {
       soldCash: l.soldCash,
       soldCard: l.soldCard,
       internal: l.internal,
+      internalOutside: l.internalOutside ?? 0,
       stock: l.opening + l.restocked - l.soldCash - l.soldCard - l.internal,
     })),
   };

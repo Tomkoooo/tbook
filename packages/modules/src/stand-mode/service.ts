@@ -189,6 +189,7 @@ function snapshot(product: IStandProduct, opening: number): IStandLine {
     soldCash: 0,
     soldCard: 0,
     internal: 0,
+    internalOutside: 0,
     counted: null,
   };
 }
@@ -232,13 +233,14 @@ export async function endSandbox(organizationId: string, dayId: string): Promise
   if (result.deletedCount === 0) throw ActionError.notFound("Practice day not found");
 }
 
-type Counter = "restocked" | "soldCash" | "soldCard" | "internal";
+type Counter = "restocked" | "soldCash" | "soldCard" | "internal" | "internalOutside";
 
 async function adjust(organizationId: string, dayId: string, productId: string, field: Counter, delta: number): Promise<IStandDay> {
   if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 100000) throw ActionError.validation("Invalid amount.");
   const day = await StandDayModel.findOneAndUpdate(
     // Atomic and guarded: the counter can't go below zero, and only an open day changes.
-    { _id: dayId, organizationId, status: "open", lines: { $elemMatch: { productId: oid(productId), [field]: { $gte: delta < 0 ? -delta : 0 } } } },
+    // (Only a subtraction needs the floor; a line saved before a counter existed has no such field yet.)
+    { _id: dayId, organizationId, status: "open", lines: { $elemMatch: { productId: oid(productId), ...(delta < 0 ? { [field]: { $gte: -delta } } : {}) } } },
     { $inc: { [`lines.$.${field}`]: delta } },
     { returnDocument: "after" },
   ).exec();
@@ -256,8 +258,9 @@ export function sell(organizationId: string, dayId: string, productId: string, m
 export const undoSale = (organizationId: string, dayId: string, productId: string, method: "cash" | "card") => sell(organizationId, dayId, productId, method, -1);
 /** Stock brought to the stand while selling (negative = correction). */
 export const restock = (organizationId: string, dayId: string, productId: string, quantity: number) => adjust(organizationId, dayId, productId, "restocked", quantity);
-/** Belső fogyasztás. */
-export const recordInternal = (organizationId: string, dayId: string, productId: string, quantity: number) => adjust(organizationId, dayId, productId, "internal", quantity);
+/** Belső fogyasztás. `outside`: consumed outside the stand, so the stand's stock stays as it is. */
+export const recordInternal = (organizationId: string, dayId: string, productId: string, quantity: number, outside = false) =>
+  adjust(organizationId, dayId, productId, outside ? "internalOutside" : "internal", quantity);
 
 /** Adds a product created after the day opened (with the count it started with). */
 export async function addProductToDay(organizationId: string, dayId: string, productId: string, opening = 0): Promise<IStandDay> {
@@ -299,6 +302,7 @@ export function toDomain(line: IStandLine): StandLine {
     soldCash: line.soldCash,
     soldCard: line.soldCard,
     internal: line.internal,
+    internalOutside: line.internalOutside ?? 0,
     counted: line.counted ?? null,
   };
 }
@@ -418,6 +422,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     ["Beszerzési költség", summary.cost],
     ["Nyereség", summary.profitComplete ? summary.profit : `${summary.profit} (nem minden termék beszerzési ára ismert)`],
     ["Belső fogyasztás (db)", summary.internalItems],
+    ["Ebből standon kívül (db)", summary.internalOutsideItems],
     ["Belső fogyasztás értéke (eladási áron)", summary.internalValue],
     ["Belső fogyasztás költsége", summary.internalCost],
     ["Nyereség a belső fogyasztás után", summary.profitAfterInternal],
@@ -435,6 +440,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     { header: "Készpénz db", key: "cash", width: 12 },
     { header: "Kártya db", key: "card", width: 12 },
     { header: "Belső fogyasztás", key: "internal", width: 16 },
+    { header: "Ebből standon kívül", key: "internalOutside", width: 18 },
     { header: "Záró", key: "closing", width: 10 },
     { header: "Bevétel", key: "revenue", width: 14 },
     { header: "Visszaváltási érték", key: "deposit", width: 18 },
@@ -445,7 +451,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
   ];
   products.getRow(1).font = { bold: true };
   for (const p of summary.byProduct) {
-    products.addRow({ name: p.name, opening: p.opening, restocked: p.restocked, sold: p.sold, cash: p.soldCash, card: p.soldCard, internal: p.internal, closing: p.closing, revenue: p.revenue, deposit: p.deposit, cost: p.cost ?? "", profit: p.profit ?? "", internalValue: p.internalValue, variance: p.variance });
+    products.addRow({ name: p.name, opening: p.opening, restocked: p.restocked, sold: p.sold, cash: p.soldCash, card: p.soldCard, internal: p.internal, internalOutside: p.internalOutside, closing: p.closing, revenue: p.revenue, deposit: p.deposit, cost: p.cost ?? "", profit: p.profit ?? "", internalValue: p.internalValue, variance: p.variance });
   }
 
   const byDay = workbook.addWorksheet("Napok");
@@ -458,11 +464,12 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     { header: "Nyereség", key: "profit", width: 14 },
     { header: "Eladott db", key: "items", width: 12 },
     { header: "Belső fogy. db", key: "internalItems", width: 14 },
+    { header: "Ebből standon kívül", key: "internalOutsideItems", width: 18 },
     { header: "Belső fogy. értéke", key: "internalValue", width: 18 },
     { header: "Megjegyzés", key: "note", width: 40 },
   ];
   byDay.getRow(1).font = { bold: true };
-  summary.byDay.forEach((row, i) => byDay.addRow({ date: row.date, revenue: row.revenue, cash: row.cash, card: row.card, deposit: row.deposit, profit: row.profit ?? "", items: row.itemsSold, internalItems: row.internalItems, internalValue: row.internalValue, note: (row.manual ? "Utólag rögzítve. " : "") + (days[i]?.note ?? "") }));
+  summary.byDay.forEach((row, i) => byDay.addRow({ date: row.date, revenue: row.revenue, cash: row.cash, card: row.card, deposit: row.deposit, profit: row.profit ?? "", items: row.itemsSold, internalItems: row.internalItems, internalOutsideItems: row.internalOutsideItems, internalValue: row.internalValue, note: (row.manual ? "Utólag rögzítve. " : "") + (days[i]?.note ?? "") }));
 
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
@@ -472,7 +479,7 @@ export function reportHtml(event: IEvent, day: IStandDay): string {
   const row = (label: string, value: string) => `<tr><td style="padding:2px 12px 2px 0">${escapeHtml(label)}</td><td style="text-align:right"><b>${escapeHtml(value)}</b></td></tr>`;
   const items = s.byProduct
     .filter((p) => p.sold > 0 || p.internal > 0)
-    .map((p) => `<li>${escapeHtml(p.name)}: ${p.sold} db eladva${p.internal ? `, ${p.internal} db belső fogyasztás` : ""}</li>`)
+    .map((p) => `<li>${escapeHtml(p.name)}: ${p.sold} db eladva${p.internal ? `, ${p.internal} db belső fogyasztás${p.internalOutside ? ` (ebből ${p.internalOutside} standon kívül)` : ""}` : ""}</li>`)
     .join("");
   return `<p>${escapeHtml(event.name)} — ${escapeHtml(day.date)} záró jelentés. A részletes kimutatás a csatolt Excelben.</p>
 <table>${row("Bevétel", ft(s.revenue))}${row("Készpénz", ft(s.cash))}${row("Kártya", ft(s.card))}${row("Visszaváltási érték", ft(s.deposit))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
