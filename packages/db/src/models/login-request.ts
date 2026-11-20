@@ -8,7 +8,7 @@ export interface ILoginRequest extends Document, Omit<LoginRequest, "id" | "conf
 const LoginRequestSchema = new Schema<ILoginRequest>(
   {
     token: { type: String, required: true, unique: true, index: true },
-    purpose: { type: String, enum: ["qr", "email-switch"], required: true },
+    purpose: { type: String, enum: ["qr", "email-switch", "device-link"], required: true },
     status: {
       type: String,
       enum: ["pending", "confirmed", "completed", "denied", "expired"],

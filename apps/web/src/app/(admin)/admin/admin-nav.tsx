@@ -166,6 +166,9 @@ export function AdminNav({
                 <DropdownMenuItem asChild>
                   <Link href="/admin/select-org">Switch organization</Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/admin/device-link">Sign in another device (QR)</Link>
+                </DropdownMenuItem>
                 {isSystemAdmin ? (
                   <DropdownMenuItem asChild>
                     <Link href="/admin/organizations">Manage all organizations</Link>
