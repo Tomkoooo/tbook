@@ -51,7 +51,7 @@ describe("stand mode", () => {
     await recordInternal(org, id, lagos, 2, true);
     await expect(recordInternal(org, id, lagos, -3, true)).rejects.toThrow(/Nothing to undo/);
 
-    const result = await closeDay(org, id, { counted: { [cola]: 32 }, emailTo: "boss@example.com" }, transporter as never);
+    const result = await closeDay(org, id, { counted: { [cola]: 32 }, internal: { [lagos]: { inside: 1, outside: 3 } }, emailTo: "boss@example.com" }, transporter as never);
     expect(result.emailed).toBe(true);
     expect(sent[0]).toMatchObject({ to: "boss@example.com" });
     expect(sent[0]!.attachments?.[0]?.filename).toBe("stand-2026-07-02.xlsx");
@@ -71,19 +71,27 @@ describe("stand mode", () => {
     expect(summary.cash).toBe(3 * 600);
     expect(summary.card).toBe(2 * 1500);
     expect(summary.deposit).toBe(150);
-    expect(summary.internalItems).toBe(3);
-    expect(summary.internalOutsideItems).toBe(2);
-    expect(summary.internalValue).toBe(3 * 1500);
+    // Internal use was corrected while closing: 1 from the stand, 3 outside it.
+    expect(summary.internalItems).toBe(4);
+    expect(summary.internalOutsideItems).toBe(3);
+    expect(summary.internalValue).toBe(4 * 1500);
     expect(summary.variance).toBe(32 - (24 + 12 - 3));
     expect((await buildReportXlsx(days, "t")).length).toBeGreaterThan(1000);
   });
 
   it("records a day by hand so tomorrow can open from it", async () => {
-    await recordManualDay(org, event, { date: "2026-07-01", closing: { [cola]: 40, [lagos]: 5 }, cashHuf: 80000, cardHuf: 30000 });
+    const manual = await recordManualDay(
+      org,
+      event,
+      { date: "2026-07-01", closing: { [cola]: 40, [lagos]: 5 }, internal: { [cola]: { inside: 2, outside: 1 } }, cashHuf: 80000, cardHuf: 30000, emailTo: "boss@example.com" },
+      transporter as never,
+    );
+    expect(manual.emailed).toBe(true);
+    expect(sent.at(-1)).toMatchObject({ to: "boss@example.com" });
     const proposal = await proposeOpening(event, "2026-07-02");
     expect(proposal.items.find((i) => i.productId === cola)!.opening).toBe(40);
     const { summary } = await standStats(event, "2026-07-01", "2026-07-01");
-    expect(summary).toMatchObject({ cash: 80000, card: 30000, manualDays: 1 });
+    expect(summary).toMatchObject({ cash: 80000, card: 30000, manualDays: 1, internalItems: 3, internalOutsideItems: 1, variance: 0 });
   });
 
   it("practice runs use the products but never reach stats, history or the next opening", async () => {

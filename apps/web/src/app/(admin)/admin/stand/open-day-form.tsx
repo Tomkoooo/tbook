@@ -18,7 +18,7 @@ interface Item {
 }
 
 /** Opening: counts start at last closing; change what differs, pick the mode, open. */
-export function OpenDayForm({ eventId, date, previousDate, items, manage }: { eventId: string; date: string; previousDate: string | null; items: Item[]; manage: boolean }) {
+export function OpenDayForm({ eventId, date, previousDate, items, manage, defaultEmail }: { eventId: string; date: string; previousDate: string | null; items: Item[]; manage: boolean; defaultEmail: string }) {
   const router = useRouter();
   const [counts, setCounts] = useState<Record<string, string>>(() => Object.fromEntries(items.map((i) => [i.productId, String(i.opening)])));
   const [devices, setDevices] = useState(false);
@@ -63,22 +63,26 @@ export function OpenDayForm({ eventId, date, previousDate, items, manage }: { ev
           </div>
         </div>
       </SectionCard>
-      {manage ? <ManualDay eventId={eventId} items={items} /> : null}
+      {manage ? <ManualDay eventId={eventId} items={items} defaultEmail={defaultEmail} /> : null}
     </div>
   );
 }
 
-/** A day that wasn't kept in the app: give the closing stock and takings so tomorrow can open. */
-function ManualDay({ eventId, items }: { eventId: string; items: Item[] }) {
+/** A day that wasn't kept in the app: give the closing stock, internal use and takings so tomorrow can open (and the report can go out). */
+function ManualDay({ eventId, items, defaultEmail }: { eventId: string; items: Item[]; defaultEmail: string }) {
   const router = useRouter();
   const [date, setDate] = useState("");
   const [closing, setClosing] = useState<Record<string, string>>({});
+  const [inside, setInside] = useState<Record<string, string>>({});
+  const [outside, setOutside] = useState<Record<string, string>>({});
   const [cash, setCash] = useState("");
   const [card, setCard] = useState("");
+  const [email, setEmail] = useState(defaultEmail);
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
+  const num = (v: string | undefined) => Number(v) || 0;
   return (
-    <SectionCard title="Korábbi nap rögzítése" description="Záró készlet és készpénz/kártya bevétel megadása, hogy a következő napot erről lehessen nyitni.">
+    <SectionCard title="Korábbi nap rögzítése" description="Záró készlet, belső fogyasztás és készpénz/kártya bevétel megadása, hogy a következő napot erről lehessen nyitni. A jelentés e-mailben is kiküldhető.">
       <div className="grid gap-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <FormField label="Nap">
@@ -91,13 +95,24 @@ function ManualDay({ eventId, items }: { eventId: string; items: Item[] }) {
             <Input type="number" inputMode="numeric" value={card} onChange={(e) => setCard(e.target.value)} />
           </FormField>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3">
           {items.map((item) => (
-            <FormField key={item.productId} label={`${item.name} – záró`}>
-              <Input type="number" inputMode="numeric" min={0} value={closing[item.productId] ?? ""} onChange={(e) => setClosing({ ...closing, [item.productId]: e.target.value })} />
-            </FormField>
+            <div key={item.productId} className="grid grid-cols-3 items-end gap-2">
+              <FormField label={`${item.name} – záró`}>
+                <Input type="number" inputMode="numeric" min={0} value={closing[item.productId] ?? ""} onChange={(e) => setClosing({ ...closing, [item.productId]: e.target.value })} />
+              </FormField>
+              <FormField label="Belső standból" hint="A stand készletéből">
+                <Input type="number" inputMode="numeric" min={0} value={inside[item.productId] ?? ""} onChange={(e) => setInside({ ...inside, [item.productId]: e.target.value })} />
+              </FormField>
+              <FormField label="Belső kívül" hint="Nem a stand készletéből">
+                <Input type="number" inputMode="numeric" min={0} value={outside[item.productId] ?? ""} onChange={(e) => setOutside({ ...outside, [item.productId]: e.target.value })} />
+              </FormField>
+            </div>
           ))}
         </div>
+        <FormField label="Jelentés e-mailben (Excellel)" hint="Üresen hagyva nem megy ki jelentés.">
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </FormField>
         <ResultNotice result={result} />
         <div>
           <Button
@@ -105,7 +120,16 @@ function ManualDay({ eventId, items }: { eventId: string; items: Item[] }) {
             disabled={pending || !date}
             onClick={() =>
               start(async () => {
-                const r = await manualDayAction(eventId, date, Object.fromEntries(Object.entries(closing).map(([k, v]) => [k, Number(v) || 0])), Number(cash) || 0, Number(card) || 0, "");
+                const r = await manualDayAction(
+                  eventId,
+                  date,
+                  Object.fromEntries(items.map((i) => [i.productId, num(closing[i.productId])])),
+                  Object.fromEntries(items.map((i) => [i.productId, { inside: num(inside[i.productId]), outside: num(outside[i.productId]) }])),
+                  num(cash),
+                  num(card),
+                  "",
+                  email.trim(),
+                );
                 setResult(r);
                 if (r.ok) router.refresh();
               })

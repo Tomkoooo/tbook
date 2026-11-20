@@ -87,6 +87,15 @@ describe("summarizeStand", () => {
     expect(cola.restocked).toBe(12);
   });
 
+  it("leaves a manual day out of the stock variance and keeps its internal use", () => {
+    const manual = { date: "2026-07-01", manual: { cashHuf: 1000, cardHuf: 0 }, lines: [can({ opening: 0, restocked: 0, soldCash: 0, soldCard: 0, internal: 2, internalOutside: 1, counted: 40 })] };
+    const s = summarizeStand([manual]);
+    expect(s.variance).toBe(0);
+    expect(s.internalItems).toBe(3);
+    expect(s.internalOutsideItems).toBe(1);
+    expect(s.byProduct[0]).toMatchObject({ closing: 40, variance: 0 });
+  });
+
   it("counts a manual day's money without item sales or profit", () => {
     const s = summarizeStand([{ date: "2026-07-01", lines: [], manual: { cashHuf: 50000, cardHuf: 20000 } }, day2]);
     expect(s.manualDays).toBe(1);

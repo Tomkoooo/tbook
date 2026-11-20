@@ -53,10 +53,12 @@ export async function changeStandAction(dayId: string, productId: string, change
   }
 }
 
-export async function closeDayAction(dayId: string, counted: Record<string, number>, note: string, emailTo: string): Promise<StandResult> {
+export type InternalUse = Record<string, { inside: number; outside: number }>;
+
+export async function closeDayAction(dayId: string, counted: Record<string, number>, internal: InternalUse, note: string, emailTo: string): Promise<StandResult> {
   try {
     const { organizationId } = await requireOrgPermission("stand:operate");
-    const result = await stand.closeDay(organizationId, dayId, { counted, note, emailTo });
+    const result = await stand.closeDay(organizationId, dayId, { counted, internal, note, emailTo });
     refresh();
     const mail = emailTo ? (result.emailed ? ` Report sent to ${emailTo}.` : ` The report email failed: ${result.emailError}`) : "";
     return { ok: true, message: `Day closed.${mail}` };
@@ -99,12 +101,22 @@ export async function resendReportAction(dayId: string, emailTo: string): Promis
   }
 }
 
-export async function manualDayAction(eventId: string, date: string, closing: Record<string, number>, cashHuf: number, cardHuf: number, note: string): Promise<StandResult> {
+export async function manualDayAction(
+  eventId: string,
+  date: string,
+  closing: Record<string, number>,
+  internal: InternalUse,
+  cashHuf: number,
+  cardHuf: number,
+  note: string,
+  emailTo: string,
+): Promise<StandResult> {
   try {
     const { organizationId } = await requireOrgPermission("stand:manage");
-    await stand.recordManualDay(organizationId, eventId, { date, closing, cashHuf, cardHuf, note });
+    const result = await stand.recordManualDay(organizationId, eventId, { date, closing, internal, cashHuf, cardHuf, note, emailTo });
     refresh();
-    return { ok: true, message: "Day recorded. The next day can open from it." };
+    const mail = emailTo ? (result.emailed ? ` Report sent to ${emailTo}.` : ` The report email failed: ${result.emailError}`) : "";
+    return { ok: true, message: `Day recorded. The next day can open from it.${mail}` };
   } catch (error) {
     return fail(error, "manualDayAction");
   }

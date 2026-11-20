@@ -65,6 +65,7 @@ export default async function StandPage({ searchParams }: { searchParams: Promis
           previousDate={proposal!.previousDate}
           items={proposal!.items}
           manage={manage}
+          defaultEmail={settings.reportEmail}
         />
       )}
     </>

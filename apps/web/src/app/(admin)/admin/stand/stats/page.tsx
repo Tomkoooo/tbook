@@ -156,7 +156,7 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
                         {row.internalItems} db ({ft(row.internalValue)})
                       </TableCell>
                       <TableCell className="text-right">
-                        {day.status === "closed" && !row.manual ? <DayActions dayId={String(day._id)} defaultEmail={day.reportSentTo || settings.reportEmail} canReopen={String(day._id) === latestClosedId} /> : null}
+                        {day.status === "closed" ? <DayActions dayId={String(day._id)} defaultEmail={day.reportSentTo || settings.reportEmail} canReopen={String(day._id) === latestClosedId} /> : null}
                       </TableCell>
                     </TableRow>
                   );

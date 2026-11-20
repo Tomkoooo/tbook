@@ -312,6 +312,8 @@ export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, 
 export interface CloseInput {
   /** productId → counted closing stock. Missing = trust the calculation. */
   counted?: Record<string, number>;
+  /** productId → internal use to record now (replaces the day's counts): from the stand's stock / outside it. */
+  internal?: Record<string, { inside?: number; outside?: number }>;
   note?: string;
   /** Send the report here; empty = don't send. */
   emailTo?: string;
@@ -323,8 +325,15 @@ export async function closeDay(organizationId: string, dayId: string, input: Clo
   if (day.sandbox) throw ActionError.validation("A practice day isn't closed; end it instead.");
   if (day.status !== "open") throw ActionError.validation("This day is already closed.");
   const lines = (day.toObject() as { lines: IStandLine[] }).lines.map((line) => {
-    const given = input.counted?.[String(line.productId)];
-    return { ...line, counted: given === undefined || given === null ? null : count(given) };
+    const id = String(line.productId);
+    const given = input.counted?.[id];
+    const used = input.internal?.[id];
+    return {
+      ...line,
+      counted: given === undefined || given === null ? null : count(given),
+      internal: used?.inside === undefined ? line.internal : count(used.inside),
+      internalOutside: used?.outside === undefined ? (line.internalOutside ?? 0) : count(used.outside),
+    };
   });
   const to = String(input.emailTo ?? "").trim();
   if (to && !/^\S+@\S+\.\S+$/.test(to)) throw ActionError.validation("The report email address isn't valid.");
@@ -352,14 +361,36 @@ export async function closeDay(organizationId: string, dayId: string, input: Clo
 export async function recordManualDay(
   organizationId: string,
   eventId: string,
-  input: { date: string; closing: Record<string, number>; cashHuf: number; cardHuf: number; note?: string },
-): Promise<IStandDay> {
+  input: {
+    date: string;
+    closing: Record<string, number>;
+    /** productId → internal use that day: from the stand's stock / outside it. */
+    internal?: Record<string, { inside?: number; outside?: number }>;
+    cashHuf: number;
+    cardHuf: number;
+    note?: string;
+    /** Email the report (with the Excel) here; empty = don't. */
+    emailTo?: string;
+  },
+  transporter?: MailTransporter,
+): Promise<{ day: IStandDay; emailed: boolean; emailError?: string }> {
   await standEventForOrg(organizationId, eventId);
   if (!DATE.test(input.date)) throw ActionError.validation("Invalid date.");
   if (await StandDayModel.exists({ eventId, date: input.date })) throw ActionError.validation("This day already exists.");
+  const to = String(input.emailTo ?? "").trim();
+  if (to && !/^\S+@\S+\.\S+$/.test(to)) throw ActionError.validation("The report email address isn't valid.");
   const products = await listProducts(eventId, { activeOnly: true });
-  const lines = products.map((p) => ({ ...snapshot(p, 0), counted: count(input.closing[String(p._id)] ?? 0) }));
-  return StandDayModel.create({
+  const lines = products.map((p) => {
+    const id = String(p._id);
+    const used = input.internal?.[id];
+    return {
+      ...snapshot(p, 0),
+      counted: count(input.closing[id] ?? 0),
+      internal: count(used?.inside ?? 0),
+      internalOutside: count(used?.outside ?? 0),
+    };
+  });
+  const day = await StandDayModel.create({
     organizationId,
     eventId,
     date: input.date,
@@ -369,6 +400,14 @@ export async function recordManualDay(
     note: String(input.note ?? "").slice(0, 1000),
     closedAt: new Date(),
   });
+  if (!to) return { day, emailed: false };
+  try {
+    await sendDayReport(day, to, transporter);
+    return { day, emailed: true };
+  } catch (error) {
+    // The day is saved either way; the report can be re-sent from the stats page.
+    return { day, emailed: false, emailError: error instanceof Error ? error.message : "The email couldn't be sent." };
+  }
 }
 
 /** Re-fixes a closed day's closing counts (the next day's opening isn't rewritten). */

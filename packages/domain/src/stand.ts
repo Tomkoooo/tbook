@@ -211,8 +211,11 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
       summary.cost += t.cost ?? 0;
       summary.profit += t.profit ?? 0;
       summary.internalCost += t.internalCost ?? 0;
-      summary.variance += t.variance;
-      summary.varianceValue += t.varianceValue;
+      // A day recorded by hand has no opening/sales, so "counted vs expected" would be meaningless.
+      if (!day.manual) {
+        summary.variance += t.variance;
+        summary.varianceValue += t.varianceValue;
+      }
 
       const existing = products.get(line.productId);
       if (!existing) {
@@ -233,7 +236,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
           cost: t.cost,
           profit: t.profit,
           internalValue: t.internalValue,
-          variance: t.variance,
+          variance: day.manual ? 0 : t.variance,
         });
       } else {
         existing.name = line.name;
@@ -249,7 +252,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
         existing.cost = existing.cost === null && t.cost === null ? null : (existing.cost ?? 0) + (t.cost ?? 0);
         existing.profit = existing.profit === null && t.profit === null ? null : (existing.profit ?? 0) + (t.profit ?? 0);
         existing.internalValue += t.internalValue;
-        existing.variance += t.variance;
+        existing.variance += day.manual ? 0 : t.variance;
       }
     }
     // A manual day has no item sales, so no profit to speak of.

@@ -372,6 +372,9 @@ function RestockDialog({ line, packs, onClose, onAdd }: { line: StandLineDto | n
 function CloseDialog({ open, onOpenChange, day, defaultEmail }: { open: boolean; onOpenChange: (open: boolean) => void; day: StandDayDto; defaultEmail: string }) {
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
+  // Internal use can still be given or corrected here; it starts from what was recorded during the day.
+  const [inside, setInside] = useState<Record<string, string>>(() => Object.fromEntries(day.lines.map((l) => [l.productId, String(l.internal)])));
+  const [outside, setOutside] = useState<Record<string, string>>(() => Object.fromEntries(day.lines.map((l) => [l.productId, String(l.internalOutside)])));
   const [note, setNote] = useState("");
   const [email, setEmail] = useState(defaultEmail);
   const [result, setResult] = useState<StandResult | null>(null);
@@ -384,15 +387,26 @@ function CloseDialog({ open, onOpenChange, day, defaultEmail }: { open: boolean;
         <DialogHeader>
           <DialogTitle>Nap zárása – {day.date}</DialogTitle>
           <DialogDescription>
-            A fiókban várhatóan {ft(money.cash)} készpénz van, a kártyás bevétel {ft(money.card)}. Számold meg a készletet; ha üresen hagyod, a számolt érték marad.
+            A fiókban várhatóan {ft(money.cash)} készpénz van, a kártyás bevétel {ft(money.card)}. Számold meg a készletet; ha üresen hagyod, a számolt érték marad. A belső fogyasztást itt is megadhatod vagy javíthatod (standból: a stand készletéből jön le; kívül: nem).
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {day.lines.map((l) => (
-            <FormField key={l.productId} label={l.name} hint={`Számolt: ${l.stock} db`}>
-              <Input type="number" inputMode="numeric" min={0} placeholder={String(l.stock)} value={counted[l.productId] ?? ""} onChange={(e) => setCounted({ ...counted, [l.productId]: e.target.value })} />
-            </FormField>
-          ))}
+        <div className="grid gap-3">
+          {day.lines.map((l) => {
+            const calculated = l.stock + l.internal - (Number(inside[l.productId]) || 0);
+            return (
+              <div key={l.productId} className="grid grid-cols-3 items-end gap-2">
+                <FormField label={`${l.name} – záró`} hint={`Számolt: ${calculated} db`}>
+                  <Input type="number" inputMode="numeric" min={0} placeholder={String(calculated)} value={counted[l.productId] ?? ""} onChange={(e) => setCounted({ ...counted, [l.productId]: e.target.value })} />
+                </FormField>
+                <FormField label="Belső standból">
+                  <Input type="number" inputMode="numeric" min={0} value={inside[l.productId]} onChange={(e) => setInside({ ...inside, [l.productId]: e.target.value })} />
+                </FormField>
+                <FormField label="Belső kívül">
+                  <Input type="number" inputMode="numeric" min={0} value={outside[l.productId]} onChange={(e) => setOutside({ ...outside, [l.productId]: e.target.value })} />
+                </FormField>
+              </div>
+            );
+          })}
         </div>
         <FormField label="Jelentés e-mailben (Excellel)" hint="Üresen hagyva nem megy ki jelentés.">
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -407,7 +421,7 @@ function CloseDialog({ open, onOpenChange, day, defaultEmail }: { open: boolean;
             onClick={() =>
               start(async () => {
                 const entered = Object.fromEntries(Object.entries(counted).filter(([, v]) => v !== "").map(([k, v]) => [k, Number(v)]));
-                const r = await closeDayAction(day.id, entered, note, email.trim());
+                const r = await closeDayAction(day.id, entered, Object.fromEntries(day.lines.map((l) => [l.productId, { inside: Number(inside[l.productId]) || 0, outside: Number(outside[l.productId]) || 0 }])), note, email.trim());
                 setResult(r);
                 if (r.ok) router.refresh();
               })
