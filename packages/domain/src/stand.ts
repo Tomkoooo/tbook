@@ -33,6 +33,13 @@ export interface StandDayData {
   lines: StandLine[];
   /** A day recorded after the fact: only the money, no item sales. */
   manual: { cashHuf: number; cardHuf: number } | null;
+  /**
+   * Cash actually counted at closing. The day's revenue is certain (it is the
+   * items sold), but the cash/card split depends on the payment method being
+   * tapped for every sale, which isn't always possible; a counted cash amount
+   * fixes the split: cash = counted, card = the rest.
+   */
+  cashActualHuf?: number | null;
 }
 
 export function expectedClosing(line: Pick<StandLine, "opening" | "restocked" | "soldCash" | "soldCard" | "internal">): number {
@@ -117,6 +124,8 @@ export interface StandProductRow {
 export interface StandDayRow {
   date: string;
   manual: boolean;
+  /** The cash/card split comes from the cash counted at closing, not from the payment mode of each sale. */
+  cashCounted: boolean;
   revenue: number;
   cash: number;
   card: number;
@@ -184,7 +193,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
   const products = new Map<string, StandProductRow>();
 
   for (const day of days) {
-    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0 };
+    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), cashCounted: false, revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0 };
     let dayProfitKnown = true;
     let dayCost = 0;
     if (day.manual) {
@@ -254,6 +263,11 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
         existing.internalValue += t.internalValue;
         existing.variance += day.manual ? 0 : t.variance;
       }
+    }
+    if (!day.manual && day.cashActualHuf !== null && day.cashActualHuf !== undefined) {
+      row.cashCounted = true;
+      row.cash = Math.min(day.cashActualHuf, row.revenue);
+      row.card = row.revenue - row.cash;
     }
     // A manual day has no item sales, so no profit to speak of.
     row.profit = day.manual || !dayProfitKnown ? null : row.revenue - row.deposit - dayCost;

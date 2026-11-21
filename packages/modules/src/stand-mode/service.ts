@@ -194,6 +194,16 @@ function snapshot(product: IStandProduct, opening: number): IStandLine {
   };
 }
 
+/** Money in whole forints (a day's takings are far above any item count). */
+const money = (v: unknown, label: string) => {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < 0 || n > 1_000_000_000) throw ActionError.validation(`${label} must be a whole amount in forints, 0 or more.`);
+  return n;
+};
+
+/** Nothing entered (the field was left empty). */
+const emptyCount = (v: unknown) => v === undefined || v === null || v === "" || (typeof v === "number" && Number.isNaN(v));
+
 const count = (v: unknown) => {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n) || n < 0 || n > 100000) throw ActionError.validation("Counts must be whole numbers, 0 or more.");
@@ -307,13 +317,15 @@ export function toDomain(line: IStandLine): StandLine {
   };
 }
 
-export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, manual: day.manual ? { cashHuf: day.manual.cashHuf, cardHuf: day.manual.cardHuf } : null, lines: day.lines.map(toDomain) });
+export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, cashActualHuf: day.cashActualHuf ?? null, manual: day.manual ? { cashHuf: day.manual.cashHuf, cardHuf: day.manual.cardHuf } : null, lines: day.lines.map(toDomain) });
 
 export interface CloseInput {
   /** productId → counted closing stock. Missing = trust the calculation. */
   counted?: Record<string, number>;
   /** productId → internal use to record now (replaces the day's counts): from the stand's stock / outside it. */
   internal?: Record<string, { inside?: number; outside?: number }>;
+  /** Cash counted in the drawer; the card part of the day's revenue is then the rest. Empty = keep the payment modes as tapped. */
+  cashHuf?: number | null;
   note?: string;
   /** Send the report here; empty = don't send. */
   emailTo?: string;
@@ -330,17 +342,21 @@ export async function closeDay(organizationId: string, dayId: string, input: Clo
     const used = input.internal?.[id];
     return {
       ...line,
-      counted: given === undefined || given === null ? null : count(given),
-      internal: used?.inside === undefined ? line.internal : count(used.inside),
-      internalOutside: used?.outside === undefined ? (line.internalOutside ?? 0) : count(used.outside),
+      counted: emptyCount(given) ? null : count(given),
+      // Left empty = keep what was recorded during the day.
+      internal: emptyCount(used?.inside) ? line.internal : count(used!.inside),
+      internalOutside: emptyCount(used?.outside) ? (line.internalOutside ?? 0) : count(used!.outside),
     };
   });
   const to = String(input.emailTo ?? "").trim();
   if (to && !/^\S+@\S+\.\S+$/.test(to)) throw ActionError.validation("The report email address isn't valid.");
+  const revenue = lines.reduce((sum, l) => sum + (l.soldCash + l.soldCard) * l.priceHuf, 0);
+  const cashActualHuf = input.cashHuf === undefined || input.cashHuf === null ? null : money(input.cashHuf, "The counted cash");
+  if (cashActualHuf !== null && cashActualHuf > revenue) throw ActionError.validation(`The counted cash (${cashActualHuf} Ft) is more than the day's revenue (${revenue} Ft).`);
   // Closed atomically: two people pressing Close can't both win.
   const closed = await StandDayModel.findOneAndUpdate(
     { _id: dayId, organizationId, status: "open" },
-    { $set: { status: "closed", closedAt: new Date(), note: String(input.note ?? "").slice(0, 1000), lines } },
+    { $set: { status: "closed", closedAt: new Date(), note: String(input.note ?? "").slice(0, 1000), lines, cashActualHuf } },
     { returnDocument: "after" },
   ).exec();
   if (!closed) throw ActionError.validation("This day is already closed.");
@@ -385,9 +401,9 @@ export async function recordManualDay(
     const used = input.internal?.[id];
     return {
       ...snapshot(p, 0),
-      counted: count(input.closing[id] ?? 0),
-      internal: count(used?.inside ?? 0),
-      internalOutside: count(used?.outside ?? 0),
+      counted: emptyCount(input.closing[id]) ? 0 : count(input.closing[id]),
+      internal: emptyCount(used?.inside) ? 0 : count(used!.inside),
+      internalOutside: emptyCount(used?.outside) ? 0 : count(used!.outside),
     };
   });
   const day = await StandDayModel.create({
@@ -395,7 +411,7 @@ export async function recordManualDay(
     eventId,
     date: input.date,
     status: "closed",
-    manual: { cashHuf: count(input.cashHuf), cardHuf: count(input.cardHuf) },
+    manual: { cashHuf: money(input.cashHuf, "The cash revenue"), cardHuf: money(input.cardHuf, "The card revenue") },
     lines,
     note: String(input.note ?? "").slice(0, 1000),
     closedAt: new Date(),
@@ -450,11 +466,14 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     { header: "", key: "v", width: 20 },
   ];
   overview.getRow(1).font = { bold: true };
+  const counted = summary.byDay.some((d) => d.cashCounted);
   const rows: Array<[string, number | string]> = [
     ["Napok száma", summary.days],
-    ["Bevétel (összesen)", summary.revenue],
-    ["Ebből készpénz", summary.cash],
-    ["Ebből kártya", summary.card],
+    // The day's revenue is the headline: it is the sum of what was sold. The cash/card split below is only as exact as
+    // the payment mode tapped for each sale (unless the cash was counted at closing).
+    ["NAPI BEVÉTEL (összesen)", summary.revenue],
+    [counted ? "Ebből készpénz (megszámolt készpénz alapján)" : "Ebből készpénz (a rögzített fizetési mód szerint)", summary.cash],
+    [counted ? "Ebből kártya (a bevétel többi része)" : "Ebből kártya (a rögzített fizetési mód szerint)", summary.card],
     ["Visszaváltási érték (nem nyereség)", summary.deposit],
     ["Nettó bevétel (visszaváltási érték nélkül)", summary.netRevenue],
     ["Eladott tételek", summary.itemsSold],
@@ -468,7 +487,10 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     ["Leltárkülönbség (db)", summary.variance],
     ["Leltárkülönbség értéke", summary.varianceValue],
   ];
-  for (const [k, v] of rows) overview.addRow({ k, v });
+  for (const [k, v] of rows) {
+    const row = overview.addRow({ k, v });
+    if (k.startsWith("NAPI BEVÉTEL")) row.font = { bold: true, size: 14 };
+  }
 
   const products = workbook.addWorksheet("Termékek");
   products.columns = [
@@ -520,8 +542,11 @@ export function reportHtml(event: IEvent, day: IStandDay): string {
     .filter((p) => p.sold > 0 || p.internal > 0)
     .map((p) => `<li>${escapeHtml(p.name)}: ${p.sold} db eladva${p.internal ? `, ${p.internal} db belső fogyasztás${p.internalOutside ? ` (ebből ${p.internalOutside} standon kívül)` : ""}` : ""}</li>`)
     .join("");
+  const counted = s.byDay[0]?.cashCounted;
   return `<p>${escapeHtml(event.name)} — ${escapeHtml(day.date)} záró jelentés. A részletes kimutatás a csatolt Excelben.</p>
-<table>${row("Bevétel", ft(s.revenue))}${row("Készpénz", ft(s.cash))}${row("Kártya", ft(s.card))}${row("Visszaváltási érték", ft(s.deposit))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
+<p style="font-size:22px;margin:12px 0 2px">Napi bevétel: <b>${escapeHtml(ft(s.revenue))}</b></p>
+<table style="color:#52525b">${row(counted ? "Ebből készpénz (megszámolt)" : "Ebből készpénz (rögzített fizetési mód)", ft(s.cash))}${row(counted ? "Ebből kártya (a többi)" : "Ebből kártya (rögzített fizetési mód)", ft(s.card))}</table>
+<table>${row("Visszaváltási érték", ft(s.deposit))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
 <ul>${items}</ul>${day.note ? `<p>${escapeHtml(day.note)}</p>` : ""}`;
 }
 

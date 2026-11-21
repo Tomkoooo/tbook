@@ -73,9 +73,9 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
         <>
           {!s.profitComplete ? <Notice tone="info">A nyereség csak azokat a termékeket tartalmazza, amelyeknek meg van adva a beszerzési ára.</Notice> : null}
           <StatGrid>
-            <Stat label="Bevétel" value={ft(s.revenue)} hint={`${s.itemsSold} db, ${s.days} nap`} />
-            <Stat label="Készpénz" value={ft(s.cash)} />
-            <Stat label="Kártya" value={ft(s.card)} />
+            <Stat label="Napi bevétel" value={ft(s.revenue)} hint={`${s.itemsSold} db, ${s.days} nap`} />
+            <Stat label="Ebből készpénz" value={ft(s.cash)} hint="rögzített fizetési mód / megszámolt készpénz" />
+            <Stat label="Ebből kártya" value={ft(s.card)} />
             <Stat label="Visszaváltási érték" value={ft(s.deposit)} hint="nem nyereség" />
             <Stat label="Nettó bevétel" value={ft(s.netRevenue)} hint="visszaváltási érték nélkül" />
             <Stat label="Nyereség" value={ft(s.profit)} hint={`költség: ${ft(s.cost)}`} />
@@ -148,8 +148,10 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
                       <TableCell className="font-medium">
                         {row.date} {day.status === "open" ? <Badge variant="success">nyitva</Badge> : null} {row.manual ? <Badge variant="outline">utólag rögzítve</Badge> : null}
                       </TableCell>
-                      <TableCell>{ft(row.revenue)}</TableCell>
-                      <TableCell>{ft(row.cash)}</TableCell>
+                      <TableCell className="font-semibold">{ft(row.revenue)}</TableCell>
+                      <TableCell>
+                        {ft(row.cash)} {row.cashCounted ? <Badge variant="outline">megszámolt</Badge> : null}
+                      </TableCell>
                       <TableCell>{ft(row.card)}</TableCell>
                       <TableCell>{ft(row.profit)}</TableCell>
                       <TableCell>

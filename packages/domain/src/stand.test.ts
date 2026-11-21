@@ -96,6 +96,16 @@ describe("summarizeStand", () => {
     expect(s.byProduct[0]).toMatchObject({ closing: 40, variance: 0 });
   });
 
+  it("takes the cash/card split from the cash counted at closing, the revenue stays the sales total", () => {
+    const tapped = { date: "2026-07-05", manual: null, lines: [can({ soldCash: 10, soldCard: 0, internal: 0 })] };
+    expect(summarizeStand([tapped])).toMatchObject({ revenue: 6000, cash: 6000, card: 0 });
+    const counted = summarizeStand([{ ...tapped, cashActualHuf: 4200 }]);
+    expect(counted).toMatchObject({ revenue: 6000, cash: 4200, card: 1800 });
+    expect(counted.byDay[0]!.cashCounted).toBe(true);
+    // Never more cash than revenue.
+    expect(summarizeStand([{ ...tapped, cashActualHuf: 9000 }])).toMatchObject({ cash: 6000, card: 0 });
+  });
+
   it("counts a manual day's money without item sales or profit", () => {
     const s = summarizeStand([{ date: "2026-07-01", lines: [], manual: { cashHuf: 50000, cardHuf: 20000 } }, day2]);
     expect(s.manualDays).toBe(1);

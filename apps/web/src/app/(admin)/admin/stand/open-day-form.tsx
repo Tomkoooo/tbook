@@ -81,6 +81,8 @@ function ManualDay({ eventId, items, defaultEmail }: { eventId: string; items: I
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
   const num = (v: string | undefined) => Number(v) || 0;
+  // Left empty = not given (0): the internal fields are optional, and Tab skips them to the next product's closing count.
+  const optional = (v: string | undefined) => (v === undefined || v.trim() === "" ? undefined : Number(v));
   return (
     <SectionCard title="Korábbi nap rögzítése" description="Záró készlet, belső fogyasztás és készpénz/kártya bevétel megadása, hogy a következő napot erről lehessen nyitni. A jelentés e-mailben is kiküldhető.">
       <div className="grid gap-4">
@@ -102,10 +104,10 @@ function ManualDay({ eventId, items, defaultEmail }: { eventId: string; items: I
                 <Input type="number" inputMode="numeric" min={0} value={closing[item.productId] ?? ""} onChange={(e) => setClosing({ ...closing, [item.productId]: e.target.value })} />
               </FormField>
               <FormField label="Belső standból" hint="A stand készletéből">
-                <Input type="number" inputMode="numeric" min={0} value={inside[item.productId] ?? ""} onChange={(e) => setInside({ ...inside, [item.productId]: e.target.value })} />
+                <Input tabIndex={-1} type="number" inputMode="numeric" min={0} value={inside[item.productId] ?? ""} onChange={(e) => setInside({ ...inside, [item.productId]: e.target.value })} />
               </FormField>
               <FormField label="Belső kívül" hint="Nem a stand készletéből">
-                <Input type="number" inputMode="numeric" min={0} value={outside[item.productId] ?? ""} onChange={(e) => setOutside({ ...outside, [item.productId]: e.target.value })} />
+                <Input tabIndex={-1} type="number" inputMode="numeric" min={0} value={outside[item.productId] ?? ""} onChange={(e) => setOutside({ ...outside, [item.productId]: e.target.value })} />
               </FormField>
             </div>
           ))}
@@ -124,7 +126,7 @@ function ManualDay({ eventId, items, defaultEmail }: { eventId: string; items: I
                   eventId,
                   date,
                   Object.fromEntries(items.map((i) => [i.productId, num(closing[i.productId])])),
-                  Object.fromEntries(items.map((i) => [i.productId, { inside: num(inside[i.productId]), outside: num(outside[i.productId]) }])),
+                  Object.fromEntries(items.map((i) => [i.productId, { inside: optional(inside[i.productId]), outside: optional(outside[i.productId]) }])),
                   num(cash),
                   num(card),
                   "",

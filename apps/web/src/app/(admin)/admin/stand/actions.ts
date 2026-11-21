@@ -53,12 +53,13 @@ export async function changeStandAction(dayId: string, productId: string, change
   }
 }
 
-export type InternalUse = Record<string, { inside: number; outside: number }>;
+/** Only what was entered: a missing value means "leave as it is" (closing) or 0 (a past day). */
+export type InternalUse = Record<string, { inside?: number; outside?: number }>;
 
-export async function closeDayAction(dayId: string, counted: Record<string, number>, internal: InternalUse, note: string, emailTo: string): Promise<StandResult> {
+export async function closeDayAction(dayId: string, counted: Record<string, number>, internal: InternalUse, cashHuf: number | null, note: string, emailTo: string): Promise<StandResult> {
   try {
     const { organizationId } = await requireOrgPermission("stand:operate");
-    const result = await stand.closeDay(organizationId, dayId, { counted, internal, note, emailTo });
+    const result = await stand.closeDay(organizationId, dayId, { counted, internal, cashHuf, note, emailTo });
     refresh();
     const mail = emailTo ? (result.emailed ? ` Report sent to ${emailTo}.` : ` The report email failed: ${result.emailError}`) : "";
     return { ok: true, message: `Day closed.${mail}` };

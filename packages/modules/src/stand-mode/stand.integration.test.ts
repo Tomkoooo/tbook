@@ -51,7 +51,8 @@ describe("stand mode", () => {
     await recordInternal(org, id, lagos, 2, true);
     await expect(recordInternal(org, id, lagos, -3, true)).rejects.toThrow(/Nothing to undo/);
 
-    const result = await closeDay(org, id, { counted: { [cola]: 32 }, internal: { [lagos]: { inside: 1, outside: 3 } }, emailTo: "boss@example.com" }, transporter as never);
+    // Internal use is optional: the cola line has none given (kept as recorded), the lángos is corrected.
+    const result = await closeDay(org, id, { counted: { [cola]: 32 }, internal: { [lagos]: { inside: 1, outside: 3 }, [cola]: { inside: undefined } }, cashHuf: 2000, emailTo: "boss@example.com" }, transporter as never);
     expect(result.emailed).toBe(true);
     expect(sent[0]).toMatchObject({ to: "boss@example.com" });
     expect(sent[0]!.attachments?.[0]?.filename).toBe("stand-2026-07-02.xlsx");
@@ -68,8 +69,10 @@ describe("stand mode", () => {
     await expect(openDay(org, event, { date: "2026-07-04" })).rejects.toThrow(/still open/);
 
     const { summary, days } = await standStats(event, "2026-07-02", "2026-07-02");
-    expect(summary.cash).toBe(3 * 600);
-    expect(summary.card).toBe(2 * 1500);
+    // Revenue is the sales total; the counted cash (2 000 Ft) fixes the split.
+    expect(summary.revenue).toBe(3 * 600 + 2 * 1500);
+    expect(summary.cash).toBe(2000);
+    expect(summary.card).toBe(3 * 600 + 2 * 1500 - 2000);
     expect(summary.deposit).toBe(150);
     // Internal use was corrected while closing: 1 from the stand, 3 outside it.
     expect(summary.internalItems).toBe(4);
@@ -79,11 +82,21 @@ describe("stand mode", () => {
     expect((await buildReportXlsx(days, "t")).length).toBeGreaterThan(1000);
   });
 
+  it("rejects counted cash above the day's revenue and keeps empty fields from failing", async () => {
+    const stillOpen = await getOpenDay(event);
+    if (stillOpen) await closeDay(org, String(stillOpen._id), {});
+    const d = await openDay(org, event, { date: "2026-08-01", openings: { [cola]: 10, [lagos]: 10 } });
+    await sell(org, String(d._id), cola, "cash", 2);
+    await expect(closeDay(org, String(d._id), { cashHuf: 5000 })).rejects.toThrow(/more than the day's revenue/);
+    const closed = await closeDay(org, String(d._id), { counted: { [cola]: undefined as never }, internal: { [cola]: { inside: "" as never, outside: NaN } } });
+    expect(closed.day.status).toBe("closed");
+  });
+
   it("records a day by hand so tomorrow can open from it", async () => {
     const manual = await recordManualDay(
       org,
       event,
-      { date: "2026-07-01", closing: { [cola]: 40, [lagos]: 5 }, internal: { [cola]: { inside: 2, outside: 1 } }, cashHuf: 80000, cardHuf: 30000, emailTo: "boss@example.com" },
+      { date: "2026-07-01", closing: { [cola]: 40, [lagos]: 5 }, internal: { [cola]: { inside: 2, outside: 1 } }, cashHuf: 250000, cardHuf: 130000, emailTo: "boss@example.com" },
       transporter as never,
     );
     expect(manual.emailed).toBe(true);
@@ -91,7 +104,7 @@ describe("stand mode", () => {
     const proposal = await proposeOpening(event, "2026-07-02");
     expect(proposal.items.find((i) => i.productId === cola)!.opening).toBe(40);
     const { summary } = await standStats(event, "2026-07-01", "2026-07-01");
-    expect(summary).toMatchObject({ cash: 80000, card: 30000, manualDays: 1, internalItems: 3, internalOutsideItems: 1, variance: 0 });
+    expect(summary).toMatchObject({ cash: 250000, card: 130000, manualDays: 1, internalItems: 3, internalOutsideItems: 1, variance: 0 });
   });
 
   it("practice runs use the products but never reach stats, history or the next opening", async () => {

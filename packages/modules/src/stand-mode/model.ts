@@ -73,6 +73,8 @@ export interface IStandDay extends Document {
   sandbox: boolean;
   /** Recorded after the fact: closing counts and money only. */
   manual: { cashHuf: number; cardHuf: number } | null;
+  /** Cash counted at closing (fixes the cash/card split; revenue is the sales total either way). */
+  cashActualHuf: number | null;
   lines: IStandLine[];
   note: string;
   openedAt: Date;
@@ -110,6 +112,7 @@ const StandDaySchema = new Schema<IStandDay>(
     status: { type: String, enum: ["open", "closed"], default: "open" },
     devices: { type: Boolean, default: false },
     sandbox: { type: Boolean, default: false },
+    cashActualHuf: { type: Number, default: null },
     manual: { type: new Schema({ cashHuf: Number, cardHuf: Number }, { _id: false }), default: null },
     lines: { type: [StandLineSchema], default: [] },
     note: { type: String, default: "" },

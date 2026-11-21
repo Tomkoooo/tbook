@@ -220,7 +220,8 @@ export function SellScreen({
         }}
       />
       <RestockDialog line={restocking} packs={packs} onClose={() => setRestocking(null)} onAdd={(line, qty) => apply(line.productId, { kind: "restock" }, qty)} />
-      <CloseDialog open={closing} onOpenChange={setClosing} day={day} defaultEmail={defaultEmail} />
+      {/* Mounted fresh on every open, so it always starts from the day as it is now. */}
+      {closing ? <CloseDialog onClose={() => setClosing(false)} day={day} defaultEmail={defaultEmail} /> : null}
     </div>
   );
 }
@@ -369,40 +370,62 @@ function RestockDialog({ line, packs, onClose, onAdd }: { line: StandLineDto | n
   );
 }
 
-function CloseDialog({ open, onOpenChange, day, defaultEmail }: { open: boolean; onOpenChange: (open: boolean) => void; day: StandDayDto; defaultEmail: string }) {
+function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day: StandDayDto; defaultEmail: string }) {
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
-  // Internal use can still be given or corrected here; it starts from what was recorded during the day.
-  const [inside, setInside] = useState<Record<string, string>>(() => Object.fromEntries(day.lines.map((l) => [l.productId, String(l.internal)])));
-  const [outside, setOutside] = useState<Record<string, string>>(() => Object.fromEntries(day.lines.map((l) => [l.productId, String(l.internalOutside)])));
+  // Empty = keep what was recorded during the day (shown as the placeholder), so there is nothing to type for 0.
+  const [inside, setInside] = useState<Record<string, string>>({});
+  const [outside, setOutside] = useState<Record<string, string>>({});
+  const [cash, setCash] = useState("");
   const [note, setNote] = useState("");
   const [email, setEmail] = useState(defaultEmail);
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
-  const money = day.lines.reduce((t, l) => ({ cash: t.cash + l.soldCash * l.priceHuf, card: t.card + l.soldCard * l.priceHuf }), { cash: 0, card: 0 });
+  const totals = day.lines.reduce((t, l) => ({ cash: t.cash + l.soldCash * l.priceHuf, card: t.card + l.soldCard * l.priceHuf }), { cash: 0, card: 0 });
+  const revenue = totals.cash + totals.card;
+  const entered = (v: string | undefined) => v !== undefined && v.trim() !== "";
+  const cashN = entered(cash) ? Number(cash) : null;
+  const cashTooHigh = cashN !== null && cashN > revenue;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Nap zárása – {day.date}</DialogTitle>
           <DialogDescription>
-            A fiókban várhatóan {ft(money.cash)} készpénz van, a kártyás bevétel {ft(money.card)}. Számold meg a készletet; ha üresen hagyod, a számolt érték marad. A belső fogyasztást itt is megadhatod vagy javíthatod (standból: a stand készletéből jön le; kívül: nem).
+            Számold meg a készletet; ha üresen hagyod, a számolt érték marad. A belső fogyasztás üresen hagyva az marad, amit napközben rögzítettél.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="bg-muted/50 grid gap-1 rounded-lg p-3">
+          <span className="text-muted-foreground text-xs font-medium">Napi bevétel</span>
+          <strong className="text-3xl font-semibold tabular-nums">{ft(revenue)}</strong>
+          <span className="text-muted-foreground text-xs tabular-nums">
+            rögzített fizetési mód szerint: készpénz {ft(totals.cash)} · kártya {ft(totals.card)}
+          </span>
+        </div>
+        <FormField
+          label="Megszámolt készpénz (Ft)"
+          hint="Nem kötelező. Ha nem minden eladást ütöttél be a jó fizetési móddal, add meg a fiókban lévő készpénzt: a kártyás rész a napi bevétel többi része lesz."
+          error={cashTooHigh ? `Több, mint a napi bevétel (${ft(revenue)}).` : undefined}
+        >
+          <Input type="number" inputMode="numeric" min={0} value={cash} onChange={(e) => setCash(e.target.value)} />
+        </FormField>
+
         <div className="grid gap-3">
           {day.lines.map((l) => {
-            const calculated = l.stock + l.internal - (Number(inside[l.productId]) || 0);
+            const calculated = l.stock + l.internal - (entered(inside[l.productId]) ? Number(inside[l.productId]) : l.internal);
             return (
               <div key={l.productId} className="grid grid-cols-3 items-end gap-2">
                 <FormField label={`${l.name} – záró`} hint={`Számolt: ${calculated} db`}>
                   <Input type="number" inputMode="numeric" min={0} placeholder={String(calculated)} value={counted[l.productId] ?? ""} onChange={(e) => setCounted({ ...counted, [l.productId]: e.target.value })} />
                 </FormField>
+                {/* Optional: Tab skips them, so the closing counts can be typed straight down the list. */}
                 <FormField label="Belső standból">
-                  <Input type="number" inputMode="numeric" min={0} value={inside[l.productId]} onChange={(e) => setInside({ ...inside, [l.productId]: e.target.value })} />
+                  <Input tabIndex={-1} type="number" inputMode="numeric" min={0} placeholder={String(l.internal)} value={inside[l.productId] ?? ""} onChange={(e) => setInside({ ...inside, [l.productId]: e.target.value })} />
                 </FormField>
                 <FormField label="Belső kívül">
-                  <Input type="number" inputMode="numeric" min={0} value={outside[l.productId]} onChange={(e) => setOutside({ ...outside, [l.productId]: e.target.value })} />
+                  <Input tabIndex={-1} type="number" inputMode="numeric" min={0} placeholder={String(l.internalOutside)} value={outside[l.productId] ?? ""} onChange={(e) => setOutside({ ...outside, [l.productId]: e.target.value })} />
                 </FormField>
               </div>
             );
@@ -417,11 +440,16 @@ function CloseDialog({ open, onOpenChange, day, defaultEmail }: { open: boolean;
         <ResultNotice result={result} />
         <DialogFooter>
           <Button
-            disabled={pending || result?.ok === true}
+            disabled={pending || result?.ok === true || cashTooHigh}
             onClick={() =>
               start(async () => {
-                const entered = Object.fromEntries(Object.entries(counted).filter(([, v]) => v !== "").map(([k, v]) => [k, Number(v)]));
-                const r = await closeDayAction(day.id, entered, Object.fromEntries(day.lines.map((l) => [l.productId, { inside: Number(inside[l.productId]) || 0, outside: Number(outside[l.productId]) || 0 }])), note, email.trim());
+                const counts = Object.fromEntries(day.lines.filter((l) => entered(counted[l.productId])).map((l) => [l.productId, Number(counted[l.productId])]));
+                const internal = Object.fromEntries(
+                  day.lines
+                    .filter((l) => entered(inside[l.productId]) || entered(outside[l.productId]))
+                    .map((l) => [l.productId, { inside: entered(inside[l.productId]) ? Number(inside[l.productId]) : undefined, outside: entered(outside[l.productId]) ? Number(outside[l.productId]) : undefined }]),
+                );
+                const r = await closeDayAction(day.id, counts, internal, cashN, note, email.trim());
                 setResult(r);
                 if (r.ok) router.refresh();
               })
