@@ -63,6 +63,7 @@ export default async function StandPage({ searchParams }: { searchParams: Promis
           eventId={eventId}
           date={today}
           previousDate={proposal!.previousDate}
+          previousFloat={proposal!.floatHuf}
           items={proposal!.items}
           manage={manage}
           defaultEmail={settings.reportEmail}

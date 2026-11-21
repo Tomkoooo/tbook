@@ -18,11 +18,12 @@ interface Item {
 }
 
 /** Opening: counts start at last closing; change what differs, pick the mode, open. */
-export function OpenDayForm({ eventId, date, previousDate, items, manage, defaultEmail }: { eventId: string; date: string; previousDate: string | null; items: Item[]; manage: boolean; defaultEmail: string }) {
+export function OpenDayForm({ eventId, date, previousDate, previousFloat, items, manage, defaultEmail }: { eventId: string; date: string; previousDate: string | null; previousFloat: number; items: Item[]; manage: boolean; defaultEmail: string }) {
   const router = useRouter();
   const [counts, setCounts] = useState<Record<string, string>>(() => Object.fromEntries(items.map((i) => [i.productId, String(i.opening)])));
   const [devices, setDevices] = useState(false);
   const [sandbox, setSandbox] = useState(false);
+  const [float, setFloat] = useState(previousFloat ? String(previousFloat) : "");
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
   const numbers = () => Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Number(v) || 0]));
@@ -43,6 +44,9 @@ export function OpenDayForm({ eventId, date, previousDate, items, manage, defaul
               </FormField>
             ))}
           </div>
+          <FormField label="Nyitó váltó (Ft)" hint={previousFloat ? "Az előző nap váltója; írd át, ha más." : "A kasszába a nyitáskor betett készpénz. Nem bevétel. Üresen hagyható, később is megadható."}>
+            <Input type="number" inputMode="numeric" min={0} className="max-w-48" value={float} onChange={(e) => setFloat(e.target.value)} />
+          </FormField>
           <CheckboxField label="Nyomtató és kártyaolvasó kezelése" hint="Ki: csak készletkezelés. Be: az eladásokhoz nyomtatás és kártyaolvasó is tartozik." checked={devices} onCheckedChange={setDevices} />
           <CheckboxField label="Gyakorló mód" hint="Kipróbálás éles nyitás nélkül: a meglévő termékekkel, a megadott mennyiségekkel. Nem kerül a statisztikába és a készletbe, a végén törlődik." checked={sandbox} onCheckedChange={setSandbox} />
           <ResultNotice result={result} />
@@ -52,7 +56,7 @@ export function OpenDayForm({ eventId, date, previousDate, items, manage, defaul
               disabled={pending}
               onClick={() =>
                 start(async () => {
-                  const r = await openDayAction(eventId, devices, numbers(), sandbox);
+                  const r = await openDayAction(eventId, devices, numbers(), sandbox, Number(float) || 0);
                   setResult(r);
                   if (r.ok) router.refresh();
                 })

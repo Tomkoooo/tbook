@@ -27,10 +27,10 @@ async function actingBy(userId: string): Promise<string> {
 
 const refresh = () => revalidatePath("/admin/stand", "layout");
 
-export async function openDayAction(eventId: string, devices: boolean, openings: Record<string, number>, sandbox = false): Promise<StandResult> {
+export async function openDayAction(eventId: string, devices: boolean, openings: Record<string, number>, sandbox = false, floatHuf = 0): Promise<StandResult> {
   try {
     const { organizationId } = await requireOrgPermission("stand:operate");
-    const day = await stand.openDay(organizationId, eventId, { devices, openings, sandbox });
+    const day = await stand.openDay(organizationId, eventId, { devices, openings, sandbox, floatHuf });
     refresh();
     return { ok: true, day: toDayDto(day) };
   } catch (error) {
@@ -210,5 +210,48 @@ export async function stornoEntryAction(entryId: string): Promise<StandResult> {
     return { ok: true, message: "Storno recorded.", day: toDayDto(day) };
   } catch (error) {
     return fail(error, "stornoEntryAction");
+  }
+}
+
+/** Sets or fixes the opening float of the open day (also when the day was opened without one). */
+export async function setFloatAction(dayId: string, floatHuf: number): Promise<StandResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("stand:operate");
+    return { ok: true, day: toDayDto(await stand.setFloat(organizationId, dayId, floatHuf)) };
+  } catch (error) {
+    return fail(error, "setFloatAction");
+  }
+}
+
+export interface StandWithdrawalDto {
+  id: string;
+  date: string;
+  at: string;
+  amountHuf: number;
+  note: string;
+  by: string;
+  stornoed: boolean;
+}
+
+/** Internal cash (the safe): withdrawals with a reason. Not part of the register report. */
+export async function addWithdrawalAction(eventId: string, amountHuf: number, note: string): Promise<StandResult> {
+  try {
+    const { organizationId, userId } = await requireOrgPermission("stand:manage");
+    await stand.addWithdrawal(organizationId, eventId, { amountHuf, note }, await actingBy(userId));
+    refresh();
+    return { ok: true, message: "Recorded." };
+  } catch (error) {
+    return fail(error, "addWithdrawalAction");
+  }
+}
+
+export async function stornoWithdrawalAction(withdrawalId: string): Promise<StandResult> {
+  try {
+    const { organizationId, userId } = await requireOrgPermission("stand:manage");
+    await stand.stornoWithdrawal(organizationId, withdrawalId, await actingBy(userId));
+    refresh();
+    return { ok: true, message: "Reversed." };
+  } catch (error) {
+    return fail(error, "stornoWithdrawalAction");
   }
 }

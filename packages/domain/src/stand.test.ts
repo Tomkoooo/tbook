@@ -106,6 +106,15 @@ describe("summarizeStand", () => {
     expect(summarizeStand([{ ...tapped, cashActualHuf: 9000 }])).toMatchObject({ cash: 6000, card: 0 });
   });
 
+  it("adds the opening float to the register figures but not to revenue", () => {
+    const day = { date: "2026-07-06", manual: null, floatHuf: 20000, lines: [can({ soldCash: 10, soldCard: 5, internal: 0 })] };
+    const s = summarizeStand([day]);
+    expect(s).toMatchObject({ revenue: 9000, cash: 6000, card: 3000, floatHuf: 20000, cashInRegister: 26000, registerTotal: 29000 });
+    // The cash counted in the drawer includes the float.
+    const counted = summarizeStand([{ ...day, cashActualHuf: 24500 }]);
+    expect(counted).toMatchObject({ revenue: 9000, cash: 4500, card: 4500, cashInRegister: 24500, registerTotal: 29000 });
+  });
+
   it("counts a manual day's money without item sales or profit", () => {
     const s = summarizeStand([{ date: "2026-07-01", lines: [], manual: { cashHuf: 50000, cardHuf: 20000 } }, day2]);
     expect(s.manualDays).toBe(1);

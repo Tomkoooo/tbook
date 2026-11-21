@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 const TABS = [
   { href: "/admin/stand", label: "Pult", key: "sell" },
   { href: "/admin/stand/products", label: "Termékek", key: "products" },
+  { href: "/admin/stand/safe", label: "Belső kassza", key: "safe" },
   { href: "/admin/stand/stats", label: "Statisztika", key: "stats" },
 ] as const;
 

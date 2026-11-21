@@ -12,7 +12,7 @@ import { FormField, ResultNotice } from "@/components/form-bits";
 import { Notice } from "@/components/notice";
 import { cn } from "@/lib/utils";
 import { LogDialog } from "./log-dialog";
-import { addProductToDayAction, changeStandAction, closeDayAction, endSandboxAction, type StandChange, type StandResult } from "./actions";
+import { addProductToDayAction, changeStandAction, closeDayAction, endSandboxAction, setFloatAction, type StandChange, type StandResult } from "./actions";
 import type { StandDayDto, StandLineDto } from "./dto";
 
 type Mode = "cash" | "card" | "internal" | "restock";
@@ -64,6 +64,7 @@ export function SellScreen({
   const [restocking, setRestocking] = useState<StandLineDto | null>(null);
   const [closing, setClosing] = useState(false);
   const [logging, setLogging] = useState(false);
+  const [floating, setFloating] = useState(false);
   const [pending, start] = useTransition();
 
   function apply(productId: string, change: StandChange, quantity: number) {
@@ -135,17 +136,26 @@ export function SellScreen({
         </div>
         <p className="text-muted-foreground flex flex-wrap items-baseline gap-x-4 text-sm tabular-nums">
           <span>
-            Kasszában (készpénz) <strong className="text-foreground text-base">{ft(totals.cash)}</strong>
+            Kasszában (készpénz, váltóval) <strong className="text-foreground text-base">{ft(day.floatHuf + totals.cash)}</strong>
           </span>
           <span>
             Kártya <strong className="text-foreground">{ft(totals.card)}</strong>
           </span>
           <span>
-            Összesen <strong className="text-foreground">{ft(totals.cash + totals.card)}</strong> ({totals.items} db)
+            Kassza összesen <strong className="text-foreground">{ft(day.floatHuf + totals.cash + totals.card)}</strong>
           </span>
-          <span>ebből visszaváltási díj {ft(totals.deposit)}</span>
+          <span>
+            Napi bevétel {ft(totals.cash + totals.card)} ({totals.items} db) · ebből visszaváltási díj {ft(totals.deposit)}
+          </span>
           <span>
             Belső fogyasztás {totals.internal} db ({ft(totals.internalValue)})
+          </span>
+          {/* Quiet on purpose: most days give the float when opening; this is for adding or fixing it later. */}
+          <span className="text-xs">
+            váltó {ft(day.floatHuf)}{" "}
+            <button type="button" className="hover:text-foreground underline underline-offset-2" onClick={() => setFloating(true)}>
+              {day.floatHuf ? "módosít" : "megad"}
+            </button>
           </span>
         </p>
       </div>
@@ -228,6 +238,7 @@ export function SellScreen({
         }}
       />
       <RestockDialog line={restocking} packs={packs} onClose={() => setRestocking(null)} onAdd={(line, qty) => apply(line.productId, { kind: "restock" }, qty)} />
+      {floating ? <FloatDialog day={day} onClose={() => setFloating(false)} onDay={setDay} /> : null}
       {logging ? <LogDialog dayId={day.id} canStorno onClose={() => setLogging(false)} onDay={setDay} /> : null}
       {/* Mounted fresh on every open, so it always starts from the day as it is now. */}
       {closing ? <CloseDialog onClose={() => setClosing(false)} day={day} defaultEmail={defaultEmail} /> : null}
@@ -346,6 +357,38 @@ function TxDialog({
   );
 }
 
+function FloatDialog({ day, onClose, onDay }: { day: StandDayDto; onClose: () => void; onDay: (day: StandDayDto) => void }) {
+  const [value, setValue] = useState(day.floatHuf ? String(day.floatHuf) : "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const save = () =>
+    start(async () => {
+      const r = await setFloatAction(day.id, Number(value) || 0);
+      if (r.ok && r.day) {
+        onDay(r.day);
+        onClose();
+      } else setError(r.message ?? "Failed.");
+    });
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nyitó váltó</DialogTitle>
+          <DialogDescription>A nyitáskor a kasszába betett készpénz. Nem bevétel; a kassza-riportban a készpénzhez adódik.</DialogDescription>
+        </DialogHeader>
+        <FormField label="Nyitó váltó (Ft)" error={error}>
+          <Input autoFocus type="number" inputMode="numeric" min={0} value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+        </FormField>
+        <DialogFooter>
+          <Button disabled={pending} onClick={save}>
+            Mentés
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RestockDialog({ line, packs, onClose, onAdd }: { line: StandLineDto | null; packs: number[]; onClose: () => void; onAdd: (line: StandLineDto, qty: number) => void }) {
   const [custom, setCustom] = useState("");
   const add = (qty: number) => {
@@ -399,7 +442,7 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
   const revenue = totals.cash + totals.card;
   const entered = (v: string | undefined) => v !== undefined && v.trim() !== "";
   const cashN = entered(cash) ? Number(cash) : null;
-  const cashTooHigh = cashN !== null && cashN > revenue;
+  const cashTooHigh = cashN !== null && cashN > day.floatHuf + revenue;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -414,26 +457,30 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
         <div className="bg-muted/50 grid gap-2 rounded-lg p-3">
           <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
             <div className="grid">
-              <span className="text-muted-foreground text-xs font-medium">Kasszában várható készpénz</span>
-              <strong className="text-3xl font-semibold tabular-nums">{ft(totals.cash)}</strong>
+              <span className="text-muted-foreground text-xs font-medium">Napi bevétel</span>
+              <strong className="text-3xl font-semibold tabular-nums">{ft(revenue)}</strong>
+            </div>
+            <div className="grid">
+              <span className="text-muted-foreground text-xs font-medium">Kasszában várható készpénz (váltóval)</span>
+              <strong className="text-xl font-semibold tabular-nums">{ft(day.floatHuf + totals.cash)}</strong>
             </div>
             <div className="grid">
               <span className="text-muted-foreground text-xs font-medium">Kártya</span>
               <strong className="text-xl font-semibold tabular-nums">{ft(totals.card)}</strong>
             </div>
             <div className="grid">
-              <span className="text-muted-foreground text-xs font-medium">Napi bevétel összesen</span>
-              <strong className="text-xl font-semibold tabular-nums">{ft(revenue)}</strong>
+              <span className="text-muted-foreground text-xs font-medium">Kassza összesen</span>
+              <strong className="text-xl font-semibold tabular-nums">{ft(day.floatHuf + revenue)}</strong>
             </div>
           </div>
           <span className="text-muted-foreground text-xs tabular-nums">
-            A visszaváltási díjat tartalmazza (ebből {ft(totals.deposit)}), így a kassza végösszegével egyezik. A visszaváltási díj nélküli nettó: {ft(revenue - totals.deposit)}.
+            A visszaváltási díjat tartalmazza (ebből {ft(totals.deposit)}), a nyitó váltó ({ft(day.floatHuf)}) a kasszához tartozik, nem bevétel. A visszaváltási díj nélküli nettó: {ft(revenue - totals.deposit)}.
           </span>
         </div>
         <FormField
-          label="Megszámolt készpénz (Ft)"
-          hint="Nem kötelező. Ha nem minden eladást ütöttél be a jó fizetési móddal, add meg a fiókban lévő készpénzt: a kártyás rész a napi bevétel többi része lesz."
-          error={cashTooHigh ? `Több, mint a napi bevétel (${ft(revenue)}).` : undefined}
+          label="Megszámolt készpénz a kasszában (Ft)"
+          hint="Nem kötelező. Ha nem minden eladást ütöttél be a jó fizetési móddal, add meg a kasszában lévő teljes készpénzt (váltóval együtt): a kártyás rész a napi bevétel többi része lesz."
+          error={cashTooHigh ? `Több, mint a váltó és a napi bevétel együtt (${ft(day.floatHuf + revenue)}).` : undefined}
         >
           <Input type="number" inputMode="numeric" min={0} value={cash} onChange={(e) => setCash(e.target.value)} />
         </FormField>

@@ -33,11 +33,13 @@ export interface StandDayData {
   lines: StandLine[];
   /** A day recorded after the fact: only the money, no item sales. */
   manual: { cashHuf: number; cardHuf: number } | null;
+  /** Nyitó váltó: the cash put in the register before the first sale. It is not revenue. */
+  floatHuf?: number;
   /**
-   * Cash actually counted at closing. The day's revenue is certain (it is the
+   * Cash actually counted in the register at closing, float included. The day's revenue is certain (it is the
    * items sold), but the cash/card split depends on the payment method being
    * tapped for every sale, which isn't always possible; a counted cash amount
-   * fixes the split: cash = counted, card = the rest.
+   * fixes the split: cash sales = counted − float, card = the rest.
    */
   cashActualHuf?: number | null;
 }
@@ -124,6 +126,12 @@ export interface StandProductRow {
 export interface StandDayRow {
   date: string;
   manual: boolean;
+  /** Nyitó váltó. */
+  floatHuf: number;
+  /** Cash that should be in the register: float + cash sales. */
+  cashInRegister: number;
+  /** Register total as the cash report shows it: float + cash sales + card. */
+  registerTotal: number;
   /** The cash/card split comes from the cash counted at closing, not from the payment mode of each sale. */
   cashCounted: boolean;
   revenue: number;
@@ -146,6 +154,10 @@ export interface StandSummary {
   deposit: number;
   netRevenue: number;
   itemsSold: number;
+  /** Float over the days, and the register figures built on it (meaningful for one day; over a range they add up the days). */
+  floatHuf: number;
+  cashInRegister: number;
+  registerTotal: number;
   /** Cost of the sold items whose purchase price is known. */
   cost: number;
   /** Net revenue − cost, over items with a known price only. */
@@ -176,6 +188,9 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     card: 0,
     deposit: 0,
     netRevenue: 0,
+    floatHuf: 0,
+    cashInRegister: 0,
+    registerTotal: 0,
     itemsSold: 0,
     cost: 0,
     profit: 0,
@@ -193,7 +208,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
   const products = new Map<string, StandProductRow>();
 
   for (const day of days) {
-    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), cashCounted: false, revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0 };
+    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), cashCounted: false, floatHuf: 0, cashInRegister: 0, registerTotal: 0, revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0 };
     let dayProfitKnown = true;
     let dayCost = 0;
     if (day.manual) {
@@ -266,15 +281,22 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     }
     if (!day.manual && day.cashActualHuf !== null && day.cashActualHuf !== undefined) {
       row.cashCounted = true;
-      row.cash = Math.min(day.cashActualHuf, row.revenue);
+      // The count includes the float, which isn't sales.
+      row.cash = Math.min(Math.max(day.cashActualHuf - (day.floatHuf ?? 0), 0), row.revenue);
       row.card = row.revenue - row.cash;
     }
+    row.floatHuf = day.manual ? 0 : (day.floatHuf ?? 0);
+    row.cashInRegister = row.floatHuf + row.cash;
+    row.registerTotal = row.cashInRegister + row.card;
     // A manual day has no item sales, so no profit to speak of.
     row.profit = day.manual || !dayProfitKnown ? null : row.revenue - row.deposit - dayCost;
     summary.revenue += row.revenue;
     summary.cash += row.cash;
     summary.card += row.card;
     summary.deposit += row.deposit;
+    summary.floatHuf += row.floatHuf;
+    summary.cashInRegister += row.cashInRegister;
+    summary.registerTotal += row.registerTotal;
     summary.itemsSold += row.itemsSold;
     summary.internalItems += row.internalItems;
     summary.internalOutsideItems += row.internalOutsideItems;

@@ -27,6 +27,8 @@ export interface StandDayDto {
   devices: boolean;
   /** Practice day: not in stats or inventory. */
   sandbox: boolean;
+  /** Nyitó váltó. */
+  floatHuf: number;
   lines: StandLineDto[];
 }
 
@@ -36,6 +38,7 @@ export function toDayDto(day: Day): StandDayDto {
     date: day.date,
     devices: day.devices,
     sandbox: day.sandbox,
+    floatHuf: day.floatHuf ?? 0,
     lines: day.lines.map((l) => ({
       productId: String(l.productId),
       name: l.name,

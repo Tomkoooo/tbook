@@ -3,7 +3,7 @@ import { EventGroupModel, EventModel, OrganizationModel, dbConnect, dbDisconnect
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import "../index";
 import { StandDayModel } from "./model";
-import { listEntries, stornoEntry, stornoLine, endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
+import { setFloat, addWithdrawal, listWithdrawals, stornoWithdrawal, listEntries, stornoEntry, stornoLine, endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
 
 const sent: Array<{ to: string; subject: string; attachments?: Array<{ filename: string }> }> = [];
 const transporter = { sendMail: async (m: never) => (sent.push(m), {} as never) };
@@ -88,7 +88,7 @@ describe("stand mode", () => {
     if (stillOpen) await closeDay(org, String(stillOpen._id), {});
     const d = await openDay(org, event, { date: "2026-08-01", openings: { [cola]: 10, [lagos]: 10 } });
     await sell(org, String(d._id), cola, "cash", 2);
-    await expect(closeDay(org, String(d._id), { cashHuf: 5000 })).rejects.toThrow(/more than the day's revenue/);
+    await expect(closeDay(org, String(d._id), { cashHuf: 5000 })).rejects.toThrow(/plus the day's revenue/);
     const closed = await closeDay(org, String(d._id), { counted: { [cola]: undefined as never }, internal: { [cola]: { inside: "" as never, outside: NaN } } });
     expect(closed.day.status).toBe("closed");
   });
@@ -194,5 +194,45 @@ describe("stand mode", () => {
     expect(day.cash % 100).toBe(0);
     expect(day.netRevenue).toBe(1650);
     expect(day.netRevenue % 100).toBe(50);
+  });
+
+  it("keeps the opening float out of revenue and in the register total", async () => {
+    const stillOpen = await getOpenDay(event);
+    if (stillOpen) await closeDay(org, String(stillOpen._id), {});
+    const d = await openDay(org, event, { date: "2026-09-10", floatHuf: 20000, openings: { [cola]: 30 } });
+    expect(d.floatHuf).toBe(20000);
+    await sell(org, String(d._id), cola, "cash", 5);
+    await sell(org, String(d._id), cola, "card", 5);
+    await expect(closeDay(org, String(d._id), { cashHuf: 99999 })).rejects.toThrow(/float/);
+    await closeDay(org, String(d._id), {});
+    const s = (await standStats(event, "2026-09-10", "2026-09-10")).summary;
+    expect(s).toMatchObject({ revenue: 6000, cash: 3000, card: 3000, floatHuf: 20000, cashInRegister: 23000, registerTotal: 26000 });
+    // Tomorrow's float starts from this one.
+    expect((await proposeOpening(event, "2026-09-11")).floatHuf).toBe(20000);
+  });
+
+  it("lets the float be set or fixed later on a day that was already opened", async () => {
+    const d = await openDay(org, event, { date: "2026-09-12", openings: { [cola]: 10 } });
+    expect(d.floatHuf).toBe(0);
+    const fixed = await setFloat(org, String(d._id), 15000);
+    expect(fixed.floatHuf).toBe(15000);
+    await expect(setFloat(org, String(d._id), -1)).rejects.toThrow(/forints/);
+    await closeDay(org, String(d._id), {});
+    await expect(setFloat(org, String(d._id), 1)).rejects.toThrow(/closed/);
+  });
+
+  it("records internal-cash (safe) withdrawals with a reason, apart from the register", async () => {
+    await expect(addWithdrawal(org, event, { amountHuf: 5000, note: "  " })).rejects.toThrow(/why/);
+    await expect(addWithdrawal(org, event, { amountHuf: 0, note: "x" })).rejects.toThrow(/more than 0/);
+    const w = await addWithdrawal(org, event, { amountHuf: 50000, note: "Beszerzés a nagykerből", date: "2026-09-10" }, "boss@example.com");
+    expect(w).toMatchObject({ amountHuf: 50000, by: "boss@example.com", stornoed: false });
+    const before = (await standStats(event, "2026-09-10", "2026-09-10")).summary;
+    expect(before.registerTotal).toBe(26000); // the register report is untouched
+
+    await stornoWithdrawal(org, String(w._id), "boss@example.com");
+    await expect(stornoWithdrawal(org, String(w._id))).rejects.toThrow(/already reversed/);
+    expect((await listWithdrawals(event, "2026-09-10", "2026-09-10"))[0]!.stornoed).toBe(true);
+    const days = (await standStats(event, "2026-09-10", "2026-09-10")).days;
+    expect((await buildReportXlsx(days, "t")).length).toBeGreaterThan(1000);
   });
 });

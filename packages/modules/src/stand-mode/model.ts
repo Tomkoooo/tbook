@@ -73,7 +73,9 @@ export interface IStandDay extends Document {
   sandbox: boolean;
   /** Recorded after the fact: closing counts and money only. */
   manual: { cashHuf: number; cardHuf: number } | null;
-  /** Cash counted at closing (fixes the cash/card split; revenue is the sales total either way). */
+  /** Nyitó váltó: cash put in the register before selling. Not revenue. */
+  floatHuf: number;
+  /** Cash counted in the register at closing, float included (fixes the cash/card split; revenue is the sales total either way). */
   cashActualHuf: number | null;
   lines: IStandLine[];
   note: string;
@@ -112,6 +114,7 @@ const StandDaySchema = new Schema<IStandDay>(
     status: { type: String, enum: ["open", "closed"], default: "open" },
     devices: { type: Boolean, default: false },
     sandbox: { type: Boolean, default: false },
+    floatHuf: { type: Number, default: 0, min: 0 },
     cashActualHuf: { type: Number, default: null },
     manual: { type: new Schema({ cashHuf: Number, cardHuf: Number }, { _id: false }), default: null },
     lines: { type: [StandLineSchema], default: [] },
@@ -176,3 +179,37 @@ const StandEntrySchema = new Schema<IStandEntry>({
 });
 
 export const StandEntryModel: Model<IStandEntry> = mongoose.models.TBookStandEntry ?? mongoose.model<IStandEntry>("TBookStandEntry", StandEntrySchema, "tbookstandentries");
+
+/**
+ * A cash withdrawal from the internal cash (the safe — NOT the register the
+ * cash report is about), with the reason. Its own ledger: it never changes a
+ * day's register figures. A mistaken line is reversed once (stornoed), not
+ * deleted.
+ */
+export interface IStandWithdrawal extends Document {
+  organizationId: Types.ObjectId;
+  eventId: Types.ObjectId;
+  /** yyyy-mm-dd, Budapest. */
+  date: string;
+  amountHuf: number;
+  note: string;
+  by: string;
+  stornoed: boolean;
+  stornoedBy: string;
+  at: Date;
+}
+
+const StandWithdrawalSchema = new Schema<IStandWithdrawal>({
+  organizationId: { type: Schema.Types.ObjectId, ref: "TBookOrganization", required: true, index: true },
+  eventId: { type: Schema.Types.ObjectId, required: true, index: true },
+  date: { type: String, required: true },
+  amountHuf: { type: Number, required: true, min: 1 },
+  note: { type: String, required: true },
+  by: { type: String, default: "" },
+  stornoed: { type: Boolean, default: false },
+  stornoedBy: { type: String, default: "" },
+  at: { type: Date, default: () => new Date() },
+});
+
+export const StandWithdrawalModel: Model<IStandWithdrawal> =
+  mongoose.models.TBookStandWithdrawal ?? mongoose.model<IStandWithdrawal>("TBookStandWithdrawal", StandWithdrawalSchema, "tbookstandwithdrawals");

@@ -37,7 +37,8 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
   const eventId = String(event._id);
   const from = query.from || daysAgo(29);
   const to = query.to || stand.todayKey();
-  const [{ summary: s, days }, settings] = await Promise.all([stand.standStats(eventId, from, to), stand.standSettings(event)]);
+  const [{ summary: s, days }, settings, withdrawals] = await Promise.all([stand.standStats(eventId, from, to), stand.standSettings(event), stand.listWithdrawals(eventId, from, to)]);
+  const withdrawn = withdrawals.filter((w) => !w.stornoed).reduce((sum, w) => sum + w.amountHuf, 0);
   const exportHref = `/admin/stand/export?eventId=${eventId}&from=${from}&to=${to}`;
   const latestClosedId = [...days].reverse().find((d) => d.status === "closed" && !d.manual) ? String([...days].reverse().find((d) => d.status === "closed" && !d.manual)!._id) : null;
 
@@ -74,8 +75,10 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
           {!s.profitComplete ? <Notice tone="info">A nyereség csak azokat a termékeket tartalmazza, amelyeknek meg van adva a beszerzési ára.</Notice> : null}
           <StatGrid>
             <Stat label="Napi bevétel" value={ft(s.revenue)} hint={`${s.itemsSold} db, ${s.days} nap · visszaváltási díjjal`} />
-            <Stat label="Kasszában (készpénz)" value={ft(s.cash)} hint="visszaváltási díjjal, a kassza végösszegével egyezik" />
+            <Stat label="Kasszában (készpénz, váltóval)" value={ft(s.cashInRegister)} hint={`készpénzes eladás ${ft(s.cash)} + váltó ${ft(s.floatHuf)}`} />
             <Stat label="Kártya" value={ft(s.card)} />
+            <Stat label="Kassza összesen" value={ft(s.registerTotal)} hint="készpénz + kártya, váltóval" />
+            <Stat label="Belső kassza kivét" value={ft(withdrawn)} hint="a széfből, a kasszától külön" />
             <Stat label="Ebből visszaváltási díj" value={ft(s.deposit)} hint="nem nyereség" />
             <Stat label="Nettó bevétel" value={ft(s.netRevenue)} hint="visszaváltási díj nélkül, a kasszával nem egyezik" />
             <Stat label="Nyereség" value={ft(s.profit)} hint={`költség: ${ft(s.cost)}`} />
@@ -135,6 +138,8 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
                   <TableHead>Bevétel</TableHead>
                   <TableHead>Készpénz</TableHead>
                   <TableHead>Kártya</TableHead>
+                  <TableHead>Váltó</TableHead>
+                  <TableHead>Kassza összesen</TableHead>
                   <TableHead>Nyereség</TableHead>
                   <TableHead>Belső fogy.</TableHead>
                   <TableHead />
@@ -153,6 +158,8 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
                         {ft(row.cash)} {row.cashCounted ? <Badge variant="outline">megszámolt</Badge> : null}
                       </TableCell>
                       <TableCell>{ft(row.card)}</TableCell>
+                      <TableCell>{ft(row.floatHuf)}</TableCell>
+                      <TableCell className="font-medium">{ft(row.registerTotal)}</TableCell>
                       <TableCell>{ft(row.profit)}</TableCell>
                       <TableCell>
                         {row.internalItems} db ({ft(row.internalValue)})

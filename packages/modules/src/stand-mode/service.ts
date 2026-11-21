@@ -5,7 +5,7 @@ import { eventRepository, type IEvent } from "@tbook/db";
 import { closingOf, expectedClosing, lineTotals, summarizeStand, type StandDayData, type StandLine, type StandSummary } from "@tbook/domain";
 import { resolveModules, sendMail, type MailTransporter } from "@tbook/services";
 import { escapeHtml, moduleMailTransporter } from "../shared/mail";
-import { StandDayModel, StandEntryModel, StandProductModel, type IStandDay, type IStandEntry, type IStandLine, type IStandProduct, type StandCounter } from "./model";
+import { StandDayModel, StandEntryModel, StandProductModel, StandWithdrawalModel, type IStandDay, type IStandEntry, type IStandLine, type IStandProduct, type IStandWithdrawal, type StandCounter } from "./model";
 
 export const STAND_MODE = "stand-mode";
 export const DEFAULT_PACKS = [6, 10, 12, 20];
@@ -159,12 +159,13 @@ export interface OpeningProposal {
 }
 
 /** Opening counts for every active product: last closing where there is one, else 0. */
-export async function proposeOpening(eventId: string, date: string): Promise<{ previousDate: string | null; items: OpeningProposal[] }> {
+export async function proposeOpening(eventId: string, date: string): Promise<{ previousDate: string | null; /** The previous day's float, as a starting point. */ floatHuf: number; items: OpeningProposal[] }> {
   const [products, previous] = await Promise.all([listProducts(eventId, { activeOnly: true }), previousClosedDay(eventId, date)]);
   const closing = new Map<string, number>();
   for (const line of previous?.lines ?? []) closing.set(String(line.productId), Math.max(0, closingOf(toDomain(line))));
   return {
     previousDate: previous?.date ?? null,
+    floatHuf: previous?.floatHuf ?? 0,
     items: products.map((p) => ({
       productId: String(p._id),
       name: p.name,
@@ -213,7 +214,7 @@ const count = (v: unknown) => {
 export async function openDay(
   organizationId: string,
   eventId: string,
-  input: { date?: string; devices?: boolean; sandbox?: boolean; openings?: Record<string, number> },
+  input: { date?: string; devices?: boolean; sandbox?: boolean; floatHuf?: number; openings?: Record<string, number> },
 ): Promise<IStandDay> {
   await standEventForOrg(organizationId, eventId);
   const sandbox = Boolean(input.sandbox);
@@ -238,7 +239,8 @@ export async function openDay(
     await StandDayModel.deleteMany({ eventId, sandbox: true }).exec();
     await StandEntryModel.deleteMany({ dayId: { $in: old.map((d) => d._id) } }).exec();
   }
-  return StandDayModel.create({ organizationId, eventId, date, devices: Boolean(input.devices), sandbox, lines, status: "open" });
+  const floatHuf = emptyCount(input.floatHuf) ? 0 : money(input.floatHuf, "The opening float");
+  return StandDayModel.create({ organizationId, eventId, date, devices: Boolean(input.devices), sandbox, floatHuf, lines, status: "open" });
 }
 
 /** Ends the practice run: it is deleted, leaving no trace in stats or inventory. */
@@ -375,6 +377,16 @@ export async function setOpening(organizationId: string, dayId: string, productI
   return day;
 }
 
+/** Sets or fixes the opening float of an open day (e.g. it wasn't given when the day was opened). */
+export async function setFloat(organizationId: string, dayId: string, floatHuf: number): Promise<IStandDay> {
+  const value = money(floatHuf, "The opening float");
+  const day = await StandDayModel.findOneAndUpdate({ _id: dayId, organizationId, status: "open" }, { $set: { floatHuf: value } }, { returnDocument: "after" }).exec();
+  if (day) return day;
+  const existing = await StandDayModel.findOne({ _id: dayId, organizationId }).exec();
+  if (!existing) throw ActionError.notFound("Day not found");
+  throw ActionError.validation("This day is closed.");
+}
+
 export async function setDayDevices(organizationId: string, dayId: string, devices: boolean): Promise<void> {
   await StandDayModel.updateOne({ _id: dayId, organizationId, status: "open" }, { $set: { devices } }).exec();
 }
@@ -397,7 +409,7 @@ export function toDomain(line: IStandLine): StandLine {
   };
 }
 
-export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, cashActualHuf: day.cashActualHuf ?? null, manual: day.manual ? { cashHuf: day.manual.cashHuf, cardHuf: day.manual.cardHuf } : null, lines: day.lines.map(toDomain) });
+export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, floatHuf: day.floatHuf ?? 0, cashActualHuf: day.cashActualHuf ?? null, manual: day.manual ? { cashHuf: day.manual.cashHuf, cardHuf: day.manual.cardHuf } : null, lines: day.lines.map(toDomain) });
 
 export interface CloseInput {
   /** productId → counted closing stock. Missing = trust the calculation. */
@@ -406,6 +418,8 @@ export interface CloseInput {
   internal?: Record<string, { inside?: number; outside?: number }>;
   /** Cash counted in the drawer; the card part of the day's revenue is then the rest. Empty = keep the payment modes as tapped. */
   cashHuf?: number | null;
+  /** Correct the opening float while closing. Empty = unchanged. */
+  floatHuf?: number | null;
   note?: string;
   /** Send the report here; empty = don't send. */
   emailTo?: string;
@@ -433,12 +447,16 @@ export async function closeDay(organizationId: string, dayId: string, input: Clo
   const to = String(input.emailTo ?? "").trim();
   if (to && !/^\S+@\S+\.\S+$/.test(to)) throw ActionError.validation("The report email address isn't valid.");
   const revenue = lines.reduce((sum, l) => sum + (l.soldCash + l.soldCard) * l.priceHuf, 0);
+  const floatHuf = emptyCount(input.floatHuf) ? (day.floatHuf ?? 0) : money(input.floatHuf, "The opening float");
   const cashActualHuf = input.cashHuf === undefined || input.cashHuf === null ? null : money(input.cashHuf, "The counted cash");
-  if (cashActualHuf !== null && cashActualHuf > revenue) throw ActionError.validation(`The counted cash (${cashActualHuf} Ft) is more than the day's revenue (${revenue} Ft).`);
+  // The count is the whole register, float included, so it can't exceed float + the day's revenue.
+  if (cashActualHuf !== null && cashActualHuf > floatHuf + revenue) {
+    throw ActionError.validation(`The counted cash (${cashActualHuf} Ft) is more than the float (${floatHuf} Ft) plus the day's revenue (${revenue} Ft).`);
+  }
   // Closed atomically: two people pressing Close can't both win.
   const closed = await StandDayModel.findOneAndUpdate(
     { _id: dayId, organizationId, status: "open" },
-    { $set: { status: "closed", closedAt: new Date(), note: String(input.note ?? "").slice(0, 1000), lines, cashActualHuf } },
+    { $set: { status: "closed", closedAt: new Date(), note: String(input.note ?? "").slice(0, 1000), lines, cashActualHuf, floatHuf } },
     { returnDocument: "after" },
   ).exec();
   if (!closed) throw ActionError.validation("This day is already closed.");
@@ -542,6 +560,37 @@ export async function standStats(eventId: string, from?: string, to?: string): P
   return { summary: summarizeStand(days.map(dayToDomain)), days };
 }
 
+// ---- Internal cash (the safe) --------------------------------------------------------
+
+/** Takes cash out of the internal cash, with the reason. Separate from the register the cash report is about. */
+export async function addWithdrawal(organizationId: string, eventId: string, input: { amountHuf: number; note: string; date?: string }, by?: string): Promise<IStandWithdrawal> {
+  await standEventForOrg(organizationId, eventId);
+  const amountHuf = money(input.amountHuf, "The amount");
+  if (amountHuf < 1) throw ActionError.validation("The amount must be more than 0.");
+  const note = String(input.note ?? "").trim().slice(0, 500);
+  if (!note) throw ActionError.validation("Write why the money was taken out.");
+  const date = input.date && DATE.test(input.date) ? input.date : todayKey();
+  return StandWithdrawalModel.create({ organizationId, eventId, date, amountHuf, note, by: by ?? "" });
+}
+
+/** Reverses a withdrawal (a wrong amount, say) once; the line stays, marked. */
+export async function stornoWithdrawal(organizationId: string, withdrawalId: string, by?: string): Promise<void> {
+  const done = await StandWithdrawalModel.findOneAndUpdate({ _id: withdrawalId, organizationId, stornoed: { $ne: true } }, { $set: { stornoed: true, stornoedBy: by ?? "" } }).exec();
+  if (done) return;
+  const existing = await StandWithdrawalModel.findOne({ _id: withdrawalId, organizationId }).exec();
+  if (!existing) throw ActionError.notFound("Withdrawal not found");
+  throw ActionError.validation("This withdrawal was already reversed.");
+}
+
+export function listWithdrawals(eventId: string, from?: string, to?: string): Promise<IStandWithdrawal[]> {
+  const filter: Record<string, unknown> = { eventId };
+  const range: Record<string, string> = {};
+  if (from && DATE.test(from)) range.$gte = from;
+  if (to && DATE.test(to)) range.$lte = to;
+  if (Object.keys(range).length) filter.date = range;
+  return StandWithdrawalModel.find(filter).sort({ at: -1 }).limit(500).exec();
+}
+
 // ---- Reports -------------------------------------------------------------------------
 
 const ft = (n: number) => `${Math.round(n).toLocaleString("hu-HU")} Ft`;
@@ -560,14 +609,15 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
   const counted = summary.byDay.some((d) => d.cashCounted);
   const rows: Array<[string, number | string]> = [
     ["Napok száma", summary.days],
-    // The day's revenue is the headline: it is the sum of what was sold. The cash/card split below is only as exact as
-    // the payment mode tapped for each sale (unless the cash was counted at closing).
     ["NAPI BEVÉTEL (összesen, visszaváltási díjjal)", summary.revenue],
-    // What the cash register (kassza) report should show: item prices already contain the deposit, so these are the
-    // gross totals — whole hundreds when the prices are. The deposit-free net below deliberately won't match it.
-    ["KASSZÁBAN VÁRHATÓ KÉSZPÉNZ (visszaváltási díjjal)", summary.cash],
+    // The cash report: the register holds the float plus the cash sales. Item prices already contain the deposit, so
+    // these are gross totals — whole hundreds when the prices are. The deposit-free net below deliberately won't match.
+    ["Nyitó váltó", summary.floatHuf],
+    ["Készpénzes eladás (visszaváltási díjjal)", summary.cash],
+    ["KASSZÁBAN VÁRHATÓ KÉSZPÉNZ (váltóval)", summary.cashInRegister],
     ["Kártyás bevétel (visszaváltási díjjal)", summary.card],
-    [counted ? "A készpénz/kártya bontás a megszámolt készpénzből számolt" : "A készpénz/kártya bontás a rögzített fizetési módok szerinti", ""],
+    ["KASSZA ÖSSZESEN (készpénz + kártya, váltóval)", summary.registerTotal],
+    [counted ? "A készpénz/kártya bontás a megszámolt készpénzből (váltó levonva) számolt" : "A készpénz/kártya bontás a rögzített fizetési módok szerinti", ""],
     ["Ebből visszaváltási díj (nem nyereség)", summary.deposit],
     ["Nettó bevétel (visszaváltási díj nélkül – nem egyezik a kasszával)", summary.netRevenue],
     ["Eladott tételek", summary.itemsSold],
@@ -583,7 +633,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
   ];
   for (const [k, v] of rows) {
     const row = overview.addRow({ k, v });
-    if (k.startsWith("NAPI BEVÉTEL") || k.startsWith("KASSZÁBAN")) row.font = { bold: true, size: 14 };
+    if (k.startsWith("NAPI BEVÉTEL") || k.startsWith("KASSZÁBAN") || k.startsWith("KASSZA ÖSSZESEN")) row.font = { bold: true, size: 14 };
   }
 
   const products = workbook.addWorksheet("Termékek");
@@ -615,6 +665,8 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     { header: "Bevétel", key: "revenue", width: 14 },
     { header: "Készpénz", key: "cash", width: 14 },
     { header: "Kártya", key: "card", width: 14 },
+    { header: "Nyitó váltó", key: "float", width: 14 },
+    { header: "Kassza összesen (váltóval)", key: "register", width: 24 },
     { header: "Visszaváltási érték", key: "deposit", width: 18 },
     { header: "Nyereség", key: "profit", width: 14 },
     { header: "Eladott db", key: "items", width: 12 },
@@ -624,7 +676,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     { header: "Megjegyzés", key: "note", width: 40 },
   ];
   byDay.getRow(1).font = { bold: true };
-  summary.byDay.forEach((row, i) => byDay.addRow({ date: row.date, revenue: row.revenue, cash: row.cash, card: row.card, deposit: row.deposit, profit: row.profit ?? "", items: row.itemsSold, internalItems: row.internalItems, internalOutsideItems: row.internalOutsideItems, internalValue: row.internalValue, note: (row.manual ? "Utólag rögzítve. " : "") + (days[i]?.note ?? "") }));
+  summary.byDay.forEach((row, i) => byDay.addRow({ date: row.date, revenue: row.revenue, cash: row.cash, card: row.card, float: row.floatHuf, register: row.registerTotal, deposit: row.deposit, profit: row.profit ?? "", items: row.itemsSold, internalItems: row.internalItems, internalOutsideItems: row.internalOutsideItems, internalValue: row.internalValue, note: (row.manual ? "Utólag rögzítve. " : "") + (days[i]?.note ?? "") }));
 
   const entries = await StandEntryModel.find({ dayId: { $in: days.map((d) => d._id) } }).sort({ at: 1 }).lean().exec();
   if (entries.length > 0) {
@@ -655,7 +707,30 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     }
   }
 
+  const withdrawals = await withdrawalsBetween(days);
+  if (withdrawals.length > 0) {
+    const safe = workbook.addWorksheet("Belső kassza kivét");
+    safe.columns = [
+      { header: "Nap", key: "date", width: 12 },
+      { header: "Időpont", key: "at", width: 20 },
+      { header: "Összeg (Ft)", key: "amount", width: 14 },
+      { header: "Miért", key: "note", width: 50 },
+      { header: "Ki", key: "by", width: 28 },
+      { header: "Állapot", key: "state", width: 14 },
+    ];
+    safe.getRow(1).font = { bold: true };
+    for (const w of withdrawals) safe.addRow({ date: w.date, at: w.at, amount: w.amountHuf, note: w.note, by: w.by, state: w.stornoed ? "stornózva" : "" });
+  }
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+/** The internal-cash withdrawals of the event, from the first to the last of these days. */
+async function withdrawalsBetween(days: IStandDay[]): Promise<IStandWithdrawal[]> {
+  const real = days.filter((d) => DATE.test(d.date));
+  if (real.length === 0) return [];
+  const dates = real.map((d) => d.date).sort();
+  return StandWithdrawalModel.find({ eventId: real[0]!.eventId, date: { $gte: dates[0]!, $lte: dates.at(-1)! } }).sort({ at: 1 }).exec();
 }
 
 const ENTRY_LABELS: Record<string, string> = {
@@ -678,8 +753,8 @@ export function reportHtml(event: IEvent, day: IStandDay): string {
   const counted = s.byDay[0]?.cashCounted;
   return `<p>${escapeHtml(event.name)} — ${escapeHtml(day.date)} záró jelentés. A részletes kimutatás a csatolt Excelben.</p>
 <p style="font-size:22px;margin:12px 0 2px">Napi bevétel: <b>${escapeHtml(ft(s.revenue))}</b></p>
-<p style="margin:0 0 8px;color:#52525b">A visszaváltási díjat tartalmazza, így a kassza végösszegével egyezik.</p>
-<table>${row("Kasszában várható készpénz", ft(s.cash))}${row("Kártyás bevétel", ft(s.card))}</table>
+<p style="margin:0 0 8px;color:#52525b">A visszaváltási díjat tartalmazza, így a kassza-riporttal egyezik.</p>
+<table>${row("Nyitó váltó", ft(s.floatHuf))}${row("Készpénzes eladás", ft(s.cash))}${row("Kasszában várható készpénz (váltóval)", ft(s.cashInRegister))}${row("Kártyás bevétel", ft(s.card))}${row("Kassza összesen (váltóval)", ft(s.registerTotal))}</table>
 <p style="margin:2px 0 8px;color:#52525b;font-size:12px">${counted ? "A bontás a megszámolt készpénzből számolt." : "A bontás a rögzített fizetési módok szerinti."}</p>
 <table>${row("Ebből visszaváltási díj", ft(s.deposit))}${row("Nettó bevétel (visszaváltási díj nélkül)", ft(s.netRevenue))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
 <ul>${items}</ul>${day.note ? `<p>${escapeHtml(day.note)}</p>` : ""}`;
