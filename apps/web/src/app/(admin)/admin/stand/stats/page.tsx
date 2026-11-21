@@ -73,11 +73,11 @@ export default async function StandStatsPage({ searchParams }: { searchParams: P
         <>
           {!s.profitComplete ? <Notice tone="info">A nyereség csak azokat a termékeket tartalmazza, amelyeknek meg van adva a beszerzési ára.</Notice> : null}
           <StatGrid>
-            <Stat label="Napi bevétel" value={ft(s.revenue)} hint={`${s.itemsSold} db, ${s.days} nap`} />
-            <Stat label="Ebből készpénz" value={ft(s.cash)} hint="rögzített fizetési mód / megszámolt készpénz" />
-            <Stat label="Ebből kártya" value={ft(s.card)} />
-            <Stat label="Visszaváltási érték" value={ft(s.deposit)} hint="nem nyereség" />
-            <Stat label="Nettó bevétel" value={ft(s.netRevenue)} hint="visszaváltási érték nélkül" />
+            <Stat label="Napi bevétel" value={ft(s.revenue)} hint={`${s.itemsSold} db, ${s.days} nap · visszaváltási díjjal`} />
+            <Stat label="Kasszában (készpénz)" value={ft(s.cash)} hint="visszaváltási díjjal, a kassza végösszegével egyezik" />
+            <Stat label="Kártya" value={ft(s.card)} />
+            <Stat label="Ebből visszaváltási díj" value={ft(s.deposit)} hint="nem nyereség" />
+            <Stat label="Nettó bevétel" value={ft(s.netRevenue)} hint="visszaváltási díj nélkül, a kasszával nem egyezik" />
             <Stat label="Nyereség" value={ft(s.profit)} hint={`költség: ${ft(s.cost)}`} />
             <Stat label="Belső fogyasztás" value={`${s.internalItems} db`} hint={`értéke: ${ft(s.internalValue)}${s.internalOutsideItems ? ` · ebből standon kívül ${s.internalOutsideItems} db` : ""}`} />
             <Stat label="Belső fogy. költsége" value={ft(s.internalCost)} />

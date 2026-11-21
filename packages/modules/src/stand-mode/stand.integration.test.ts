@@ -2,7 +2,8 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import { EventGroupModel, EventModel, OrganizationModel, dbConnect, dbDisconnectAll } from "@tbook/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import "../index";
-import { endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
+import { StandDayModel } from "./model";
+import { listEntries, stornoEntry, stornoLine, endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
 
 const sent: Array<{ to: string; subject: string; attachments?: Array<{ filename: string }> }> = [];
 const transporter = { sendMail: async (m: never) => (sent.push(m), {} as never) };
@@ -133,5 +134,65 @@ describe("stand mode", () => {
     expect(await getSandboxDay(event)).not.toBeNull();
     await endSandbox(org, String(again._id));
     expect(await getSandboxDay(event)).toBeNull();
+  });
+
+  it("logs every change and lets each entry be reversed once", async () => {
+    const stillOpen = await getOpenDay(event);
+    if (stillOpen) await closeDay(org, String(stillOpen._id), {});
+    const d = await openDay(org, event, { date: "2026-09-01", openings: { [cola]: 20, [lagos]: 5 } });
+    const id = String(d._id);
+    await sell(org, id, cola, "cash", 3, "pultos@example.com");
+    await restock(org, id, cola, 12, "pultos@example.com");
+    await recordInternal(org, id, lagos, 1, true, "pultos@example.com");
+    await setOpening(org, id, lagos, 6, "pultos@example.com");
+
+    const log = await listEntries(org, id);
+    expect(log.map((e) => [e.field, e.quantity])).toEqual([["opening", 6], ["internalOutside", 1], ["restocked", 12], ["soldCash", 3]]);
+    expect(log[0]).toMatchObject({ previous: 5, by: "pultos@example.com" });
+
+    const sale = log.find((e) => e.field === "soldCash")!;
+    const afterStorno = await stornoEntry(org, String(sale._id), "pultos@example.com");
+    expect(afterStorno.lines.find((l) => String(l.productId) === cola)!.soldCash).toBe(0);
+    await expect(stornoEntry(org, String(sale._id))).rejects.toThrow(/already reversed/);
+
+    const after = await listEntries(org, id);
+    expect(after[0]).toMatchObject({ field: "soldCash", quantity: -3, storno: true });
+    expect(String(after[0]!.reverses)).toBe(String(sale._id));
+    expect(after.find((e) => String(e._id) === String(sale._id))!.stornoed).toBe(true);
+
+    // Something that was already taken back by hand can't be reversed again (and stays reversible later).
+    await sell(org, id, cola, "card", 2);
+    const cardSale = (await listEntries(org, id)).find((e) => e.field === "soldCard")!;
+    await sell(org, id, cola, "card", -2);
+    await expect(stornoEntry(org, String(cardSale._id))).rejects.toThrow(/Nothing to undo/);
+    expect((await listEntries(org, id)).find((e) => String(e._id) === String(cardSale._id))!.stornoed).toBe(false);
+    await closeDay(org, id, {});
+    await expect(stornoEntry(org, String(log.find((e) => e.field === "restocked")!._id))).rejects.toThrow(/closed/);
+  });
+
+  it("can storno on a day that has counters but no log (opened before the log existed)", async () => {
+    const d = await openDay(org, event, { date: "2026-09-02", openings: { [cola]: 20, [lagos]: 5 } });
+    const id = String(d._id);
+    // What an older version left behind: counters changed, nothing logged.
+    await StandDayModel.updateOne({ _id: id }, { $inc: { "lines.$[l].soldCash": 4, "lines.$[l].restocked": 6 } }, { arrayFilters: [{ "l.productId": d.lines[0]!.productId }] });
+    expect(await listEntries(org, id)).toHaveLength(0);
+    const day = await stornoLine(org, id, String(d.lines[0]!.productId), "soldCash", 1, "pultos@example.com");
+    expect(day.lines[0]!.soldCash).toBe(3);
+    await expect(stornoLine(org, id, String(d.lines[0]!.productId), "soldCash", 9)).rejects.toThrow(/Nothing to undo/);
+    await stornoLine(org, id, String(d.lines[0]!.productId), "restocked", 6);
+    expect(await listEntries(org, id)).toHaveLength(2);
+    await closeDay(org, id, {});
+  });
+
+  it("the cash register total includes the deposit: gross, whole hundreds, unlike the deposit-free net", async () => {
+    // 3 cola at 600 incl. 50 deposit: revenue stays in hundreds, the net ends in 50.
+    const probe = await openDay(org, event, { date: "2026-09-03", openings: { [cola]: 30 } });
+    await sell(org, String(probe._id), cola, "cash", 3);
+    await closeDay(org, String(probe._id), {});
+    const day = (await standStats(event, "2026-09-03", "2026-09-03")).summary;
+    expect(day.cash).toBe(1800);
+    expect(day.cash % 100).toBe(0);
+    expect(day.netRevenue).toBe(1650);
+    expect(day.netRevenue % 100).toBe(50);
   });
 });

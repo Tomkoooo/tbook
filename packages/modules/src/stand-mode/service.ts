@@ -5,7 +5,7 @@ import { eventRepository, type IEvent } from "@tbook/db";
 import { closingOf, expectedClosing, lineTotals, summarizeStand, type StandDayData, type StandLine, type StandSummary } from "@tbook/domain";
 import { resolveModules, sendMail, type MailTransporter } from "@tbook/services";
 import { escapeHtml, moduleMailTransporter } from "../shared/mail";
-import { StandDayModel, StandProductModel, type IStandDay, type IStandLine, type IStandProduct } from "./model";
+import { StandDayModel, StandEntryModel, StandProductModel, type IStandDay, type IStandEntry, type IStandLine, type IStandProduct, type StandCounter } from "./model";
 
 export const STAND_MODE = "stand-mode";
 export const DEFAULT_PACKS = [6, 10, 12, 20];
@@ -233,7 +233,11 @@ export async function openDay(
     return snapshot(p, given === undefined ? fallback : count(given));
   });
   // A new practice run replaces the previous one.
-  if (sandbox) await StandDayModel.deleteMany({ eventId, sandbox: true }).exec();
+  if (sandbox) {
+    const old = await StandDayModel.find({ eventId, sandbox: true }, { _id: 1 }).lean().exec();
+    await StandDayModel.deleteMany({ eventId, sandbox: true }).exec();
+    await StandEntryModel.deleteMany({ dayId: { $in: old.map((d) => d._id) } }).exec();
+  }
   return StandDayModel.create({ organizationId, eventId, date, devices: Boolean(input.devices), sandbox, lines, status: "open" });
 }
 
@@ -241,11 +245,43 @@ export async function openDay(
 export async function endSandbox(organizationId: string, dayId: string): Promise<void> {
   const result = await StandDayModel.deleteOne({ _id: dayId, organizationId, sandbox: true }).exec();
   if (result.deletedCount === 0) throw ActionError.notFound("Practice day not found");
+  await StandEntryModel.deleteMany({ dayId }).exec();
 }
 
-type Counter = "restocked" | "soldCash" | "soldCard" | "internal" | "internalOutside";
+type Counter = StandCounter;
 
-async function adjust(organizationId: string, dayId: string, productId: string, field: Counter, delta: number): Promise<IStandDay> {
+interface Actor {
+  /** Who did it (shown in the log). */
+  by?: string;
+  /** The entry this change reverses (a storno made from the log). */
+  reverses?: Types.ObjectId;
+}
+
+async function logEntry(day: IStandDay, productId: string, field: IStandEntry["field"], quantity: number, actor: Actor, previous: number | null = null): Promise<void> {
+  const line = day.lines.find((l) => String(l.productId) === productId);
+  try {
+    await StandEntryModel.create({
+      organizationId: day.organizationId,
+      eventId: day.eventId,
+      dayId: day._id,
+      productId,
+      productName: line?.name ?? "",
+      field,
+      quantity,
+      previous,
+      priceHuf: line?.priceHuf ?? 0,
+      depositHuf: line?.depositHuf ?? 0,
+      storno: quantity < 0 && field !== "opening",
+      reverses: actor.reverses ?? null,
+      by: actor.by ?? "",
+    });
+  } catch (error) {
+    // The counters are the truth and already changed; a missing log line mustn't fail the sale.
+    console.error("[stand log]", error);
+  }
+}
+
+async function adjust(organizationId: string, dayId: string, productId: string, field: Counter, delta: number, actor: Actor = {}): Promise<IStandDay> {
   if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 100000) throw ActionError.validation("Invalid amount.");
   const day = await StandDayModel.findOneAndUpdate(
     // Atomic and guarded: the counter can't go below zero, and only an open day changes.
@@ -254,7 +290,10 @@ async function adjust(organizationId: string, dayId: string, productId: string, 
     { $inc: { [`lines.$.${field}`]: delta } },
     { returnDocument: "after" },
   ).exec();
-  if (day) return day;
+  if (day) {
+    await logEntry(day, productId, field, delta, actor);
+    return day;
+  }
   const existing = await StandDayModel.findOne({ _id: dayId, organizationId }).exec();
   if (!existing) throw ActionError.notFound("Day not found");
   if (existing.status !== "open") throw ActionError.validation("This day is closed.");
@@ -262,15 +301,53 @@ async function adjust(organizationId: string, dayId: string, productId: string, 
 }
 
 /** One or more units sold. `method` decides which drawer the money belongs to. */
-export function sell(organizationId: string, dayId: string, productId: string, method: "cash" | "card", quantity = 1): Promise<IStandDay> {
-  return adjust(organizationId, dayId, productId, method === "card" ? "soldCard" : "soldCash", quantity);
+export function sell(organizationId: string, dayId: string, productId: string, method: "cash" | "card", quantity = 1, by?: string): Promise<IStandDay> {
+  return adjust(organizationId, dayId, productId, method === "card" ? "soldCard" : "soldCash", quantity, { by });
 }
-export const undoSale = (organizationId: string, dayId: string, productId: string, method: "cash" | "card") => sell(organizationId, dayId, productId, method, -1);
+export const undoSale = (organizationId: string, dayId: string, productId: string, method: "cash" | "card", by?: string) => sell(organizationId, dayId, productId, method, -1, by);
 /** Stock brought to the stand while selling (negative = correction). */
-export const restock = (organizationId: string, dayId: string, productId: string, quantity: number) => adjust(organizationId, dayId, productId, "restocked", quantity);
+export const restock = (organizationId: string, dayId: string, productId: string, quantity: number, by?: string) => adjust(organizationId, dayId, productId, "restocked", quantity, { by });
 /** Belső fogyasztás. `outside`: consumed outside the stand, so the stand's stock stays as it is. */
-export const recordInternal = (organizationId: string, dayId: string, productId: string, quantity: number, outside = false) =>
-  adjust(organizationId, dayId, productId, outside ? "internalOutside" : "internal", quantity);
+export const recordInternal = (organizationId: string, dayId: string, productId: string, quantity: number, outside = false, by?: string) =>
+  adjust(organizationId, dayId, productId, outside ? "internalOutside" : "internal", quantity, { by });
+
+/**
+ * Storno of one logged entry: reverses exactly what it did, once. The entry
+ * is marked first (so two people can't reverse it twice); if the change
+ * can't be made (e.g. something already took it back) the mark is undone.
+ */
+export async function stornoEntry(organizationId: string, entryId: string, by?: string): Promise<IStandDay> {
+  const entry = await StandEntryModel.findOneAndUpdate(
+    { _id: entryId, organizationId, stornoed: { $ne: true }, quantity: { $gt: 0 }, field: { $ne: "opening" } },
+    { $set: { stornoed: true } },
+    { returnDocument: "before" },
+  ).exec();
+  if (!entry) {
+    const existing = await StandEntryModel.findOne({ _id: entryId, organizationId }).exec();
+    if (!existing) throw ActionError.notFound("Entry not found");
+    throw ActionError.validation(existing.stornoed ? "This entry was already reversed." : "This entry can't be reversed.");
+  }
+  try {
+    return await adjust(organizationId, String(entry.dayId), String(entry.productId), entry.field as Counter, -entry.quantity, { by, reverses: entry._id as Types.ObjectId });
+  } catch (error) {
+    await StandEntryModel.updateOne({ _id: entryId }, { $set: { stornoed: false } }).exec();
+    throw error;
+  }
+}
+
+/**
+ * Storno of some units of one product, straight from its counter — no log
+ * entry needed, so it also works on a day that was opened before the log
+ * existed. It is logged as a storno.
+ */
+export function stornoLine(organizationId: string, dayId: string, productId: string, field: Counter, quantity: number, by?: string): Promise<IStandDay> {
+  if (!Number.isInteger(quantity) || quantity <= 0) throw ActionError.validation("Invalid amount.");
+  return adjust(organizationId, dayId, productId, field, -quantity, { by });
+}
+
+export async function listEntries(organizationId: string, dayId: string, limit = 500): Promise<IStandEntry[]> {
+  return StandEntryModel.find({ organizationId, dayId }).sort({ at: -1, _id: -1 }).limit(limit).exec();
+}
 
 /** Adds a product created after the day opened (with the count it started with). */
 export async function addProductToDay(organizationId: string, dayId: string, productId: string, opening = 0): Promise<IStandDay> {
@@ -285,13 +362,16 @@ export async function addProductToDay(organizationId: string, dayId: string, pro
 }
 
 /** Fixes the opening count of an open day (e.g. differs from last night's closing). */
-export async function setOpening(organizationId: string, dayId: string, productId: string, opening: number): Promise<IStandDay> {
+export async function setOpening(organizationId: string, dayId: string, productId: string, opening: number, by?: string): Promise<IStandDay> {
+  const before = await StandDayModel.findOne({ _id: dayId, organizationId, status: "open" }).exec();
+  const previous = before?.lines.find((l) => String(l.productId) === productId)?.opening ?? null;
   const day = await StandDayModel.findOneAndUpdate(
     { _id: dayId, organizationId, status: "open", "lines.productId": oid(productId) },
     { $set: { "lines.$.opening": count(opening) } },
     { returnDocument: "after" },
   ).exec();
   if (!day) throw ActionError.notFound("Open day not found");
+  await logEntry(day, productId, "opening", count(opening), { by }, previous);
   return day;
 }
 
@@ -329,6 +409,8 @@ export interface CloseInput {
   note?: string;
   /** Send the report here; empty = don't send. */
   emailTo?: string;
+  /** Who is closing (shown in the log). */
+  by?: string;
 }
 
 export async function closeDay(organizationId: string, dayId: string, input: CloseInput, transporter?: MailTransporter): Promise<{ day: IStandDay; emailed: boolean; emailError?: string }> {
@@ -360,6 +442,15 @@ export async function closeDay(organizationId: string, dayId: string, input: Clo
     { returnDocument: "after" },
   ).exec();
   if (!closed) throw ActionError.validation("This day is already closed.");
+  // Internal use corrected while closing is part of the day's story too.
+  const doc = day.toObject() as { lines: IStandLine[] };
+  for (const line of closed.lines) {
+    const old = doc.lines.find((l) => String(l.productId) === String(line.productId));
+    for (const field of ["internal", "internalOutside"] as const) {
+      const delta = (line[field] ?? 0) - (old?.[field] ?? 0);
+      if (delta !== 0) await logEntry(closed, String(line.productId), field, delta, { by: input.by });
+    }
+  }
   if (!to) return { day: closed, emailed: false };
   try {
     await sendDayReport(closed, to, transporter);
@@ -471,11 +562,14 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     ["Napok száma", summary.days],
     // The day's revenue is the headline: it is the sum of what was sold. The cash/card split below is only as exact as
     // the payment mode tapped for each sale (unless the cash was counted at closing).
-    ["NAPI BEVÉTEL (összesen)", summary.revenue],
-    [counted ? "Ebből készpénz (megszámolt készpénz alapján)" : "Ebből készpénz (a rögzített fizetési mód szerint)", summary.cash],
-    [counted ? "Ebből kártya (a bevétel többi része)" : "Ebből kártya (a rögzített fizetési mód szerint)", summary.card],
-    ["Visszaváltási érték (nem nyereség)", summary.deposit],
-    ["Nettó bevétel (visszaváltási érték nélkül)", summary.netRevenue],
+    ["NAPI BEVÉTEL (összesen, visszaváltási díjjal)", summary.revenue],
+    // What the cash register (kassza) report should show: item prices already contain the deposit, so these are the
+    // gross totals — whole hundreds when the prices are. The deposit-free net below deliberately won't match it.
+    ["KASSZÁBAN VÁRHATÓ KÉSZPÉNZ (visszaváltási díjjal)", summary.cash],
+    ["Kártyás bevétel (visszaváltási díjjal)", summary.card],
+    [counted ? "A készpénz/kártya bontás a megszámolt készpénzből számolt" : "A készpénz/kártya bontás a rögzített fizetési módok szerinti", ""],
+    ["Ebből visszaváltási díj (nem nyereség)", summary.deposit],
+    ["Nettó bevétel (visszaváltási díj nélkül – nem egyezik a kasszával)", summary.netRevenue],
     ["Eladott tételek", summary.itemsSold],
     ["Beszerzési költség", summary.cost],
     ["Nyereség", summary.profitComplete ? summary.profit : `${summary.profit} (nem minden termék beszerzési ára ismert)`],
@@ -489,7 +583,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
   ];
   for (const [k, v] of rows) {
     const row = overview.addRow({ k, v });
-    if (k.startsWith("NAPI BEVÉTEL")) row.font = { bold: true, size: 14 };
+    if (k.startsWith("NAPI BEVÉTEL") || k.startsWith("KASSZÁBAN")) row.font = { bold: true, size: 14 };
   }
 
   const products = workbook.addWorksheet("Termékek");
@@ -532,8 +626,47 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
   byDay.getRow(1).font = { bold: true };
   summary.byDay.forEach((row, i) => byDay.addRow({ date: row.date, revenue: row.revenue, cash: row.cash, card: row.card, deposit: row.deposit, profit: row.profit ?? "", items: row.itemsSold, internalItems: row.internalItems, internalOutsideItems: row.internalOutsideItems, internalValue: row.internalValue, note: (row.manual ? "Utólag rögzítve. " : "") + (days[i]?.note ?? "") }));
 
+  const entries = await StandEntryModel.find({ dayId: { $in: days.map((d) => d._id) } }).sort({ at: 1 }).lean().exec();
+  if (entries.length > 0) {
+    const dateOf = new Map(days.map((d) => [String(d._id), d.date]));
+    const log = workbook.addWorksheet("Napló");
+    log.columns = [
+      { header: "Nap", key: "date", width: 12 },
+      { header: "Időpont", key: "at", width: 20 },
+      { header: "Termék", key: "product", width: 28 },
+      { header: "Művelet", key: "what", width: 36 },
+      { header: "Mennyiség", key: "qty", width: 12 },
+      { header: "Érték (Ft)", key: "value", width: 14 },
+      { header: "Ki", key: "by", width: 28 },
+      { header: "Állapot", key: "state", width: 16 },
+    ];
+    log.getRow(1).font = { bold: true };
+    for (const e of entries) {
+      log.addRow({
+        date: dateOf.get(String(e.dayId)) ?? "",
+        at: e.at,
+        product: e.productName,
+        what: `${e.storno ? "STORNO – " : ""}${entryLabel(e.field)}`,
+        qty: e.quantity,
+        value: e.field === "soldCash" || e.field === "soldCard" || e.field === "internal" || e.field === "internalOutside" ? e.quantity * e.priceHuf : "",
+        by: e.by,
+        state: e.stornoed ? "stornózva" : e.reverses ? "storno" : "",
+      });
+    }
+  }
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
+
+const ENTRY_LABELS: Record<string, string> = {
+  soldCash: "Eladás (készpénz)",
+  soldCard: "Eladás (kártya)",
+  internal: "Belső fogyasztás (standból)",
+  internalOutside: "Belső fogyasztás (standon kívül)",
+  restocked: "Bevételezés",
+  opening: "Nyitókészlet módosítása",
+};
+export const entryLabel = (field: string): string => ENTRY_LABELS[field] ?? field;
 
 export function reportHtml(event: IEvent, day: IStandDay): string {
   const s = summarizeStand([dayToDomain(day)]);
@@ -545,8 +678,10 @@ export function reportHtml(event: IEvent, day: IStandDay): string {
   const counted = s.byDay[0]?.cashCounted;
   return `<p>${escapeHtml(event.name)} — ${escapeHtml(day.date)} záró jelentés. A részletes kimutatás a csatolt Excelben.</p>
 <p style="font-size:22px;margin:12px 0 2px">Napi bevétel: <b>${escapeHtml(ft(s.revenue))}</b></p>
-<table style="color:#52525b">${row(counted ? "Ebből készpénz (megszámolt)" : "Ebből készpénz (rögzített fizetési mód)", ft(s.cash))}${row(counted ? "Ebből kártya (a többi)" : "Ebből kártya (rögzített fizetési mód)", ft(s.card))}</table>
-<table>${row("Visszaváltási érték", ft(s.deposit))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
+<p style="margin:0 0 8px;color:#52525b">A visszaváltási díjat tartalmazza, így a kassza végösszegével egyezik.</p>
+<table>${row("Kasszában várható készpénz", ft(s.cash))}${row("Kártyás bevétel", ft(s.card))}</table>
+<p style="margin:2px 0 8px;color:#52525b;font-size:12px">${counted ? "A bontás a megszámolt készpénzből számolt." : "A bontás a rögzített fizetési módok szerinti."}</p>
+<table>${row("Ebből visszaváltási díj", ft(s.deposit))}${row("Nettó bevétel (visszaváltási díj nélkül)", ft(s.netRevenue))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
 <ul>${items}</ul>${day.note ? `<p>${escapeHtml(day.note)}</p>` : ""}`;
 }
 

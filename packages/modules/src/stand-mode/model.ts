@@ -125,3 +125,54 @@ const StandDaySchema = new Schema<IStandDay>(
 StandDaySchema.index({ eventId: 1, date: 1 }, { unique: true });
 
 export const StandDayModel: Model<IStandDay> = mongoose.models.TBookStandDay ?? mongoose.model<IStandDay>("TBookStandDay", StandDaySchema, "tbookstanddays");
+
+export type StandCounter = "restocked" | "soldCash" | "soldCard" | "internal" | "internalOutside";
+
+/**
+ * One thing that was done on a day: a sale, internal use, a restock, an
+ * opening fix — or its reversal (storno). Written next to every counter
+ * change, so a day's story can be read back and any entry reversed.
+ * Days opened before the log existed simply have fewer entries than their
+ * counters say; those can still be reversed per product.
+ */
+export interface IStandEntry extends Document {
+  organizationId: Types.ObjectId;
+  eventId: Types.ObjectId;
+  dayId: Types.ObjectId;
+  productId: Types.ObjectId;
+  productName: string;
+  field: StandCounter | "opening";
+  /** Signed: negative = a storno / undo. For "opening" the new count. */
+  quantity: number;
+  /** "opening" only: the count before. */
+  previous: number | null;
+  priceHuf: number;
+  depositHuf: number;
+  storno: boolean;
+  /** The entry this one reverses (a storno made from the log). */
+  reverses: Types.ObjectId | null;
+  /** Set on an entry once it has been reversed; an entry can be reversed once. */
+  stornoed: boolean;
+  by: string;
+  at: Date;
+}
+
+const StandEntrySchema = new Schema<IStandEntry>({
+  organizationId: { type: Schema.Types.ObjectId, ref: "TBookOrganization", required: true, index: true },
+  eventId: { type: Schema.Types.ObjectId, required: true },
+  dayId: { type: Schema.Types.ObjectId, required: true, index: true },
+  productId: { type: Schema.Types.ObjectId, required: true },
+  productName: { type: String, default: "" },
+  field: { type: String, enum: ["restocked", "soldCash", "soldCard", "internal", "internalOutside", "opening"], required: true },
+  quantity: { type: Number, required: true },
+  previous: { type: Number, default: null },
+  priceHuf: { type: Number, default: 0 },
+  depositHuf: { type: Number, default: 0 },
+  storno: { type: Boolean, default: false },
+  reverses: { type: Schema.Types.ObjectId, default: null },
+  stornoed: { type: Boolean, default: false },
+  by: { type: String, default: "" },
+  at: { type: Date, default: () => new Date() },
+});
+
+export const StandEntryModel: Model<IStandEntry> = mongoose.models.TBookStandEntry ?? mongoose.model<IStandEntry>("TBookStandEntry", StandEntrySchema, "tbookstandentries");

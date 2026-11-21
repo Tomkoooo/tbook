@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { ActionError } from "@tbook/actions";
 import { stand } from "@tbook/modules";
-import { requireOrgPermission } from "@/lib/admin-auth";
+import { getSessionUser, requireOrgPermission } from "@/lib/admin-auth";
 import { toDayDto, type StandDayDto } from "./dto";
 
 /** Running the stand needs stand:operate; products, history and manual days need stand:manage. */
@@ -18,6 +18,11 @@ function fail(error: unknown, label: string): StandResult {
   if (error instanceof ActionError) return { ok: false, message: error.message };
   console.error(`[${label}]`, error);
   return { ok: false, message: "Something went wrong. Please try again." };
+}
+
+/** Who is acting, as shown in the log. */
+async function actingBy(userId: string): Promise<string> {
+  return (await getSessionUser())?.email ?? userId;
 }
 
 const refresh = () => revalidatePath("/admin/stand", "layout");
@@ -38,15 +43,16 @@ export type StandChange = { kind: "sell"; method: "cash" | "card" } | { kind: "r
 /** One tap: sell / restock / internal use / fix the opening count. Negative `quantity` undoes. */
 export async function changeStandAction(dayId: string, productId: string, change: StandChange, quantity: number): Promise<StandResult> {
   try {
-    const { organizationId } = await requireOrgPermission("stand:operate");
+    const { organizationId, userId } = await requireOrgPermission("stand:operate");
+    const by = await actingBy(userId);
     const day =
       change.kind === "sell"
-        ? await stand.sell(organizationId, dayId, productId, change.method, quantity)
+        ? await stand.sell(organizationId, dayId, productId, change.method, quantity, by)
         : change.kind === "restock"
-          ? await stand.restock(organizationId, dayId, productId, quantity)
+          ? await stand.restock(organizationId, dayId, productId, quantity, by)
           : change.kind === "internal"
-            ? await stand.recordInternal(organizationId, dayId, productId, quantity, change.outside)
-            : await stand.setOpening(organizationId, dayId, productId, quantity);
+            ? await stand.recordInternal(organizationId, dayId, productId, quantity, change.outside, by)
+            : await stand.setOpening(organizationId, dayId, productId, quantity, by);
     return { ok: true, day: toDayDto(day) };
   } catch (error) {
     return fail(error, "changeStandAction");
@@ -58,8 +64,8 @@ export type InternalUse = Record<string, { inside?: number; outside?: number }>;
 
 export async function closeDayAction(dayId: string, counted: Record<string, number>, internal: InternalUse, cashHuf: number | null, note: string, emailTo: string): Promise<StandResult> {
   try {
-    const { organizationId } = await requireOrgPermission("stand:operate");
-    const result = await stand.closeDay(organizationId, dayId, { counted, internal, cashHuf, note, emailTo });
+    const { organizationId, userId } = await requireOrgPermission("stand:operate");
+    const result = await stand.closeDay(organizationId, dayId, { counted, internal, cashHuf, note, emailTo, by: await actingBy(userId) });
     refresh();
     const mail = emailTo ? (result.emailed ? ` Report sent to ${emailTo}.` : ` The report email failed: ${result.emailError}`) : "";
     return { ok: true, message: `Day closed.${mail}` };
@@ -152,5 +158,57 @@ export async function addProductToDayAction(dayId: string, productId: string, op
     return { ok: true, day: toDayDto(await stand.addProductToDay(organizationId, dayId, productId, opening)) };
   } catch (error) {
     return fail(error, "addProductToDayAction");
+  }
+}
+
+export interface StandEntryDto {
+  id: string;
+  at: string;
+  productName: string;
+  field: string;
+  label: string;
+  quantity: number;
+  previous: number | null;
+  /** quantity × price, for sales and internal use. */
+  value: number | null;
+  storno: boolean;
+  /** Already reversed. */
+  stornoed: boolean;
+  by: string;
+}
+
+export async function listEntriesAction(dayId: string): Promise<{ ok: boolean; message?: string; entries: StandEntryDto[] }> {
+  try {
+    const { organizationId } = await requireOrgPermission("stand:operate");
+    const entries = await stand.listEntries(organizationId, dayId);
+    return {
+      ok: true,
+      entries: entries.map((e) => ({
+        id: String(e._id),
+        at: e.at.toISOString(),
+        productName: e.productName,
+        field: e.field,
+        label: stand.entryLabel(e.field),
+        quantity: e.quantity,
+        previous: e.previous ?? null,
+        value: e.field === "opening" || e.field === "restocked" ? null : e.quantity * e.priceHuf,
+        storno: e.storno,
+        stornoed: e.stornoed,
+        by: e.by,
+      })),
+    };
+  } catch (error) {
+    return { ...fail(error, "listEntriesAction"), entries: [] };
+  }
+}
+
+/** Reverses one logged entry. */
+export async function stornoEntryAction(entryId: string): Promise<StandResult> {
+  try {
+    const { organizationId, userId } = await requireOrgPermission("stand:operate");
+    const day = await stand.stornoEntry(organizationId, entryId, await actingBy(userId));
+    return { ok: true, message: "Storno recorded.", day: toDayDto(day) };
+  } catch (error) {
+    return fail(error, "stornoEntryAction");
   }
 }

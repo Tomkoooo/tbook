@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FormField, ResultNotice } from "@/components/form-bits";
 import { Notice } from "@/components/notice";
 import { cn } from "@/lib/utils";
+import { LogDialog } from "./log-dialog";
 import { addProductToDayAction, changeStandAction, closeDayAction, endSandboxAction, type StandChange, type StandResult } from "./actions";
 import type { StandDayDto, StandLineDto } from "./dto";
 
@@ -26,7 +27,7 @@ const MODES: Array<{ key: Mode; label: string }> = [
 const ft = (n: number) => `${n.toLocaleString("hu-HU")} Ft`;
 
 /** What the confirm dialog is for. Undo kinds subtract. */
-type TxKind = "sell" | "undo-sell" | "internal" | "undo-internal";
+type TxKind = "sell" | "undo-sell" | "internal" | "undo-internal" | "undo-restock";
 interface Tx {
   kind: TxKind;
   line: StandLineDto;
@@ -62,6 +63,7 @@ export function SellScreen({
   const [tx, setTx] = useState<Tx | null>(null);
   const [restocking, setRestocking] = useState<StandLineDto | null>(null);
   const [closing, setClosing] = useState(false);
+  const [logging, setLogging] = useState(false);
   const [pending, start] = useTransition();
 
   function apply(productId: string, change: StandChange, quantity: number) {
@@ -74,8 +76,10 @@ export function SellScreen({
   }
 
   function open(line: StandLineDto, subtract: boolean) {
-    if (mode === "restock") setRestocking(line);
-    else if (mode === "internal") setTx({ kind: subtract ? "undo-internal" : "internal", line });
+    if (mode === "restock") {
+      if (subtract) setTx({ kind: "undo-restock", line });
+      else setRestocking(line);
+    } else if (mode === "internal") setTx({ kind: subtract ? "undo-internal" : "internal", line });
     else setTx({ kind: subtract ? "undo-sell" : "sell", line });
   }
 
@@ -104,6 +108,9 @@ export function SellScreen({
           ))}
           {day.devices ? <Badge variant="outline">Nyomtató + kártyaolvasó</Badge> : null}
           {day.sandbox ? <Badge variant="warning">Gyakorló mód</Badge> : null}
+          <Button variant="outline" size="lg" onClick={() => setLogging(true)}>
+            Napló
+          </Button>
           {day.sandbox ? (
             <Button
               className="ml-auto"
@@ -126,9 +133,9 @@ export function SellScreen({
             </Button>
           )}
         </div>
-        <p className="text-muted-foreground flex flex-wrap gap-x-4 text-sm tabular-nums">
+        <p className="text-muted-foreground flex flex-wrap items-baseline gap-x-4 text-sm tabular-nums">
           <span>
-            Készpénz <strong className="text-foreground">{ft(totals.cash)}</strong>
+            Kasszában (készpénz) <strong className="text-foreground text-base">{ft(totals.cash)}</strong>
           </span>
           <span>
             Kártya <strong className="text-foreground">{ft(totals.card)}</strong>
@@ -136,7 +143,7 @@ export function SellScreen({
           <span>
             Összesen <strong className="text-foreground">{ft(totals.cash + totals.card)}</strong> ({totals.items} db)
           </span>
-          <span>Visszaváltási érték {ft(totals.deposit)}</span>
+          <span>ebből visszaváltási díj {ft(totals.deposit)}</span>
           <span>
             Belső fogyasztás {totals.internal} db ({ft(totals.internalValue)})
           </span>
@@ -196,8 +203,8 @@ export function SellScreen({
                 variant="ghost"
                 size="icon"
                 className="h-auto flex-1 rounded-none border-t"
-                aria-label={`${line.name}: visszavonás`}
-                disabled={countOf(line) === 0 || mode === "restock"}
+                aria-label={`${line.name}: storno`}
+                disabled={countOf(line) === 0}
                 onClick={() => open(line, true)}
               >
                 <Minus />
@@ -214,12 +221,14 @@ export function SellScreen({
         onClose={() => setTx(null)}
         onConfirm={(t, quantity, options) => {
           const sign = t.kind.startsWith("undo") ? -1 : 1;
-          const change: StandChange = t.kind === "sell" || t.kind === "undo-sell" ? { kind: "sell", method: options.method } : { kind: "internal", outside: options.outside };
+          const change: StandChange =
+            t.kind === "sell" || t.kind === "undo-sell" ? { kind: "sell", method: options.method } : t.kind === "undo-restock" ? { kind: "restock" } : { kind: "internal", outside: options.outside };
           apply(t.line.productId, change, sign * quantity);
           setTx(null);
         }}
       />
       <RestockDialog line={restocking} packs={packs} onClose={() => setRestocking(null)} onAdd={(line, qty) => apply(line.productId, { kind: "restock" }, qty)} />
+      {logging ? <LogDialog dayId={day.id} canStorno onClose={() => setLogging(false)} onDay={setDay} /> : null}
       {/* Mounted fresh on every open, so it always starts from the day as it is now. */}
       {closing ? <CloseDialog onClose={() => setClosing(false)} day={day} defaultEmail={defaultEmail} /> : null}
     </div>
@@ -228,9 +237,10 @@ export function SellScreen({
 
 const TITLES: Record<TxKind, string> = {
   sell: "Eladás",
-  "undo-sell": "Eladás visszavonása",
+  "undo-sell": "Storno – eladás",
   internal: "Belső fogyasztás",
-  "undo-internal": "Belső fogyasztás visszavonása",
+  "undo-internal": "Storno – belső fogyasztás",
+  "undo-restock": "Storno – bevételezés",
 };
 
 /** Confirmation with a quantity: used for selling, internal use and their undo. */
@@ -253,12 +263,13 @@ function TxDialog({
   const { kind, line } = tx;
   const undo = kind.startsWith("undo");
   const isSale = kind === "sell" || kind === "undo-sell";
-  // An undo can't take back more than was recorded.
-  const max = !undo ? 9999 : isSale ? (method === "card" ? line.soldCard : line.soldCash) : outside ? line.internalOutside : line.internal;
+  const isRestock = kind === "undo-restock";
+  // A storno can't take back more than was recorded.
+  const max = !undo ? 9999 : isRestock ? line.restocked : isSale ? (method === "card" ? line.soldCard : line.soldCash) : outside ? line.internalOutside : line.internal;
   const clamp = (n: number) => Math.min(Math.max(1, Math.floor(n) || 1), Math.max(1, max));
   const q = clamp(quantity);
   const overStock = !undo && (isSale || !outside) && q > line.stock;
-  const confirmLabel = isSale ? `${undo ? "Visszavonás" : "Eladás"} – ${ft(q * line.priceHuf)}` : undo ? "Visszavonás" : "Rögzítés";
+  const confirmLabel = isSale ? `${undo ? "Storno" : "Eladás"} – ${ft(q * line.priceHuf)}` : undo ? "Storno" : "Rögzítés";
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -281,7 +292,7 @@ function TxDialog({
                 Kártya
               </Button>
             </div>
-          ) : (
+          ) : isRestock ? null : (
             <div className="grid gap-1.5">
               <div className="grid grid-cols-2 gap-2">
                 <Button size="lg" variant={!outside ? "default" : "outline"} onClick={() => setOutside(false)}>
@@ -319,7 +330,7 @@ function TxDialog({
               </Button>
             ))}
           </div>
-          {undo && max === 0 ? <p className="text-muted-foreground text-center text-sm">Ebből most nincs mit visszavonni.</p> : null}
+          {undo && max === 0 ? <p className="text-muted-foreground text-center text-sm">Ebből most nincs mit stornózni.</p> : null}
           {overStock ? <p className="text-destructive text-center text-sm">Több, mint a készlet ({line.stock} db).</p> : null}
         </div>
         <DialogFooter>
@@ -381,7 +392,10 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
   const [email, setEmail] = useState(defaultEmail);
   const [result, setResult] = useState<StandResult | null>(null);
   const [pending, start] = useTransition();
-  const totals = day.lines.reduce((t, l) => ({ cash: t.cash + l.soldCash * l.priceHuf, card: t.card + l.soldCard * l.priceHuf }), { cash: 0, card: 0 });
+  const totals = day.lines.reduce(
+    (t, l) => ({ cash: t.cash + l.soldCash * l.priceHuf, card: t.card + l.soldCard * l.priceHuf, deposit: t.deposit + (l.soldCash + l.soldCard) * l.depositHuf }),
+    { cash: 0, card: 0, deposit: 0 },
+  );
   const revenue = totals.cash + totals.card;
   const entered = (v: string | undefined) => v !== undefined && v.trim() !== "";
   const cashN = entered(cash) ? Number(cash) : null;
@@ -397,11 +411,23 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
           </DialogDescription>
         </DialogHeader>
 
-        <div className="bg-muted/50 grid gap-1 rounded-lg p-3">
-          <span className="text-muted-foreground text-xs font-medium">Napi bevétel</span>
-          <strong className="text-3xl font-semibold tabular-nums">{ft(revenue)}</strong>
+        <div className="bg-muted/50 grid gap-2 rounded-lg p-3">
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+            <div className="grid">
+              <span className="text-muted-foreground text-xs font-medium">Kasszában várható készpénz</span>
+              <strong className="text-3xl font-semibold tabular-nums">{ft(totals.cash)}</strong>
+            </div>
+            <div className="grid">
+              <span className="text-muted-foreground text-xs font-medium">Kártya</span>
+              <strong className="text-xl font-semibold tabular-nums">{ft(totals.card)}</strong>
+            </div>
+            <div className="grid">
+              <span className="text-muted-foreground text-xs font-medium">Napi bevétel összesen</span>
+              <strong className="text-xl font-semibold tabular-nums">{ft(revenue)}</strong>
+            </div>
+          </div>
           <span className="text-muted-foreground text-xs tabular-nums">
-            rögzített fizetési mód szerint: készpénz {ft(totals.cash)} · kártya {ft(totals.card)}
+            A visszaváltási díjat tartalmazza (ebből {ft(totals.deposit)}), így a kassza végösszegével egyezik. A visszaváltási díj nélküli nettó: {ft(revenue - totals.deposit)}.
           </span>
         </div>
         <FormField
