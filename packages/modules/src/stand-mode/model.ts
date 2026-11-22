@@ -58,6 +58,8 @@ export interface IStandLine {
   internal: number;
   /** Belső fogyasztás outside the stand: counted as internal use, not taken from the stand's stock. */
   internalOutside: number;
+  /** Negative stock adjustment: units taken off the stock without a sale (breakage, loss, a fix). Not a storno. */
+  adjusted: number;
   counted: number | null;
 }
 
@@ -73,6 +75,11 @@ export interface IStandDay extends Document {
   sandbox: boolean;
   /** Recorded after the fact: closing counts and money only. */
   manual: { cashHuf: number; cardHuf: number } | null;
+  /**
+   * Takings entered as totals at closing (not every sale was tapped): cash WITHOUT the opening float, and bank
+   * card. When set they are the day's revenue and the report is inventory + takings only.
+   */
+  takings: { cashHuf: number; cardHuf: number } | null;
   /** Nyitó váltó: cash put in the register before selling. Not revenue. */
   floatHuf: number;
   /** Cash counted in the register at closing, float included (fixes the cash/card split; revenue is the sales total either way). */
@@ -101,6 +108,7 @@ const StandLineSchema = new Schema<IStandLine>(
     soldCard: { type: Number, default: 0 },
     internal: { type: Number, default: 0 },
     internalOutside: { type: Number, default: 0 },
+    adjusted: { type: Number, default: 0 },
     counted: { type: Number, default: null },
   },
   { _id: false },
@@ -117,6 +125,7 @@ const StandDaySchema = new Schema<IStandDay>(
     floatHuf: { type: Number, default: 0, min: 0 },
     cashActualHuf: { type: Number, default: null },
     manual: { type: new Schema({ cashHuf: Number, cardHuf: Number }, { _id: false }), default: null },
+    takings: { type: new Schema({ cashHuf: Number, cardHuf: Number }, { _id: false }), default: null },
     lines: { type: [StandLineSchema], default: [] },
     note: { type: String, default: "" },
     openedAt: { type: Date, default: () => new Date() },
@@ -129,7 +138,7 @@ StandDaySchema.index({ eventId: 1, date: 1 }, { unique: true });
 
 export const StandDayModel: Model<IStandDay> = mongoose.models.TBookStandDay ?? mongoose.model<IStandDay>("TBookStandDay", StandDaySchema, "tbookstanddays");
 
-export type StandCounter = "restocked" | "soldCash" | "soldCard" | "internal" | "internalOutside";
+export type StandCounter = "restocked" | "soldCash" | "soldCard" | "internal" | "internalOutside" | "adjusted";
 
 /**
  * One thing that was done on a day: a sale, internal use, a restock, an
@@ -156,6 +165,8 @@ export interface IStandEntry extends Document {
   reverses: Types.ObjectId | null;
   /** Set on an entry once it has been reversed; an entry can be reversed once. */
   stornoed: boolean;
+  /** Why (stock adjustments: breakage, loss, …). */
+  reason: string;
   by: string;
   at: Date;
 }
@@ -166,7 +177,7 @@ const StandEntrySchema = new Schema<IStandEntry>({
   dayId: { type: Schema.Types.ObjectId, required: true, index: true },
   productId: { type: Schema.Types.ObjectId, required: true },
   productName: { type: String, default: "" },
-  field: { type: String, enum: ["restocked", "soldCash", "soldCard", "internal", "internalOutside", "opening"], required: true },
+  field: { type: String, enum: ["restocked", "soldCash", "soldCard", "internal", "internalOutside", "adjusted", "opening"], required: true },
   quantity: { type: Number, required: true },
   previous: { type: Number, default: null },
   priceHuf: { type: Number, default: 0 },
@@ -174,6 +185,7 @@ const StandEntrySchema = new Schema<IStandEntry>({
   storno: { type: Boolean, default: false },
   reverses: { type: Schema.Types.ObjectId, default: null },
   stornoed: { type: Boolean, default: false },
+  reason: { type: String, default: "" },
   by: { type: String, default: "" },
   at: { type: Date, default: () => new Date() },
 });

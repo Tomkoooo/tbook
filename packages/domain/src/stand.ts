@@ -24,6 +24,11 @@ export interface StandLine {
   internal: number;
   /** Belső fogyasztás outside the stand (not taken from its stock): counts as internal use, leaves the inventory alone. */
   internalOutside: number;
+  /**
+   * Negative stock adjustment: units taken off the stand's stock without a sale and without a storno
+   * (breakage, loss, a stock fix). Reduces the inventory; not revenue, not internal use.
+   */
+  adjusted: number;
   /** The closing count entered by hand; null = trust the calculation. */
   counted: number | null;
 }
@@ -33,6 +38,13 @@ export interface StandDayData {
   lines: StandLine[];
   /** A day recorded after the fact: only the money, no item sales. */
   manual: { cashHuf: number; cardHuf: number } | null;
+  /**
+   * The day's takings entered as totals at closing, for a day when not every sale was tapped (only the
+   * stock adjustments and the closing count were kept). `cashHuf` is the cash takings WITHOUT the opening
+   * float; `cardHuf` the bank card (bk) takings. When set, these ARE the day's revenue and the item sales
+   * are not used for money; the day reports inventory + takings only.
+   */
+  takings?: { cashHuf: number; cardHuf: number } | null;
   /** Nyitó váltó: the cash put in the register before the first sale. It is not revenue. */
   floatHuf?: number;
   /**
@@ -44,8 +56,8 @@ export interface StandDayData {
   cashActualHuf?: number | null;
 }
 
-export function expectedClosing(line: Pick<StandLine, "opening" | "restocked" | "soldCash" | "soldCard" | "internal">): number {
-  return line.opening + line.restocked - line.soldCash - line.soldCard - line.internal;
+export function expectedClosing(line: Pick<StandLine, "opening" | "restocked" | "soldCash" | "soldCard" | "internal"> & { adjusted?: number }): number {
+  return line.opening + line.restocked - line.soldCash - line.soldCard - line.internal - (line.adjusted ?? 0);
 }
 
 /** What tomorrow starts with: the count if there is one, else the calculation. */
@@ -113,6 +125,8 @@ export interface StandProductRow {
   /** All internal use (from the stand + outside). */
   internal: number;
   internalOutside: number;
+  /** Negative stock adjustments (units). */
+  adjusted: number;
   /** Last day's closing in the range. */
   closing: number;
   revenue: number;
@@ -126,6 +140,8 @@ export interface StandProductRow {
 export interface StandDayRow {
   date: string;
   manual: boolean;
+  /** Takings were entered as totals (inventory day): revenue is not derived from item sales. */
+  inventory: boolean;
   /** Nyitó váltó. */
   floatHuf: number;
   /** Cash that should be in the register: float + cash sales. */
@@ -143,6 +159,7 @@ export interface StandDayRow {
   itemsSold: number;
   internalItems: number;
   internalOutsideItems: number;
+  adjustedItems: number;
 }
 
 export interface StandSummary {
@@ -167,6 +184,8 @@ export interface StandSummary {
   internalItems: number;
   /** Of internalItems, the part consumed outside the stand. */
   internalOutsideItems: number;
+  /** Units taken off the stock by adjustments. */
+  adjustedItems: number;
   internalValue: number;
   internalCost: number;
   /** Profit after the cost of internal use. */
@@ -197,6 +216,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     profitComplete: true,
     internalItems: 0,
     internalOutsideItems: 0,
+    adjustedItems: 0,
     internalValue: 0,
     internalCost: 0,
     profitAfterInternal: 0,
@@ -208,7 +228,8 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
   const products = new Map<string, StandProductRow>();
 
   for (const day of days) {
-    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), cashCounted: false, floatHuf: 0, cashInRegister: 0, registerTotal: 0, revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0 };
+    const inventory = !day.manual && Boolean(day.takings);
+    const row: StandDayRow = { date: day.date, manual: Boolean(day.manual), inventory, cashCounted: false, floatHuf: 0, cashInRegister: 0, registerTotal: 0, revenue: 0, cash: 0, card: 0, deposit: 0, profit: 0, internalValue: 0, itemsSold: 0, internalItems: 0, internalOutsideItems: 0, adjustedItems: 0 };
     let dayProfitKnown = true;
     let dayCost = 0;
     if (day.manual) {
@@ -218,7 +239,9 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
       row.revenue = day.manual.cashHuf + day.manual.cardHuf;
     }
     for (const line of day.lines) {
-      const t = lineTotals(line);
+      const raw = lineTotals(line);
+      // An inventory day's money is the entered takings: tapped sales (if any) don't add money, profit or variance.
+      const t = inventory ? { ...raw, revenueCash: 0, revenueCard: 0, revenue: 0, deposit: 0, netRevenue: 0, cost: null, profit: null, variance: 0, varianceValue: 0 } : raw;
       row.revenue += t.revenue;
       row.cash += t.revenueCash;
       row.card += t.revenueCard;
@@ -227,8 +250,9 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
       row.itemsSold += t.sold;
       row.internalItems += t.internal;
       row.internalOutsideItems += t.internalOutside;
+      row.adjustedItems += line.adjusted;
       dayCost += t.cost ?? 0;
-      if (t.sold > 0 && t.profit === null) {
+      if (!inventory && t.sold > 0 && t.profit === null) {
         dayProfitKnown = false;
         summary.profitComplete = false;
       }
@@ -254,6 +278,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
           soldCard: line.soldCard,
           internal: t.internal,
           internalOutside: line.internalOutside,
+          adjusted: line.adjusted,
           closing: closingOf(line),
           revenue: t.revenue,
           deposit: t.deposit,
@@ -270,6 +295,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
         existing.soldCard += line.soldCard;
         existing.internal += t.internal;
         existing.internalOutside += line.internalOutside;
+        existing.adjusted += line.adjusted;
         existing.closing = closingOf(line);
         existing.revenue += t.revenue;
         existing.deposit += t.deposit;
@@ -279,7 +305,12 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
         existing.variance += day.manual ? 0 : t.variance;
       }
     }
-    if (!day.manual && day.cashActualHuf !== null && day.cashActualHuf !== undefined) {
+    if (inventory && day.takings) {
+      row.cash = day.takings.cashHuf;
+      row.card = day.takings.cardHuf;
+      row.revenue = day.takings.cashHuf + day.takings.cardHuf;
+      row.cashCounted = true;
+    } else if (!day.manual && day.cashActualHuf !== null && day.cashActualHuf !== undefined) {
       row.cashCounted = true;
       // The count includes the float, which isn't sales.
       row.cash = Math.min(Math.max(day.cashActualHuf - (day.floatHuf ?? 0), 0), row.revenue);
@@ -289,7 +320,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     row.cashInRegister = row.floatHuf + row.cash;
     row.registerTotal = row.cashInRegister + row.card;
     // A manual day has no item sales, so no profit to speak of.
-    row.profit = day.manual || !dayProfitKnown ? null : row.revenue - row.deposit - dayCost;
+    row.profit = day.manual || inventory || !dayProfitKnown ? null : row.revenue - row.deposit - dayCost;
     summary.revenue += row.revenue;
     summary.cash += row.cash;
     summary.card += row.card;
@@ -300,6 +331,7 @@ export function summarizeStand(input: StandDayData[]): StandSummary {
     summary.itemsSold += row.itemsSold;
     summary.internalItems += row.internalItems;
     summary.internalOutsideItems += row.internalOutsideItems;
+    summary.adjustedItems += row.adjustedItems;
     summary.internalValue += row.internalValue;
     summary.byDay.push(row);
   }

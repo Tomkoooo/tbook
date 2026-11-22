@@ -3,7 +3,7 @@ import { EventGroupModel, EventModel, OrganizationModel, dbConnect, dbDisconnect
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import "../index";
 import { StandDayModel } from "./model";
-import { setFloat, addWithdrawal, listWithdrawals, stornoWithdrawal, listEntries, stornoEntry, stornoLine, endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
+import { adjustStock, setDayTakings, reportHtml, setFloat, addWithdrawal, listWithdrawals, stornoWithdrawal, listEntries, stornoEntry, stornoLine, endSandbox, getOpenDay, getSandboxDay, closeDay, getDay, openDay, proposeOpening, recordInternal, recordManualDay, restock, saveProduct, sell, setOpening, standStats, undoSale, buildReportXlsx } from "./service";
 
 const sent: Array<{ to: string; subject: string; attachments?: Array<{ filename: string }> }> = [];
 const transporter = { sendMail: async (m: never) => (sent.push(m), {} as never) };
@@ -88,7 +88,7 @@ describe("stand mode", () => {
     if (stillOpen) await closeDay(org, String(stillOpen._id), {});
     const d = await openDay(org, event, { date: "2026-08-01", openings: { [cola]: 10, [lagos]: 10 } });
     await sell(org, String(d._id), cola, "cash", 2);
-    await expect(closeDay(org, String(d._id), { cashHuf: 5000 })).rejects.toThrow(/plus the day's revenue/);
+    await expect(closeDay(org, String(d._id), { cashHuf: 5000 })).rejects.toThrow(/plus the tapped sales/);
     const closed = await closeDay(org, String(d._id), { counted: { [cola]: undefined as never }, internal: { [cola]: { inside: "" as never, outside: NaN } } });
     expect(closed.day.status).toBe("closed");
   });
@@ -234,5 +234,67 @@ describe("stand mode", () => {
     expect((await listWithdrawals(event, "2026-09-10", "2026-09-10"))[0]!.stornoed).toBe(true);
     const days = (await standStats(event, "2026-09-10", "2026-09-10")).days;
     expect((await buildReportXlsx(days, "t")).length).toBeGreaterThan(1000);
+  });
+
+  it("keeps a day by stock adjustments + closing count and enters the takings as totals", async () => {
+    const stillOpen = await getOpenDay(event);
+    if (stillOpen) await closeDay(org, String(stillOpen._id), {});
+    const d = await openDay(org, event, { date: "2026-10-01", floatHuf: 20000, openings: { [cola]: 30, [lagos]: 10 } });
+    const id = String(d._id);
+    // Not every sale is tapped: only the changes to the inventory are noted.
+    const adjusted = await adjustStock(org, id, cola, 4, "törött üveg", "boss@example.com");
+    expect(adjusted.lines.find((l) => String(l.productId) === cola)!.adjusted).toBe(4);
+    await expect(adjustStock(org, id, cola, 0)).rejects.toThrow(/1 or more/);
+    await expect(adjustStock(org, id, cola, -2)).rejects.toThrow(/1 or more/);
+    // A plain adjustment, not a storno, and it carries its reason.
+    const entries = await listEntries(org, id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ field: "adjusted", quantity: 4, storno: false, reason: "törött üveg", by: "boss@example.com" });
+    // It can still be taken back from the log, once.
+    await stornoEntry(org, String(entries[0]!._id));
+    expect((await getDay(event, "2026-10-01"))!.lines.find((l) => String(l.productId) === cola)!.adjusted).toBe(0);
+    await adjustStock(org, id, cola, 4, "törött üveg");
+
+    // Cash (with the float) above anything tapped is fine when the takings are entered as totals.
+    await expect(closeDay(org, id, { cashHuf: 150000, counted: { [cola]: 20 } })).rejects.toThrow(/card takings/);
+    await expect(closeDay(org, id, { cashHuf: 1000, cardHuf: 5000 })).rejects.toThrow(/less than the float/);
+    await expect(closeDay(org, id, { cardHuf: 5000 })).rejects.toThrow(/counted cash/);
+    const closed = await closeDay(org, id, { cashHuf: 150000, cardHuf: 45000, counted: { [cola]: 20, [lagos]: 3 }, note: "bevétel: kp 130000, bk 45000", emailTo: "boss@example.com" }, transporter as never);
+    expect(closed.day.takings).toMatchObject({ cashHuf: 130000, cardHuf: 45000 });
+    expect(closed.emailed).toBe(true);
+
+    const s = (await standStats(event, "2026-10-01", "2026-10-01")).summary;
+    expect(s).toMatchObject({ revenue: 175000, cash: 130000, card: 45000, floatHuf: 20000, cashInRegister: 150000, registerTotal: 195000, adjustedItems: 4, variance: 0 });
+    expect(s.byProduct.find((p) => p.name === "Cola")).toMatchObject({ opening: 30, adjusted: 4, closing: 20 });
+    // Tomorrow opens from the count.
+    expect((await proposeOpening(event, "2026-10-02")).items.find((i) => i.productId === cola)!.opening).toBe(20);
+
+    // The report is inventory + takings + note only.
+    const html = reportHtml((await EventModel.findById(event))!, closed.day);
+    expect(html).toContain("Leltár");
+    expect(html).toContain("bevétel: kp 130000, bk 45000");
+    expect(html).not.toContain("Nyereség");
+    expect(html).not.toContain("visszaváltási");
+  });
+
+  it("enters or corrects the takings of a day that is already closed (kp without the float)", async () => {
+    const day = await openDay(org, event, { date: "2026-10-02", floatHuf: 10000, openings: { [cola]: 20 } });
+    const id = String(day._id);
+    await adjustStock(org, id, cola, 2);
+    const closed = await closeDay(org, id, { counted: { [cola]: 18 }, note: "kp 80000 (váltó nélkül), bk 20000" });
+    expect(closed.day.takings).toBeNull();
+    await expect(setDayTakings(org, id, { cashHuf: -1, cardHuf: 0 })).rejects.toThrow(/forints/);
+    const fixed = await setDayTakings(org, id, { cashHuf: 80000, cardHuf: 20000 });
+    expect(fixed.takings).toMatchObject({ cashHuf: 80000, cardHuf: 20000 });
+    expect(fixed.floatHuf).toBe(10000);
+    expect(fixed.note).toBe("kp 80000 (váltó nélkül), bk 20000");
+    const s = (await standStats(event, "2026-10-02", "2026-10-02")).summary;
+    expect(s).toMatchObject({ revenue: 100000, cash: 80000, card: 20000, cashInRegister: 90000, registerTotal: 110000 });
+    const days = (await standStats(event, "2026-10-02", "2026-10-02")).days;
+    expect((await buildReportXlsx(days, "t")).length).toBeGreaterThan(1000);
+    // An open day has nothing to correct yet.
+    const open = await openDay(org, event, { date: "2026-10-03", openings: { [cola]: 18 } });
+    await expect(setDayTakings(org, String(open._id), { cashHuf: 1, cardHuf: 1 })).rejects.toThrow(/Close the day first/);
+    await closeDay(org, String(open._id), {});
   });
 });

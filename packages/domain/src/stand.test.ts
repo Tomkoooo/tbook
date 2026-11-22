@@ -14,6 +14,7 @@ const can = (over: Partial<StandLine> = {}): StandLine => ({
   soldCard: 6,
   internal: 2,
   internalOutside: 0,
+  adjusted: 0,
   counted: null,
   ...over,
 });
@@ -121,5 +122,27 @@ describe("summarizeStand", () => {
     expect(s.cash).toBe(50000 + 3000);
     expect(s.card).toBe(20000 + 3000);
     expect(s.byDay[0]).toMatchObject({ manual: true, profit: null });
+  });
+  it("takes stock adjustments off the inventory without touching revenue", () => {
+    const line = can({ adjusted: 3 });
+    expect(expectedClosing(line)).toBe(24 + 12 - 16 - 2 - 3);
+    expect(lineTotals(line).revenue).toBe(16 * 600);
+    expect(lineTotals(can({ adjusted: 3, counted: 15 })).variance).toBe(0);
+  });
+
+  it("an inventory day's revenue is the takings entered, not the tapped sales", () => {
+    const day = {
+      date: "2026-07-07",
+      manual: null,
+      floatHuf: 20000,
+      takings: { cashHuf: 120000, cardHuf: 45000 },
+      // Nothing was tapped, 5 units were adjusted away, and the closing count differs from the calculation.
+      lines: [can({ soldCash: 0, soldCard: 0, internal: 0, adjusted: 5, counted: 3 })],
+    };
+    const s = summarizeStand([day]);
+    expect(s).toMatchObject({ revenue: 165000, cash: 120000, card: 45000, floatHuf: 20000, cashInRegister: 140000, registerTotal: 185000, adjustedItems: 5, profit: 0, variance: 0 });
+    expect(s.byDay[0]).toMatchObject({ inventory: true, profit: null });
+    // Closing is the count; the sold-based money isn't derived from the lines.
+    expect(s.byProduct[0]).toMatchObject({ opening: 24, restocked: 12, adjusted: 5, closing: 3, revenue: 0 });
   });
 });

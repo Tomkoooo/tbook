@@ -191,6 +191,7 @@ function snapshot(product: IStandProduct, opening: number): IStandLine {
     soldCard: 0,
     internal: 0,
     internalOutside: 0,
+    adjusted: 0,
     counted: null,
   };
 }
@@ -257,6 +258,8 @@ interface Actor {
   by?: string;
   /** The entry this change reverses (a storno made from the log). */
   reverses?: Types.ObjectId;
+  /** Why (stock adjustments). */
+  reason?: string;
 }
 
 async function logEntry(day: IStandDay, productId: string, field: IStandEntry["field"], quantity: number, actor: Actor, previous: number | null = null): Promise<void> {
@@ -275,6 +278,7 @@ async function logEntry(day: IStandDay, productId: string, field: IStandEntry["f
       depositHuf: line?.depositHuf ?? 0,
       storno: quantity < 0 && field !== "opening",
       reverses: actor.reverses ?? null,
+      reason: actor.reason ?? "",
       by: actor.by ?? "",
     });
   } catch (error) {
@@ -312,6 +316,16 @@ export const restock = (organizationId: string, dayId: string, productId: string
 /** Belső fogyasztás. `outside`: consumed outside the stand, so the stand's stock stays as it is. */
 export const recordInternal = (organizationId: string, dayId: string, productId: string, quantity: number, outside = false, by?: string) =>
   adjust(organizationId, dayId, productId, outside ? "internalOutside" : "internal", quantity, { by });
+
+/**
+ * Negative stock adjustment: takes `quantity` units off the stand's stock without a sale, a storno or internal
+ * use — for the days when sales aren't tapped one by one and only the changes to the inventory are noted. It is
+ * logged as a plain adjustment (not a storno) and can itself be reversed from the log.
+ */
+export async function adjustStock(organizationId: string, dayId: string, productId: string, quantity: number, reason = "", by?: string): Promise<IStandDay> {
+  if (!Number.isInteger(quantity) || quantity <= 0) throw ActionError.validation("Enter how many units to take off the stock (1 or more).");
+  return adjust(organizationId, dayId, productId, "adjusted", quantity, { by, reason: String(reason).trim().slice(0, 200) });
+}
 
 /**
  * Storno of one logged entry: reverses exactly what it did, once. The entry
@@ -405,19 +419,26 @@ export function toDomain(line: IStandLine): StandLine {
     soldCard: line.soldCard,
     internal: line.internal,
     internalOutside: line.internalOutside ?? 0,
+    adjusted: line.adjusted ?? 0,
     counted: line.counted ?? null,
   };
 }
 
-export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, floatHuf: day.floatHuf ?? 0, cashActualHuf: day.cashActualHuf ?? null, manual: day.manual ? { cashHuf: day.manual.cashHuf, cardHuf: day.manual.cardHuf } : null, lines: day.lines.map(toDomain) });
+export const dayToDomain = (day: IStandDay): StandDayData => ({ date: day.date, floatHuf: day.floatHuf ?? 0, cashActualHuf: day.cashActualHuf ?? null, manual: day.manual ? { cashHuf: day.manual.cashHuf, cardHuf: day.manual.cardHuf } : null, takings: day.takings ? { cashHuf: day.takings.cashHuf, cardHuf: day.takings.cardHuf } : null, lines: day.lines.map(toDomain) });
 
 export interface CloseInput {
   /** productId → counted closing stock. Missing = trust the calculation. */
   counted?: Record<string, number>;
   /** productId → internal use to record now (replaces the day's counts): from the stand's stock / outside it. */
   internal?: Record<string, { inside?: number; outside?: number }>;
-  /** Cash counted in the drawer; the card part of the day's revenue is then the rest. Empty = keep the payment modes as tapped. */
+  /** Cash counted in the drawer (kp), opening float included. Without `cardHuf` the card part of the day's revenue is the rest; empty = keep the payment modes as tapped. */
   cashHuf?: number | null;
+  /**
+   * Bank card (bk) takings. Giving it switches the day to entered takings: cash (kp, minus the float) + card
+   * are the day's revenue, whatever was tapped, so the cash can be higher than the tapped sales. Use it when
+   * only the stock adjustments and the closing count were kept.
+   */
+  cardHuf?: number | null;
   /** Correct the opening float while closing. Empty = unchanged. */
   floatHuf?: number | null;
   note?: string;
@@ -449,14 +470,21 @@ export async function closeDay(organizationId: string, dayId: string, input: Clo
   const revenue = lines.reduce((sum, l) => sum + (l.soldCash + l.soldCard) * l.priceHuf, 0);
   const floatHuf = emptyCount(input.floatHuf) ? (day.floatHuf ?? 0) : money(input.floatHuf, "The opening float");
   const cashActualHuf = input.cashHuf === undefined || input.cashHuf === null ? null : money(input.cashHuf, "The counted cash");
-  // The count is the whole register, float included, so it can't exceed float + the day's revenue.
-  if (cashActualHuf !== null && cashActualHuf > floatHuf + revenue) {
-    throw ActionError.validation(`The counted cash (${cashActualHuf} Ft) is more than the float (${floatHuf} Ft) plus the day's revenue (${revenue} Ft).`);
+  let takings: { cashHuf: number; cardHuf: number } | null = null;
+  if (!emptyCount(input.cardHuf)) {
+    // Takings entered as totals: not tied to what was tapped.
+    const cardHuf = money(input.cardHuf, "The card takings");
+    if (cashActualHuf === null) throw ActionError.validation("Enter the counted cash (kp, with the float) as well.");
+    if (cashActualHuf < floatHuf) throw ActionError.validation(`The counted cash (${cashActualHuf} Ft) is less than the float (${floatHuf} Ft). The count includes the float; correct the float if it changed.`);
+    takings = { cashHuf: cashActualHuf - floatHuf, cardHuf };
+  } else if (cashActualHuf !== null && cashActualHuf > floatHuf + revenue) {
+    // Tapped sales only: the count is the whole register, float included, so it can't exceed float + the day's revenue.
+    throw ActionError.validation(`The counted cash (${cashActualHuf} Ft) is more than the float (${floatHuf} Ft) plus the tapped sales (${revenue} Ft). If you didn't tap every sale, enter the card takings too.`);
   }
   // Closed atomically: two people pressing Close can't both win.
   const closed = await StandDayModel.findOneAndUpdate(
     { _id: dayId, organizationId, status: "open" },
-    { $set: { status: "closed", closedAt: new Date(), note: String(input.note ?? "").slice(0, 1000), lines, cashActualHuf, floatHuf } },
+    { $set: { status: "closed", closedAt: new Date(), note: String(input.note ?? "").slice(0, 1000), lines, cashActualHuf, floatHuf, takings } },
     { returnDocument: "after" },
   ).exec();
   if (!closed) throw ActionError.validation("This day is already closed.");
@@ -535,6 +563,31 @@ export async function recordManualDay(
   }
 }
 
+/**
+ * Sets (or corrects) the takings of a closed day: cash revenue WITHOUT the float, and bank card. Turns the day
+ * into an inventory day (the report lists inventory with adjustments and these takings). The next day's opening
+ * isn't touched.
+ */
+export async function setDayTakings(
+  organizationId: string,
+  dayId: string,
+  input: { cashHuf: number; cardHuf: number; floatHuf?: number | null; note?: string },
+): Promise<IStandDay> {
+  const day = await StandDayModel.findOne({ _id: dayId, organizationId }).exec();
+  if (!day) throw ActionError.notFound("Day not found");
+  if (day.sandbox) throw ActionError.validation("A practice day has no takings.");
+  if (day.manual) throw ActionError.validation("A day recorded by hand already has its takings; record it again instead.");
+  if (day.status !== "closed") throw ActionError.validation("Close the day first; the takings are entered when closing.");
+  const cashHuf = money(input.cashHuf, "The cash takings");
+  const cardHuf = money(input.cardHuf, "The card takings");
+  const floatHuf = emptyCount(input.floatHuf) ? (day.floatHuf ?? 0) : money(input.floatHuf, "The opening float");
+  const set: Record<string, unknown> = { takings: { cashHuf, cardHuf }, floatHuf, cashActualHuf: cashHuf + floatHuf };
+  if (input.note !== undefined) set.note = String(input.note).slice(0, 1000);
+  const updated = await StandDayModel.findOneAndUpdate({ _id: dayId, organizationId, status: "closed" }, { $set: set }, { returnDocument: "after" }).exec();
+  if (!updated) throw ActionError.validation("This day isn't closed.");
+  return updated;
+}
+
 /** Re-fixes a closed day's closing counts (the next day's opening isn't rewritten). */
 export async function reopenDay(organizationId: string, dayId: string): Promise<void> {
   const day = await StandDayModel.findOne({ _id: dayId, organizationId }).exec();
@@ -595,7 +648,75 @@ export function listWithdrawals(eventId: string, from?: string, to?: string): Pr
 
 const ft = (n: number) => `${Math.round(n).toLocaleString("hu-HU")} Ft`;
 
+/** Every day is an inventory day: the report is stock (opening, adjustments, closing) and the takings entered. */
+const isInventoryReport = (days: IStandDay[]) => days.length > 0 && days.every((d) => Boolean(d.takings) && !d.manual);
+
+async function buildInventoryXlsx(days: IStandDay[], title: string): Promise<Buffer> {
+  const summary = summarizeStand(days.map(dayToDomain));
+  const workbook = new ExcelJS.Workbook();
+  const overview = workbook.addWorksheet("Összesítő");
+  overview.columns = [
+    { header: title, key: "k", width: 44 },
+    { header: "", key: "v", width: 22 },
+  ];
+  overview.getRow(1).font = { bold: true };
+  const rows: Array<[string, number | string]> = [
+    ["NAPI BEVÉTEL (kp + bankkártya, váltó nélkül)", summary.revenue],
+    ["Készpénz (kp, váltó nélkül)", summary.cash],
+    ["Nyitó váltó", summary.floatHuf],
+    ["Kasszában készpénz (kp, váltóval)", summary.cashInRegister],
+    ["Bankkártya (bk)", summary.card],
+    ["KASSZA ÖSSZESEN (váltóval)", summary.registerTotal],
+    ["Készletcsökkentés / korrekció (db)", summary.adjustedItems],
+  ];
+  for (const [k, v] of rows) {
+    const row = overview.addRow({ k, v });
+    if (k.startsWith("NAPI BEVÉTEL") || k.startsWith("KASSZA ÖSSZESEN")) row.font = { bold: true, size: 14 };
+  }
+  const notes = days.filter((d) => d.note).map((d) => (days.length > 1 ? `${d.date}: ${d.note}` : d.note));
+  if (notes.length) {
+    overview.addRow({ k: "", v: "" });
+    overview.addRow({ k: "Megjegyzés", v: "" }).font = { bold: true };
+    for (const note of notes) {
+      const row = overview.addRow({ k: note, v: "" });
+      row.getCell(1).alignment = { wrapText: true, vertical: "top" };
+    }
+  }
+
+  const products = workbook.addWorksheet("Leltár");
+  products.columns = [
+    { header: "Termék", key: "name", width: 30 },
+    { header: "Nyitó", key: "opening", width: 10 },
+    { header: "Bevételezés", key: "restocked", width: 13 },
+    { header: "Korrekció (−)", key: "adjusted", width: 14 },
+    ...(summary.internalItems > 0 ? [{ header: "Belső fogyasztás", key: "internal", width: 16 }] : []),
+    { header: "Záró", key: "closing", width: 10 },
+  ];
+  products.getRow(1).font = { bold: true };
+  for (const p of summary.byProduct) products.addRow({ name: p.name, opening: p.opening, restocked: p.restocked, adjusted: p.adjusted, internal: p.internal, closing: p.closing });
+
+  const dayIds = days.map((d) => d._id);
+  const adjustments = await StandEntryModel.find({ dayId: { $in: dayIds }, field: "adjusted" }).sort({ at: 1 }).lean().exec();
+  if (adjustments.length > 0) {
+    const dateOf = new Map(days.map((d) => [String(d._id), d.date]));
+    const log = workbook.addWorksheet("Korrekciók");
+    log.columns = [
+      { header: "Nap", key: "date", width: 12 },
+      { header: "Időpont", key: "at", width: 20 },
+      { header: "Termék", key: "product", width: 28 },
+      { header: "Db", key: "qty", width: 8 },
+      { header: "Miért", key: "reason", width: 36 },
+      { header: "Ki", key: "by", width: 28 },
+      { header: "Állapot", key: "state", width: 14 },
+    ];
+    log.getRow(1).font = { bold: true };
+    for (const e of adjustments) log.addRow({ date: dateOf.get(String(e.dayId)) ?? "", at: e.at, product: e.productName, qty: e.quantity, reason: e.reason ?? "", by: e.by, state: e.stornoed ? "visszavonva" : e.reverses ? "visszavonás" : "" });
+  }
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
 export async function buildReportXlsx(days: IStandDay[], title: string): Promise<Buffer> {
+  if (isInventoryReport(days)) return buildInventoryXlsx(days, title);
   const data = days.map(dayToDomain);
   const summary = summarizeStand(data);
   const workbook = new ExcelJS.Workbook();
@@ -628,6 +749,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     ["Belső fogyasztás értéke (eladási áron)", summary.internalValue],
     ["Belső fogyasztás költsége", summary.internalCost],
     ["Nyereség a belső fogyasztás után", summary.profitAfterInternal],
+    ["Készletcsökkentés / korrekció (db)", summary.adjustedItems],
     ["Leltárkülönbség (db)", summary.variance],
     ["Leltárkülönbség értéke", summary.varianceValue],
   ];
@@ -646,6 +768,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
     { header: "Kártya db", key: "card", width: 12 },
     { header: "Belső fogyasztás", key: "internal", width: 16 },
     { header: "Ebből standon kívül", key: "internalOutside", width: 18 },
+    { header: "Korrekció (−)", key: "adjusted", width: 14 },
     { header: "Záró", key: "closing", width: 10 },
     { header: "Bevétel", key: "revenue", width: 14 },
     { header: "Visszaváltási érték", key: "deposit", width: 18 },
@@ -656,7 +779,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
   ];
   products.getRow(1).font = { bold: true };
   for (const p of summary.byProduct) {
-    products.addRow({ name: p.name, opening: p.opening, restocked: p.restocked, sold: p.sold, cash: p.soldCash, card: p.soldCard, internal: p.internal, internalOutside: p.internalOutside, closing: p.closing, revenue: p.revenue, deposit: p.deposit, cost: p.cost ?? "", profit: p.profit ?? "", internalValue: p.internalValue, variance: p.variance });
+    products.addRow({ name: p.name, opening: p.opening, restocked: p.restocked, sold: p.sold, cash: p.soldCash, card: p.soldCard, internal: p.internal, internalOutside: p.internalOutside, adjusted: p.adjusted, closing: p.closing, revenue: p.revenue, deposit: p.deposit, cost: p.cost ?? "", profit: p.profit ?? "", internalValue: p.internalValue, variance: p.variance });
   }
 
   const byDay = workbook.addWorksheet("Napok");
@@ -698,7 +821,7 @@ export async function buildReportXlsx(days: IStandDay[], title: string): Promise
         date: dateOf.get(String(e.dayId)) ?? "",
         at: e.at,
         product: e.productName,
-        what: `${e.storno ? "STORNO – " : ""}${entryLabel(e.field)}`,
+        what: `${e.storno ? "STORNO – " : ""}${entryLabel(e.field)}${e.reason ? ` (${e.reason})` : ""}`,
         qty: e.quantity,
         value: e.field === "soldCash" || e.field === "soldCard" || e.field === "internal" || e.field === "internalOutside" ? e.quantity * e.priceHuf : "",
         by: e.by,
@@ -736,6 +859,7 @@ async function withdrawalsBetween(days: IStandDay[]): Promise<IStandWithdrawal[]
 const ENTRY_LABELS: Record<string, string> = {
   soldCash: "Eladás (készpénz)",
   soldCard: "Eladás (kártya)",
+  adjusted: "Készletcsökkentés (korrekció)",
   internal: "Belső fogyasztás (standból)",
   internalOutside: "Belső fogyasztás (standon kívül)",
   restocked: "Bevételezés",
@@ -745,6 +869,7 @@ export const entryLabel = (field: string): string => ENTRY_LABELS[field] ?? fiel
 
 export function reportHtml(event: IEvent, day: IStandDay): string {
   const s = summarizeStand([dayToDomain(day)]);
+  if (isInventoryReport([day])) return inventoryReportHtml(event, day, s);
   const row = (label: string, value: string) => `<tr><td style="padding:2px 12px 2px 0">${escapeHtml(label)}</td><td style="text-align:right"><b>${escapeHtml(value)}</b></td></tr>`;
   const items = s.byProduct
     .filter((p) => p.sold > 0 || p.internal > 0)
@@ -758,6 +883,22 @@ export function reportHtml(event: IEvent, day: IStandDay): string {
 <p style="margin:2px 0 8px;color:#52525b;font-size:12px">${counted ? "A bontás a megszámolt készpénzből számolt." : "A bontás a rögzített fizetési módok szerinti."}</p>
 <table>${row("Ebből visszaváltási díj", ft(s.deposit))}${row("Nettó bevétel (visszaváltási díj nélkül)", ft(s.netRevenue))}${row("Belső fogyasztás értéke", ft(s.internalValue))}${s.profitComplete ? row("Nyereség", ft(s.profit)) : ""}</table>
 <ul>${items}</ul>${day.note ? `<p>${escapeHtml(day.note)}</p>` : ""}`;
+}
+
+/** Opening and closing inventory with the adjustments, the takings, the note — nothing else. */
+function inventoryReportHtml(event: IEvent, day: IStandDay, s: StandSummary): string {
+  const row = (label: string, value: string) => `<tr><td style="padding:2px 12px 2px 0">${escapeHtml(label)}</td><td style="text-align:right"><b>${escapeHtml(value)}</b></td></tr>`;
+  const cell = (v: string | number, bold = false) => `<td style="padding:2px 10px;text-align:right${bold ? ";font-weight:bold" : ""}">${escapeHtml(String(v))}</td>`;
+  const showInternal = s.internalItems > 0;
+  const stock = s.byProduct
+    .map((p) => `<tr><td style="padding:2px 10px 2px 0">${escapeHtml(p.name)}</td>${cell(p.opening)}${cell(p.restocked ? `+${p.restocked}` : 0)}${cell(p.adjusted ? `−${p.adjusted}` : 0)}${showInternal ? cell(p.internal) : ""}${cell(p.closing, true)}</tr>`)
+    .join("");
+  return `<p>${escapeHtml(event.name)} — ${escapeHtml(day.date)} záró jelentés. A részletek a csatolt Excelben.</p>
+<p style="font-size:22px;margin:12px 0 2px">Napi bevétel: <b>${escapeHtml(ft(s.revenue))}</b></p>
+<table>${row("Készpénz (kp, váltó nélkül)", ft(s.cash))}${row("Bankkártya (bk)", ft(s.card))}${row("Nyitó váltó", ft(s.floatHuf))}${row("Kasszában készpénz (váltóval)", ft(s.cashInRegister))}${row("Kassza összesen (váltóval)", ft(s.registerTotal))}</table>
+<p style="margin:16px 0 4px"><b>Leltár</b></p>
+<table style="border-collapse:collapse"><thead><tr><th style="text-align:left;padding:2px 10px 2px 0">Termék</th><th style="padding:2px 10px">Nyitó</th><th style="padding:2px 10px">Bevét.</th><th style="padding:2px 10px">Korrekció</th>${showInternal ? '<th style="padding:2px 10px">Belső</th>' : ""}<th style="padding:2px 10px">Záró</th></tr></thead><tbody>${stock}</tbody></table>
+${day.note ? `<p style="margin-top:16px"><b>Megjegyzés</b><br>${escapeHtml(day.note).replace(/\n/g, "<br>")}</p>` : ""}`;
 }
 
 export async function sendDayReport(day: IStandDay, to: string, transporter?: MailTransporter): Promise<void> {

@@ -8,26 +8,27 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { FormField, ResultNotice } from "@/components/form-bits";
+import { CheckboxField, FormField, ResultNotice } from "@/components/form-bits";
 import { Notice } from "@/components/notice";
 import { cn } from "@/lib/utils";
 import { LogDialog } from "./log-dialog";
 import { addProductToDayAction, changeStandAction, closeDayAction, endSandboxAction, setFloatAction, type StandChange, type StandResult } from "./actions";
 import type { StandDayDto, StandLineDto } from "./dto";
 
-type Mode = "cash" | "card" | "internal" | "restock";
+type Mode = "cash" | "card" | "internal" | "restock" | "adjust";
 
 const MODES: Array<{ key: Mode; label: string }> = [
   { key: "cash", label: "Készpénz" },
   { key: "card", label: "Kártya" },
   { key: "internal", label: "Belső fogyasztás" },
   { key: "restock", label: "Bevételezés" },
+  { key: "adjust", label: "Készletcsökkentés" },
 ];
 
 const ft = (n: number) => `${n.toLocaleString("hu-HU")} Ft`;
 
 /** What the confirm dialog is for. Undo kinds subtract. */
-type TxKind = "sell" | "undo-sell" | "internal" | "undo-internal" | "undo-restock";
+type TxKind = "sell" | "undo-sell" | "internal" | "undo-internal" | "undo-restock" | "adjust" | "undo-adjust";
 interface Tx {
   kind: TxKind;
   line: StandLineDto;
@@ -80,7 +81,8 @@ export function SellScreen({
     if (mode === "restock") {
       if (subtract) setTx({ kind: "undo-restock", line });
       else setRestocking(line);
-    } else if (mode === "internal") setTx({ kind: subtract ? "undo-internal" : "internal", line });
+    } else if (mode === "adjust") setTx({ kind: subtract ? "undo-adjust" : "adjust", line });
+    else if (mode === "internal") setTx({ kind: subtract ? "undo-internal" : "internal", line });
     else setTx({ kind: subtract ? "undo-sell" : "sell", line });
   }
 
@@ -92,11 +94,12 @@ export function SellScreen({
       items: t.items + l.soldCash + l.soldCard,
       internal: t.internal + l.internal + l.internalOutside,
       internalValue: t.internalValue + (l.internal + l.internalOutside) * l.priceHuf,
+      adjusted: t.adjusted + l.adjusted,
     }),
-    { cash: 0, card: 0, deposit: 0, items: 0, internal: 0, internalValue: 0 },
+    { cash: 0, card: 0, deposit: 0, items: 0, internal: 0, internalValue: 0, adjusted: 0 },
   );
-  const countOf = (l: StandLineDto) => (mode === "cash" ? l.soldCash : mode === "card" ? l.soldCard : mode === "internal" ? l.internal + l.internalOutside : l.restocked);
-  const countLabel = mode === "internal" ? "belső" : mode === "restock" ? "bevét." : "eladva";
+  const countOf = (l: StandLineDto) => (mode === "cash" ? l.soldCash : mode === "card" ? l.soldCard : mode === "internal" ? l.internal + l.internalOutside : mode === "adjust" ? l.adjusted : l.restocked);
+  const countLabel = mode === "internal" ? "belső" : mode === "restock" ? "bevét." : mode === "adjust" ? "korr." : "eladva";
 
   return (
     <div className="grid gap-3">
@@ -150,6 +153,7 @@ export function SellScreen({
           <span>
             Belső fogyasztás {totals.internal} db ({ft(totals.internalValue)})
           </span>
+          {totals.adjusted > 0 ? <span>Készletcsökkentés {totals.adjusted} db</span> : null}
           {/* Quiet on purpose: most days give the float when opening; this is for adding or fixing it later. */}
           <span className="text-xs">
             váltó {ft(day.floatHuf)}{" "}
@@ -185,7 +189,7 @@ export function SellScreen({
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-4">
         {day.lines.map((line) => (
-          <div key={line.productId} className={cn("bg-card flex min-h-16 items-stretch overflow-hidden rounded-lg border", pending && "opacity-80", mode === "internal" && "border-warning")}>
+          <div key={line.productId} className={cn("bg-card flex min-h-16 items-stretch overflow-hidden rounded-lg border", pending && "opacity-80", (mode === "internal" || mode === "adjust") && "border-warning")}>
             <Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none p-2 text-left whitespace-normal" onClick={() => open(line, false)}>
               {line.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -232,7 +236,13 @@ export function SellScreen({
         onConfirm={(t, quantity, options) => {
           const sign = t.kind.startsWith("undo") ? -1 : 1;
           const change: StandChange =
-            t.kind === "sell" || t.kind === "undo-sell" ? { kind: "sell", method: options.method } : t.kind === "undo-restock" ? { kind: "restock" } : { kind: "internal", outside: options.outside };
+            t.kind === "sell" || t.kind === "undo-sell"
+              ? { kind: "sell", method: options.method }
+              : t.kind === "undo-restock"
+                ? { kind: "restock" }
+                : t.kind === "adjust" || t.kind === "undo-adjust"
+                  ? { kind: "adjust", reason: options.reason }
+                  : { kind: "internal", outside: options.outside };
           apply(t.line.productId, change, sign * quantity);
           setTx(null);
         }}
@@ -252,6 +262,8 @@ const TITLES: Record<TxKind, string> = {
   internal: "Belső fogyasztás",
   "undo-internal": "Storno – belső fogyasztás",
   "undo-restock": "Storno – bevételezés",
+  adjust: "Készletcsökkentés",
+  "undo-adjust": "Készletcsökkentés visszavonása",
 };
 
 /** Confirmation with a quantity: used for selling, internal use and their undo. */
@@ -264,23 +276,26 @@ function TxDialog({
   tx: Tx | null;
   defaultMethod: "cash" | "card";
   onClose: () => void;
-  onConfirm: (tx: Tx, quantity: number, options: { method: "cash" | "card"; outside: boolean }) => void;
+  onConfirm: (tx: Tx, quantity: number, options: { method: "cash" | "card"; outside: boolean; reason: string }) => void;
 }) {
   const [quantity, setQuantity] = useState(1);
   const [method, setMethod] = useState(defaultMethod);
   const [outside, setOutside] = useState(false);
+  const [reason, setReason] = useState("");
   if (!tx) return null;
 
   const { kind, line } = tx;
   const undo = kind.startsWith("undo");
   const isSale = kind === "sell" || kind === "undo-sell";
   const isRestock = kind === "undo-restock";
+  const isAdjust = kind === "adjust" || kind === "undo-adjust";
   // A storno can't take back more than was recorded.
-  const max = !undo ? 9999 : isRestock ? line.restocked : isSale ? (method === "card" ? line.soldCard : line.soldCash) : outside ? line.internalOutside : line.internal;
+  const max = !undo ? 9999 : isRestock ? line.restocked : isAdjust ? line.adjusted : isSale ? (method === "card" ? line.soldCard : line.soldCash) : outside ? line.internalOutside : line.internal;
   const clamp = (n: number) => Math.min(Math.max(1, Math.floor(n) || 1), Math.max(1, max));
   const q = clamp(quantity);
-  const overStock = !undo && (isSale || !outside) && q > line.stock;
-  const confirmLabel = isSale ? `${undo ? "Storno" : "Eladás"} – ${ft(q * line.priceHuf)}` : undo ? "Storno" : "Rögzítés";
+  const overStock = !undo && (isSale || isAdjust || !outside) && q > line.stock;
+  const confirmLabel = isSale ? `${undo ? "Storno" : "Eladás"} – ${ft(q * line.priceHuf)}` : isAdjust ? (undo ? "Visszavonás" : `−${q} db levonása`) : undo ? "Storno" : "Rögzítés";
+  const confirm = () => onConfirm(tx, q, { method, outside, reason });
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -303,7 +318,13 @@ function TxDialog({
                 Kártya
               </Button>
             </div>
-          ) : isRestock ? null : (
+          ) : isRestock ? null : isAdjust ? (
+            undo ? null : (
+              <FormField label="Miért (nem kötelező)" hint="Levonódik a készletből eladás és storno nélkül: törés, selejt, készletjavítás. A napi összesítőben a korrekciók között jelenik meg.">
+                <Input value={reason} maxLength={200} placeholder="pl. törött üveg" onChange={(e) => setReason(e.target.value)} />
+              </FormField>
+            )
+          ) : (
             <div className="grid gap-1.5">
               <div className="grid grid-cols-2 gap-2">
                 <Button size="lg" variant={!outside ? "default" : "outline"} onClick={() => setOutside(false)}>
@@ -328,7 +349,7 @@ function TxDialog({
               aria-label="Mennyiség"
               value={q}
               onChange={(e) => setQuantity(clamp(Number(e.target.value)))}
-              onKeyDown={(e) => e.key === "Enter" && onConfirm(tx, q, { method, outside })}
+              onKeyDown={(e) => e.key === "Enter" && confirm()}
             />
             <Button size="icon-lg" variant="outline" aria-label="Több" disabled={q >= max} onClick={() => setQuantity(clamp(q + 1))}>
               <Plus />
@@ -348,7 +369,7 @@ function TxDialog({
           <Button variant="outline" onClick={onClose}>
             Mégse
           </Button>
-          <Button size="lg" disabled={undo && max === 0} onClick={() => onConfirm(tx, q, { method, outside })}>
+          <Button size="lg" disabled={undo && max === 0} onClick={confirm}>
             {confirmLabel}
           </Button>
         </DialogFooter>
@@ -431,6 +452,8 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
   const [inside, setInside] = useState<Record<string, string>>({});
   const [outside, setOutside] = useState<Record<string, string>>({});
   const [cash, setCash] = useState("");
+  const [card, setCard] = useState("");
+  const [floatValue, setFloatValue] = useState("");
   const [note, setNote] = useState("");
   const [email, setEmail] = useState(defaultEmail);
   const [result, setResult] = useState<StandResult | null>(null);
@@ -439,10 +462,21 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
     (t, l) => ({ cash: t.cash + l.soldCash * l.priceHuf, card: t.card + l.soldCard * l.priceHuf, deposit: t.deposit + (l.soldCash + l.soldCard) * l.depositHuf }),
     { cash: 0, card: 0, deposit: 0 },
   );
-  const revenue = totals.cash + totals.card;
   const entered = (v: string | undefined) => v !== undefined && v.trim() !== "";
+  // Sales weren't tapped one by one (only adjustments and the closing count were kept): the takings are typed in.
+  const [byTotals, setByTotals] = useState(totals.cash + totals.card === 0);
   const cashN = entered(cash) ? Number(cash) : null;
-  const cashTooHigh = cashN !== null && cashN > day.floatHuf + revenue;
+  const cardN = entered(card) ? Number(card) : null;
+  const floatN = entered(floatValue) ? Number(floatValue) : day.floatHuf;
+  const tapped = totals.cash + totals.card;
+  const cashTooHigh = !byTotals && cashN !== null && cashN > day.floatHuf + tapped;
+  const cashBelowFloat = byTotals && cashN !== null && cashN < floatN;
+  const totalsMissing = byTotals && (cashN === null || cardN === null);
+  const typedCash = byTotals && cashN !== null ? Math.max(cashN - floatN, 0) : 0;
+  const typedCard = byTotals && cardN !== null ? cardN : 0;
+  const revenue = byTotals ? typedCash + typedCard : tapped;
+  const registerCash = byTotals ? (cashN ?? floatN) : day.floatHuf + totals.cash;
+  const registerCard = byTotals ? typedCard : totals.card;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -462,28 +496,54 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
             </div>
             <div className="grid">
               <span className="text-muted-foreground text-xs font-medium">Kasszában várható készpénz (váltóval)</span>
-              <strong className="text-xl font-semibold tabular-nums">{ft(day.floatHuf + totals.cash)}</strong>
+              <strong className="text-xl font-semibold tabular-nums">{ft(registerCash)}</strong>
             </div>
             <div className="grid">
               <span className="text-muted-foreground text-xs font-medium">Kártya</span>
-              <strong className="text-xl font-semibold tabular-nums">{ft(totals.card)}</strong>
+              <strong className="text-xl font-semibold tabular-nums">{ft(registerCard)}</strong>
             </div>
             <div className="grid">
               <span className="text-muted-foreground text-xs font-medium">Kassza összesen</span>
-              <strong className="text-xl font-semibold tabular-nums">{ft(day.floatHuf + revenue)}</strong>
+              <strong className="text-xl font-semibold tabular-nums">{ft(registerCash + registerCard)}</strong>
             </div>
           </div>
           <span className="text-muted-foreground text-xs tabular-nums">
-            A visszaváltási díjat tartalmazza (ebből {ft(totals.deposit)}), a nyitó váltó ({ft(day.floatHuf)}) a kasszához tartozik, nem bevétel. A visszaváltási díj nélküli nettó: {ft(revenue - totals.deposit)}.
+            {byTotals
+              ? `A napi bevétel a megadott készpénz (váltó nélkül) és a kártya összege; a nyitó váltó (${ft(floatN)}) a kasszához tartozik, nem bevétel.`
+              : `A visszaváltási díjat tartalmazza (ebből ${ft(totals.deposit)}), a nyitó váltó (${ft(day.floatHuf)}) a kasszához tartozik, nem bevétel. A visszaváltási díj nélküli nettó: ${ft(revenue - totals.deposit)}.`}
           </span>
         </div>
-        <FormField
-          label="Megszámolt készpénz a kasszában (Ft)"
-          hint="Nem kötelező. Ha nem minden eladást ütöttél be a jó fizetési móddal, add meg a kasszában lévő teljes készpénzt (váltóval együtt): a kártyás rész a napi bevétel többi része lesz."
-          error={cashTooHigh ? `Több, mint a váltó és a napi bevétel együtt (${ft(day.floatHuf + revenue)}).` : undefined}
-        >
-          <Input type="number" inputMode="numeric" min={0} value={cash} onChange={(e) => setCash(e.target.value)} />
-        </FormField>
+        <CheckboxField
+          label="Nem ütöttem be minden eladást: a napi összesítőt kézzel adom meg"
+          hint="Csak a készletcsökkentéseket és a záró leltárt vezetted? Add meg a kasszában lévő készpénzt (váltóval) és a bankkártyás összeget. A jelentés ekkor a nyitó és záró készletet a korrekciókkal, a bevételt és a megjegyzést tartalmazza."
+          checked={byTotals}
+          onCheckedChange={setByTotals}
+        />
+        {byTotals ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <FormField
+              label="Készpénz a kasszában – kp (Ft)"
+              hint="A megszámolt teljes készpénz, a nyitó váltóval együtt."
+              error={cashBelowFloat ? `Kevesebb, mint a váltó (${ft(floatN)}).` : undefined}
+            >
+              <Input type="number" inputMode="numeric" min={0} value={cash} onChange={(e) => setCash(e.target.value)} />
+            </FormField>
+            <FormField label="Bankkártya – bk (Ft)" hint="A kártyás bevétel összesen.">
+              <Input type="number" inputMode="numeric" min={0} value={card} onChange={(e) => setCard(e.target.value)} />
+            </FormField>
+            <FormField label="Nyitó váltó (Ft)" hint="Csak ha módosult.">
+              <Input type="number" inputMode="numeric" min={0} placeholder={String(day.floatHuf)} value={floatValue} onChange={(e) => setFloatValue(e.target.value)} />
+            </FormField>
+          </div>
+        ) : (
+          <FormField
+            label="Megszámolt készpénz a kasszában (Ft)"
+            hint="Nem kötelező. Ha nem minden eladást ütöttél be a jó fizetési móddal, add meg a kasszában lévő teljes készpénzt (váltóval együtt): a kártyás rész a napi bevétel többi része lesz."
+            error={cashTooHigh ? `Több, mint a váltó és a beütött eladások együtt (${ft(day.floatHuf + tapped)}). Ha nem ütöttél be mindent, add meg a napi összesítőt kézzel.` : undefined}
+          >
+            <Input type="number" inputMode="numeric" min={0} value={cash} onChange={(e) => setCash(e.target.value)} />
+          </FormField>
+        )}
 
         <div className="grid gap-3">
           {day.lines.map((l) => {
@@ -513,7 +573,7 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
         <ResultNotice result={result} />
         <DialogFooter>
           <Button
-            disabled={pending || result?.ok === true || cashTooHigh}
+            disabled={pending || result?.ok === true || cashTooHigh || cashBelowFloat || totalsMissing}
             onClick={() =>
               start(async () => {
                 const counts = Object.fromEntries(day.lines.filter((l) => entered(counted[l.productId])).map((l) => [l.productId, Number(counted[l.productId])]));
@@ -522,7 +582,7 @@ function CloseDialog({ onClose, day, defaultEmail }: { onClose: () => void; day:
                     .filter((l) => entered(inside[l.productId]) || entered(outside[l.productId]))
                     .map((l) => [l.productId, { inside: entered(inside[l.productId]) ? Number(inside[l.productId]) : undefined, outside: entered(outside[l.productId]) ? Number(outside[l.productId]) : undefined }]),
                 );
-                const r = await closeDayAction(day.id, counts, internal, cashN, note, email.trim());
+                const r = await closeDayAction(day.id, counts, internal, cashN, note, email.trim(), byTotals ? cardN : null, byTotals && entered(floatValue) ? floatN : null);
                 setResult(r);
                 if (r.ok) router.refresh();
               })

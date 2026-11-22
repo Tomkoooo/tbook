@@ -65,6 +65,7 @@ export function LogDialog({ dayId, canStorno, onClose, onDay }: { dayId: string;
                     {e.field === "opening" ? `${e.previous ?? "?"} → ${e.quantity} db` : `${e.quantity > 0 ? "+" : ""}${e.quantity} db`}
                     {e.value !== null ? ` · ${ft(e.value)}` : ""}
                   </span>
+                  {e.reason ? <span className="text-muted-foreground text-xs">{e.reason}</span> : null}
                   <span className="text-muted-foreground text-xs">{e.by}</span>
                 </span>
                 {e.storno ? <Badge variant="warning">storno</Badge> : null}

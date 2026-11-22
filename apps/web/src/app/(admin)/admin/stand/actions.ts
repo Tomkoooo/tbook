@@ -38,9 +38,9 @@ export async function openDayAction(eventId: string, devices: boolean, openings:
   }
 }
 
-export type StandChange = { kind: "sell"; method: "cash" | "card" } | { kind: "restock" } | { kind: "internal"; outside: boolean } | { kind: "opening" };
+export type StandChange = { kind: "sell"; method: "cash" | "card" } | { kind: "restock" } | { kind: "internal"; outside: boolean } | { kind: "adjust"; reason?: string } | { kind: "opening" };
 
-/** One tap: sell / restock / internal use / fix the opening count. Negative `quantity` undoes. */
+/** One tap: sell / restock / internal use / stock adjustment / fix the opening count. Negative `quantity` undoes. */
 export async function changeStandAction(dayId: string, productId: string, change: StandChange, quantity: number): Promise<StandResult> {
   try {
     const { organizationId, userId } = await requireOrgPermission("stand:operate");
@@ -52,7 +52,11 @@ export async function changeStandAction(dayId: string, productId: string, change
           ? await stand.restock(organizationId, dayId, productId, quantity, by)
           : change.kind === "internal"
             ? await stand.recordInternal(organizationId, dayId, productId, quantity, change.outside, by)
-            : await stand.setOpening(organizationId, dayId, productId, quantity, by);
+            : change.kind === "adjust"
+              ? quantity > 0
+                ? await stand.adjustStock(organizationId, dayId, productId, quantity, change.reason, by)
+                : await stand.stornoLine(organizationId, dayId, productId, "adjusted", -quantity, by)
+              : await stand.setOpening(organizationId, dayId, productId, quantity, by);
     return { ok: true, day: toDayDto(day) };
   } catch (error) {
     return fail(error, "changeStandAction");
@@ -62,10 +66,23 @@ export async function changeStandAction(dayId: string, productId: string, change
 /** Only what was entered: a missing value means "leave as it is" (closing) or 0 (a past day). */
 export type InternalUse = Record<string, { inside?: number; outside?: number }>;
 
-export async function closeDayAction(dayId: string, counted: Record<string, number>, internal: InternalUse, cashHuf: number | null, note: string, emailTo: string): Promise<StandResult> {
+/**
+ * `cashHuf` is the counted cash (kp) with the float; with `cardHuf` (bk) the day's takings are entered as totals
+ * instead of coming from the tapped sales. `floatHuf` corrects the opening float while closing (null = unchanged).
+ */
+export async function closeDayAction(
+  dayId: string,
+  counted: Record<string, number>,
+  internal: InternalUse,
+  cashHuf: number | null,
+  note: string,
+  emailTo: string,
+  cardHuf: number | null = null,
+  floatHuf: number | null = null,
+): Promise<StandResult> {
   try {
     const { organizationId, userId } = await requireOrgPermission("stand:operate");
-    const result = await stand.closeDay(organizationId, dayId, { counted, internal, cashHuf, note, emailTo, by: await actingBy(userId) });
+    const result = await stand.closeDay(organizationId, dayId, { counted, internal, cashHuf, cardHuf, floatHuf, note, emailTo, by: await actingBy(userId) });
     refresh();
     const mail = emailTo ? (result.emailed ? ` Report sent to ${emailTo}.` : ` The report email failed: ${result.emailError}`) : "";
     return { ok: true, message: `Day closed.${mail}` };
@@ -94,6 +111,18 @@ export async function reopenDayAction(dayId: string): Promise<StandResult> {
     return { ok: true, message: "Day reopened." };
   } catch (error) {
     return fail(error, "reopenDayAction");
+  }
+}
+
+/** Sets or corrects a closed day's takings (kp without the float, bk): the report then lists inventory + takings. */
+export async function setDayTakingsAction(dayId: string, cashHuf: number, cardHuf: number, floatHuf: number | null, note: string | null): Promise<StandResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("stand:manage");
+    await stand.setDayTakings(organizationId, dayId, { cashHuf, cardHuf, floatHuf, ...(note === null ? {} : { note }) });
+    refresh();
+    return { ok: true, message: "Takings saved. You can send the report again." };
+  } catch (error) {
+    return fail(error, "setDayTakingsAction");
   }
 }
 
@@ -171,6 +200,8 @@ export interface StandEntryDto {
   previous: number | null;
   /** quantity × price, for sales and internal use. */
   value: number | null;
+  /** Why (stock adjustments). */
+  reason: string;
   storno: boolean;
   /** Already reversed. */
   stornoed: boolean;
@@ -191,7 +222,8 @@ export async function listEntriesAction(dayId: string): Promise<{ ok: boolean; m
         label: stand.entryLabel(e.field),
         quantity: e.quantity,
         previous: e.previous ?? null,
-        value: e.field === "opening" || e.field === "restocked" ? null : e.quantity * e.priceHuf,
+        value: e.field === "opening" || e.field === "restocked" || e.field === "adjusted" ? null : e.quantity * e.priceHuf,
+        reason: e.reason ?? "",
         storno: e.storno,
         stornoed: e.stornoed,
         by: e.by,
