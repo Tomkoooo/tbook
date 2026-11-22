@@ -1,8 +1,10 @@
 import { getInventoryApiKey, getOrganizationSettings, getSumUpSettings, listWebhooks } from "@tbook/services";
 import { webhookEventTypes } from "@tbook/schemas";
+import { CreditCard, FileText, KeyRound, Mail, Webhook } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { formatDateTime, requireAdminPage } from "@/lib/admin-page";
@@ -37,16 +39,55 @@ export default async function IntegrationsPage() {
       <PageTitle title="Settings" description="Payments, invoicing, email and connections to other systems." />
       <SettingsNav active="integrations" />
 
-      <div className="grid items-start gap-6 xl:grid-cols-2">
+      <KpiGrid cols={5}>
+        <KpiTile
+          label="Online payments"
+          value={settings.stripe.enabled ? "Own Stripe" : "Platform"}
+          hint="Stripe account in use"
+          tone={settings.stripe.enabled ? "success" : "neutral"}
+          icon={<CreditCard />}
+        />
+        <KpiTile
+          label="Invoicing"
+          value={settings.szamlazz.enabled ? "On" : "Off"}
+          hint="Számlázz.hu"
+          tone={settings.szamlazz.enabled ? "success" : "neutral"}
+          icon={<FileText />}
+        />
+        <KpiTile
+          label="Email"
+          value={settings.smtp.host ? "Own SMTP" : "Platform"}
+          hint="sender for customer emails"
+          tone={settings.smtp.host ? "success" : "neutral"}
+          icon={<Mail />}
+        />
+        <KpiTile
+          label="Card terminals"
+          value={sumup.readers.length}
+          hint={sumup.enabled ? "SumUp readers paired" : "SumUp is off"}
+          tone={sumup.enabled ? "success" : "neutral"}
+          icon={<CreditCard />}
+        />
+        <KpiTile
+          label="Webshop key"
+          value={inventoryKey.configured ? "Active" : "None"}
+          hint="inventory API"
+          tone={inventoryKey.configured ? "success" : "neutral"}
+          icon={<KeyRound />}
+          className="col-span-2 md:col-span-1"
+        />
+      </KpiGrid>
+
+      <div className="grid items-start gap-4 md:gap-6 xl:grid-cols-2">
         <StripeCard stripe={settings.stripe} webhookUrl={`${appUrl || "https://your-domain"}/api/webhooks/stripe`} />
         <SzamlazzCard szamlazz={settings.szamlazz} />
         <SmtpCard smtp={settings.smtp} />
         <SumUpCard {...sumup} webhookReachable={webhookReachable} />
-      <InventoryApiCard
-        configured={inventoryKey.configured}
-        hint={inventoryKey.hint}
-        apiBaseUrl={`${appUrl || "https://your-domain"}/api/v2/inventory`}
-      />
+        <InventoryApiCard
+          configured={inventoryKey.configured}
+          hint={inventoryKey.hint}
+          apiBaseUrl={`${appUrl || "https://your-domain"}/api/v2/inventory`}
+        />
       </div>
 
       <SectionCard
@@ -54,62 +95,74 @@ export default async function IntegrationsPage() {
         description="Send booking and check-in events to another system as they happen."
         flush
       >
-        {webhooks.length === 0 ? (
-          <EmptyState title="No endpoints yet" hint="Add one below to start receiving events." />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>URL</TableHead>
-                <TableHead>Events</TableHead>
-                <TableHead>Enabled</TableHead>
-                <TableHead>Last delivery</TableHead>
-                <TableHead>
-                  <span className="sr-only">Actions</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {webhooks.map((hook) => (
-                <TableRow key={hook.id}>
-                  <TableCell className="min-w-56 whitespace-normal">
-                    <code className="font-mono text-xs break-all">{hook.url}</code>
-                    {hook.description ? <div className="text-muted-foreground text-xs">{hook.description}</div> : null}
-                  </TableCell>
-                  <TableCell className="whitespace-normal">
-                    <div className="flex flex-wrap gap-1">
-                      {hook.events.map((event) => (
-                        <Badge key={event} variant="info" className="font-mono">
-                          {event}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={hook.enabled ? "success" : "neutral"}>{hook.enabled ? "yes" : "no"}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {hook.lastDeliveredAt ? (
-                      <div className="grid gap-1">
-                        {formatDateTime(hook.lastDeliveredAt)}
-                        {hook.lastError ? (
-                          <Badge variant="danger">{hook.lastError}</Badge>
-                        ) : (
-                          <Badge variant="success">HTTP {hook.lastStatus}</Badge>
-                        )}
-                      </div>
+        <DataTable
+          rows={webhooks}
+          rowKey={(hook) => hook.id}
+          mobileCards
+          caption="Webhook endpoints"
+          density="comfortable"
+          empty={
+            <EmptyState icon={<Webhook />} title="No endpoints yet" hint="Add one below to start receiving events." />
+          }
+          columns={[
+            {
+              key: "url",
+              header: "URL",
+              wrap: true,
+              mobile: "title",
+              className: "min-w-56",
+              cell: (hook) => (
+                <>
+                  <code className="font-mono text-xs break-all">{hook.url}</code>
+                  {hook.description ? <div className="text-muted-foreground text-xs">{hook.description}</div> : null}
+                </>
+              ),
+            },
+            {
+              key: "events",
+              header: "Events",
+              wrap: true,
+              cell: (hook) => (
+                <div className="flex flex-wrap justify-end gap-1 md:justify-start">
+                  {hook.events.map((event) => (
+                    <Badge key={event} variant="info" className="font-mono">
+                      {event}
+                    </Badge>
+                  ))}
+                </div>
+              ),
+            },
+            {
+              key: "enabled",
+              header: "Enabled",
+              cell: (hook) => <Badge variant={hook.enabled ? "success" : "neutral"}>{hook.enabled ? "yes" : "no"}</Badge>,
+            },
+            {
+              key: "last",
+              header: "Last delivery",
+              className: "text-muted-foreground",
+              cell: (hook) =>
+                hook.lastDeliveredAt ? (
+                  <div className="grid justify-items-end gap-1 md:justify-items-start">
+                    {formatDateTime(hook.lastDeliveredAt)}
+                    {hook.lastError ? (
+                      <Badge variant="danger">{hook.lastError}</Badge>
                     ) : (
-                      "never"
+                      <Badge variant="success">HTTP {hook.lastStatus}</Badge>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <WebhookRowActions webhookId={hook.id} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+                  </div>
+                ) : (
+                  "never"
+                ),
+            },
+            {
+              key: "actions",
+              header: <span className="sr-only">Actions</span>,
+              mobile: "footer",
+              cell: (hook) => <WebhookRowActions webhookId={hook.id} />,
+            },
+          ]}
+        />
       </SectionCard>
 
       <WebhookForm eventTypes={[...webhookEventTypes]} />

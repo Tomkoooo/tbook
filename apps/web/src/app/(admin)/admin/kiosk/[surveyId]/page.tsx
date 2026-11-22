@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
 import { ActionError } from "@tbook/actions";
-import { feedback } from "@tbook/modules";
+import { FEEDBACK, feedback } from "@tbook/modules";
 import { SurveyForm } from "@/components/feedback/survey-form";
 import { PageTitle } from "@/components/page-title";
 import { requireOrgPermission } from "@/lib/admin-auth";
 import { requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
 export default async function StaffKioskPage({ params }: { params: Promise<{ surveyId: string }> }) {
   const { surveyId } = await params;
   const { organizationId } = await requireAdminPage("feedback:kiosk");
+  const off = await requireModule(organizationId, FEEDBACK, "Kiosk");
+  if (off) return off;
   const kiosk = await feedback.getKioskForOrg(organizationId, surveyId);
   if (!kiosk) notFound();
 

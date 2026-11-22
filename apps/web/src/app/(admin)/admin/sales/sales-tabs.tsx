@@ -16,7 +16,7 @@ export function SalesTabs({ active }: { active: "tickets" | "merch" }) {
           href={href}
           aria-current={active === key ? "page" : undefined}
           className={cn(
-            "flex h-10 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors",
+            "flex h-11 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors",
             active === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
           )}
         >

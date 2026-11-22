@@ -1,11 +1,10 @@
 import Link from "next/link";
-import { DoorOpen } from "lucide-react";
+import { CalendarX, ChevronRight, DoorOpen } from "lucide-react";
 import { listBookingFilterOptions } from "@tbook/services";
-import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
+import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { PageTitle } from "@/components/page-title";
-import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
 
 /**
@@ -23,36 +22,41 @@ export default async function CheckInIndexPage() {
     <>
       <PageTitle title="Check-in" description="Pick the event you're working the door for." />
 
-      <SectionCard flush>
-        {events.length === 0 ? (
-          <EmptyState title="No events yet" hint="Create an event first — entries are issued per event." />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Event</TableHead>
-                <TableHead>
-                  <span className="sr-only">Open</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {events.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell className="font-medium whitespace-normal">{event.name}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href={`/admin/check-in/${event.id}`}>
-                        <DoorOpen /> Open door
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </SectionCard>
+      {events.length === 0 ? (
+        <EmptyState
+          variant="hero"
+          icon={<CalendarX />}
+          title="No events yet"
+          hint="Create an event first — entries are issued per event."
+        />
+      ) : (
+        <>
+          <KpiGrid cols={3}>
+            <KpiTile label="Events" value={events.length} hint="available at the door" icon={<DoorOpen />} tone="info" />
+          </KpiGrid>
+          <ul className="grid gap-3 sm:grid-cols-2 md:gap-4 xl:grid-cols-3">
+            {events.map((event) => (
+              <li key={event.id}>
+                <Link
+                  href={`/admin/check-in/${event.id}`}
+                  className="focus-visible:ring-ring/50 group block rounded-xl outline-none focus-visible:ring-[3px]"
+                >
+                  <Card className="group-hover:border-ring/60 group-hover:bg-muted/40 flex-row items-center gap-3 p-4 shadow-xs transition-colors">
+                    <span className="bg-info-soft text-info-soft-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+                      <DoorOpen className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{event.name}</span>
+                      <span className="text-muted-foreground block text-xs">Open door</span>
+                    </span>
+                    <ChevronRight className="text-muted-foreground size-5 shrink-0" />
+                  </Card>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   );
 }

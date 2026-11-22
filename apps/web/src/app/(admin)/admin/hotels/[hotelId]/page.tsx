@@ -1,24 +1,30 @@
 import { notFound } from "next/navigation";
 import { ActionError } from "@tbook/actions";
+import { HOTELS } from "@tbook/modules";
 import { getHotelForOrg, getOrganizationSettings, listGroupsForOrg } from "@tbook/services";
 import { normalizeHotelPricing } from "@tbook/domain";
 import { PageTitle } from "@/components/page-title";
 import { requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { HotelForm, type HotelFormValues } from "./hotel-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function HotelPage({ params }: { params: Promise<{ hotelId: string }> }) {
+export default async function HotelPage({ params, searchParams }: { params: Promise<{ hotelId: string }>; searchParams: Promise<{ groupId?: string }> }) {
   const { hotelId } = await params;
+  const { groupId: requestedGroup } = await searchParams;
   const isNew = hotelId === "new";
   const { organizationId, permissions } = await requireAdminPage(isNew ? "hotel:write" : "hotel:read");
+
+  const off = await requireModule(organizationId, HOTELS, "Hotels");
+  if (off) return off;
 
   const groups = (await listGroupsForOrg(organizationId)).map((group) => ({ id: String(group._id), name: group.name }));
 
   if (isNew) {
     const { currency: orgCurrency } = await getOrganizationSettings(organizationId);
     const initial: HotelFormValues = {
-      groupId: groups[0]?.id ?? "",
+      groupId: groups.find((group) => group.id === requestedGroup)?.id ?? groups[0]?.id ?? "",
       name: "",
       description: "",
       address: "",
@@ -36,7 +42,7 @@ export default async function HotelPage({ params }: { params: Promise<{ hotelId:
     };
     return (
       <>
-        <PageTitle title="New hotel" />
+        <PageTitle title="New hotel" back={{ href: "/admin/hotels", label: "Hotels" }} />
         <HotelForm hotelId={null} initial={initial} groups={groups} />
       </>
     );
@@ -49,7 +55,7 @@ export default async function HotelPage({ params }: { params: Promise<{ hotelId:
   if (!hotel) notFound();
 
   if (!permissions.has("hotel:write")) {
-    return <PageTitle title={hotel.name} description="You have read-only access to this hotel." />;
+    return <PageTitle title={hotel.name} description="You have read-only access to this hotel." back={{ href: "/admin/hotels", label: "Hotels" }} />;
   }
 
   // Legacy flat pricing is migrated to room types/packages on read, so the
@@ -58,7 +64,7 @@ export default async function HotelPage({ params }: { params: Promise<{ hotelId:
 
   return (
     <>
-      <PageTitle title={hotel.name} />
+      <PageTitle title={hotel.name} back={{ href: "/admin/hotels", label: "Hotels" }} />
       <HotelForm
         hotelId={hotelId}
         groups={groups}

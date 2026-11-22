@@ -1,5 +1,6 @@
 import { getOrganizationSettings, listMerchSales, listProducts } from "@tbook/services";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataTable } from "@/components/data-table";
+import { Notice } from "@/components/notice";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { formatDateTime, formatMoney, requireAdminPage } from "@/lib/admin-page";
@@ -12,7 +13,12 @@ export const dynamic = "force-dynamic";
 export default async function MerchSalesPage() {
   const { organizationId, permissions } = await requireAdminPage();
   if (!permissions.has("sale:create") && !permissions.has("booking:manage")) {
-    return <PageTitle title="Point of sale" description="You don't have permission to sell." />;
+    return (
+      <>
+        <PageTitle title="Point of sale" description="You don't have permission to sell." />
+        <Notice tone="warning">Ask an organization admin for the sale:create permission.</Notice>
+      </>
+    );
   }
   const [products, recent, settings] = await Promise.all([
     listProducts(organizationId, { status: "active", channel: "pos" }),
@@ -28,38 +34,42 @@ export default async function MerchSalesPage() {
 
       {recent.length > 0 ? (
         <SectionCard title="Recent merch sales" flush>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead>Paid</TableHead>
-                <TableHead>Receipt</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recent.map((sale) => (
-                <TableRow key={sale.id}>
-                  <TableCell className="text-muted-foreground">{formatDateTime(sale.createdAt)}</TableCell>
-                  <TableCell className="max-w-80 truncate">
-                    {sale.lines.map((l) => `${l.quantity}× ${l.name}${l.variantLabel ? ` (${l.variantLabel})` : ""}`).join(", ")}
-                  </TableCell>
-                  <TableCell className="text-right">{formatMoney(sale.totalGross, sale.currency)}</TableCell>
-                  <TableCell className="text-muted-foreground">{sale.paymentMethod === "card" ? `card${sale.paymentReference ? ` · ${sale.paymentReference}` : ""}` : "cash"}</TableCell>
-                  <TableCell>
-                    {sale.receipt.status === "issued" && sale.receipt.hasPdf ? (
-                      <a className="text-primary text-sm hover:underline" href={`/admin/sales/merch/${sale.id}/receipt`} target="_blank" rel="noopener">
-                        {sale.receipt.number} · print
-                      </a>
-                    ) : (
-                      <RetryReceiptButton saleId={sale.id} error={sale.receipt.error} />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            rows={recent}
+            rowKey={(sale) => sale.id}
+            mobileCards
+            density="comfortable"
+            caption="Recent merch sales"
+            columns={[
+              { key: "when", header: "When", className: "text-muted-foreground", cell: (sale) => formatDateTime(sale.createdAt) },
+              {
+                key: "items",
+                header: "Items",
+                className: "max-w-80 truncate",
+                mobile: "title",
+                cell: (sale) => sale.lines.map((l) => `${l.quantity}× ${l.name}${l.variantLabel ? ` (${l.variantLabel})` : ""}`).join(", "),
+              },
+              { key: "total", header: "Total", align: "right", cell: (sale) => formatMoney(sale.totalGross, sale.currency) },
+              {
+                key: "paid",
+                header: "Paid",
+                className: "text-muted-foreground",
+                cell: (sale) => (sale.paymentMethod === "card" ? `card${sale.paymentReference ? ` · ${sale.paymentReference}` : ""}` : "cash"),
+              },
+              {
+                key: "receipt",
+                header: "Receipt",
+                cell: (sale) =>
+                  sale.receipt.status === "issued" && sale.receipt.hasPdf ? (
+                    <a className="text-primary text-sm hover:underline" href={`/admin/sales/merch/${sale.id}/receipt`} target="_blank" rel="noopener">
+                      {sale.receipt.number} · print
+                    </a>
+                  ) : (
+                    <RetryReceiptButton saleId={sale.id} error={sale.receipt.error} />
+                  ),
+              },
+            ]}
+          />
         </SectionCard>
       ) : null}
     </>

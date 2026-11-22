@@ -47,6 +47,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       ? [...TBOOK_OWNER_PERMISSIONS]
       : [...((await resolveMembershipPermissions(activeOrgId, user.id))?.permissions ?? [])];
 
+  const orgModules = Object.entries((activeOrg?.modules ?? {}) as Record<string, { enabled?: boolean }>)
+    .filter(([, state]) => state?.enabled)
+    .map(([key]) => key);
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -55,12 +59,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           userEmail={user.email}
           isSystemAdmin={user.isSystemAdmin}
           permissions={permissions}
-          modules={Object.entries((activeOrg?.modules ?? {}) as Record<string, { enabled?: boolean }>)
-            .filter(([, state]) => state?.enabled)
-            .map(([key]) => key)}
+          modules={orgModules}
         />
         <SidebarInset>
-          <AdminHeader />
+          <AdminHeader permissions={permissions} modules={orgModules} isSystemAdmin={user.isSystemAdmin} />
           <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 pb-16 md:p-6">{children}</main>
         </SidebarInset>
       </SidebarProvider>

@@ -64,6 +64,7 @@ export default async function PreviewPage({ searchParams }: { searchParams: Prom
     <>
       <PageTitle
         title="Preview"
+        back={{ href: `/admin/events/${eventId}`, label: event.name }}
         description="Próbáld ki az esemény valódi beállításaival, mit lát a vendég, a buszkapitány, a beléptető és a kioszk. Itt semmi nem mentődik."
         actions={events.length > 1 ? <EventPicker basePath={`/admin/preview?view=${view}`} events={events.map((e) => ({ id: String(e._id), name: e.name }))} value={eventId} /> : null}
       />

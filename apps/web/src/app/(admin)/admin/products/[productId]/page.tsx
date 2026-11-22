@@ -34,7 +34,7 @@ export default async function ProductPage({ params }: { params: Promise<{ produc
     const { currency } = await getOrganizationSettings(organizationId);
     return (
       <>
-        <PageTitle back={{ href: "/admin/products", label: "Products" }} title="New product" />
+        <PageTitle breadcrumbs={[{ label: "Products", href: "/admin/products" }]} title="New product" />
         <ProductForm product={null} canEdit currency={currency} />
       </>
     );
@@ -52,7 +52,7 @@ export default async function ProductPage({ params }: { params: Promise<{ produc
   return (
     <>
       <PageTitle
-        back={{ href: "/admin/products", label: "Products" }}
+        breadcrumbs={[{ label: "Products", href: "/admin/products" }]}
         title={product.name}
         description={`${product.totalAvailable} available across ${product.variants.length} variant${product.variants.length === 1 ? "" : "s"}`}
       />

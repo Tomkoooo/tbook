@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth-shell";
 import { ConfirmButtons } from "../confirm-buttons";
 import { SAME_DEVICE_COOKIE } from "../same-device-cookie";
 
@@ -35,26 +35,23 @@ export default async function SwitchDevicePage({ searchParams }: { searchParams:
   if (sameDeviceToken === token) redirect(destination);
 
   return (
-    <main className="bg-background flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Where do you want to sign in?</CardTitle>
-          <CardDescription>This link was requested on: {request.requesterLabel}. You&apos;re opening it from somewhere else.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <Button asChild>
-            <Link href={destination}>Sign in here</Link>
-          </Button>
-          <div className="text-muted-foreground text-center text-xs">or</div>
-          <ConfirmButtons
-            token={token}
-            approveLabel="Sign in there instead"
-            declineLabel="Cancel that request"
-            approvedMessage={`Done — continue on ${request.requesterLabel}.`}
-            declinedMessage="Cancelled. You can still sign in here."
-          />
-        </CardContent>
-      </Card>
-    </main>
+    <AuthShell
+      title="Where do you want to sign in?"
+      description={`This link was requested on: ${request.requesterLabel}. You're opening it from somewhere else.`}
+    >
+      <div className="grid gap-3">
+        <Button asChild>
+          <Link href={destination}>Sign in here</Link>
+        </Button>
+        <div className="text-muted-foreground text-center text-xs">or</div>
+        <ConfirmButtons
+          token={token}
+          approveLabel="Sign in there instead"
+          declineLabel="Cancel that request"
+          approvedMessage={`Done — continue on ${request.requesterLabel}.`}
+          declinedMessage="Cancelled. You can still sign in here."
+        />
+      </div>
+    </AuthShell>
   );
 }

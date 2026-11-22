@@ -6,6 +6,7 @@
 **Domain:** modern B2B operational SaaS dashboard (admin console for multi-tenant event booking)
 **Stack:** Next.js 15 (App Router, RSC) · Tailwind CSS v4 (CSS-first `@theme`) · shadcn/ui (`new-york`, Radix, Lucide)
 **Generated:** 2026-10-31 with the `ui-ux-pro-max` engine (v2.15), then mapped onto this codebase. See [Sources](#sources).
+**Revised:** 2026-11 to follow the **tCrm template patterns** (`tCrm-templete/docs/06-design-tokenek.md`, `07-datatable.md`, `08-ui-komponensek.md`): status tone set with solid / soft / border variants, chart palette, `KpiTile` / `Panel` / `Container`, the page header pattern, empty-state variants, compact data tables, mobile rules, print rules. The template describes a different (Hungarian ERP) app, so only its patterns are used. The console keeps English labels and tBook's own rules in `AGENTS.md`.
 
 ---
 
@@ -73,6 +74,29 @@ Neutrals are the slate ramp, chosen to match the engine palette. Status colours 
 
 `--destructive` maps to `--tbook-danger` (`#DC2626`, the engine's `--critical-color`).
 
+### 1.2a Status tones (tCrm pattern)
+
+Six tones carry meaning, not brand: `success`, `warning`, `danger`, `info`, `note`, `neutral`. Each has four brand tokens in `globals.css` (`--tbook-{tone}-bg`, `-text`, `-border`, `-on`, plus the `--tbook-danger` solid used by `--destructive`) and these Tailwind utilities:
+
+| Utility | Use |
+|---|---|
+| `bg-{tone}` + `text-{tone}-foreground` | Solid fill: dot, counter, bar |
+| `text-{tone}` | Emphasised text or icon on the page background |
+| `bg-{tone}-soft` + `text-{tone}-soft-foreground` | Tinted surface: badge, notice, highlighted row, KPI icon chip |
+| `border-{tone}-border` | Frame of a tinted surface |
+| `bg-{tone}-muted` | Older name for `-soft`; still works |
+
+| Tone | Scale | Meaning |
+|---|---|---|
+| `success` | green | done, valid, healthy |
+| `warning` | amber | pending, needs attention |
+| `danger` | red | failed, cancelled, error |
+| `info` | sky | new, informational |
+| `note` | violet | log, remark, system entry (tags) |
+| `neutral` | slate | expired, off, no state |
+
+`Badge` has the matching variants (`success`, `warning`, `danger`, `info`, `note`, `neutral`, plus `solid-*` for counters), and so do `Alert` / `Notice`. **A status never picks a colour in a page.** It goes through `lib/status-tones.ts`: `*_STATUS_TONES` maps, `toneFor()`, and `TONE_CLASSES` for non-badge surfaces.
+
 ### 1.3 Dark mode
 
 Engine anti-pattern: **"Dark mode by default."** The current behaviour already fits this rule: dark mode follows `prefers-color-scheme`, and `[data-theme]` lets the user override it. Keep it. The values below are derived from the same slate/sky ramps and are not engine output:
@@ -86,7 +110,18 @@ Engine anti-pattern: **"Dark mode by default."** The current behaviour already f
 
 ### 1.4 Data / chart colours
 
-Data-Dense style: neutral chrome, with colour reserved for data (blue, green, red). For series, use blue `#0369A1`, teal `#0D9488`, amber `#D97706`, violet `#7C3AED`, slate `#64748B`. **Do not** reuse the status red or green as series colours, because they mean alerts. For anything with charts, run the `dataviz` skill.
+Data-Dense style: neutral chrome, with colour reserved for data (blue, green, red). For series, use `--chart-1..5` (`var(--chart-N)`, in fixed order): blue `#0369A1`, teal `#0D9488`, amber `#D97706`, violet `#7C3AED`, slate `#64748B`, with lighter dark-mode values. One y-axis per chart. **Do not** reuse the status red or green as series colours, because they mean alerts. For anything with charts, run the `dataviz` skill.
+
+### 1.5 Other tokens
+
+| Token | Value | Use |
+|---|---|---|
+| `--radius` | 0.5rem; `rounded-sm/md/lg/xl/2xl` derive from it (-4, -2, 0, +4, +8px) | Cards use `rounded-xl`, controls `rounded-md` |
+| `--row-h-compact` / `--row-h-comfortable` / `--row-h-touch` | 2.25 / 2.75 / 3.5rem | Table row heights (`DataTable` `density`) |
+| `--header-h` | 3.5rem | Console header |
+| `num` utility | `tabular-nums` | Figures that line up in columns |
+
+Theme: light and dark follow `prefers-color-scheme`; `[data-theme="light|dark"]` on `<html>` overrides it. `components/theme-toggle.tsx` (`ThemeToggle`) sets the attribute and remembers it in `localStorage`; `ThemeInitScript` avoids a flash on first paint.
 
 ---
 
@@ -148,11 +183,11 @@ SidebarProvider                        ← at layout level (shadcn rule, severit
 ├── AppSidebar (collapsible="icon")    ← org switcher · nav groups · user menu
 └── SidebarInset
     ├── AdminHeader  h-14 sticky       ← SidebarTrigger · Breadcrumb · ⌘K Command · actions
-    └── main  p-4 md:p-6  max-w-[1440px]
-        ├── PageTitle + primary action (right-aligned)
-        ├── KPI row (4 cards)
-        ├── Filter bar (sticky under header for long lists)
-        └── Table / detail content
+    └── main  p-4 md:p-6  max-w-[1440px]  flex-col gap-6
+        ├── PageTitle (back link · title · status · description · actions)
+        ├── KpiGrid of KpiTile
+        ├── FilterBar (GET form; secondary filters under "More filters")
+        └── Panel / SectionCard holding a DataTable, or detail content
 ```
 
 ### 3.2 Page archetypes
@@ -165,9 +200,31 @@ SidebarProvider                        ← at layout level (shadcn rule, severit
 | **Live ops** (POS, check-in, capacity) | Real-Time Monitoring | Status dot with a 2s pulse (`--live-indicator: #22C55E`), connection/refresh indicator, critical alerts first, toast duration 5s, offline fallback |
 | **Storefront / marketing** | Hero + Features + CTA | CTA above the fold. These are the only pages where the engine's landing pattern applies. |
 
+### 3.2a Page rhythm, header, empty states (tCrm pattern)
+
+- **Rhythm.** Page children are stacked with `gap-4` on phones and `gap-6` from `md` (the console `<main>` does this; `Container` gives the same inside a narrower column). Forms: `grid gap-4`, field `gap-1.5`.
+- **Page header.** `PageTitle`: optional back link (derived from `back` or `breadcrumbs`; the console header already prints the full trail, so the page shows only one step up), `h1` (22px / 600), `status` badges next to it, one-line `description`, `actions` right-aligned (full-width row on phones).
+
+  ```tsx
+  <PageTitle title="Bookings" description="…" actions={canWrite && <Button asChild>…</Button>} />
+  <KpiGrid cols={3}> <KpiTile label="Matching" value={n} icon={<CreditCard />} /> … </KpiGrid>
+  <FilterBar …/>
+  <SectionCard flush> <DataTable … /> <LinkPagination … /> </SectionCard>
+  ```
+- **Empty states.** `EmptyState variant="hero"` (dashed frame, whole page empty), `"panel"` (muted box, one section) or the default `"inline"` (inside a table card). Always say what is empty and what to do; add an `action` when the user can fix it.
+- **Notices.** Page-level messages use `Notice` (tone + optional title and action), never a bare `<p>` in colour.
+
+### 3.2b Compact data tables (tCrm DataTable, "lite")
+
+The template's engine (server/client modes, column picker, memory, export) is **not** built. tBook pages keep their state in the URL and use `DataTable`: shadcn `Table`, 36px rows by default, sticky header with `maxHeight`, sortable headers as links (`sort={{ state, hrefFor }}`, helpers in `lib/table-sort.ts`), an `empty` slot, a horizontal scroll wrapper, and `mobileCards` to turn rows into cards below `md`. Search, filters, paging and sorting live in the query string so every view is linkable and the back button works. A KPI tile that links to a list uses the same query params (`href="/admin/bookings?status=pending"`).
+
+### 3.2c Print and screen export
+
+`globals.css` has an `@media print` block: sidebar, header and buttons hidden, scroll containers opened, cards and rows kept whole, table headers repeated, always light colours. `data-print="hide"` drops an element; `data-export="skip"` is reserved. `KpiTile` already writes `data-export-label` / `data-export-value` so a future "export this screen" (the template's header export button, Excel + print) can read headings, `dl` pairs and tables without per-page code. Use semantic HTML (`h2` section titles, `dl` pairs, real tables) to stay export-ready.
+
 ### 3.3 Breakpoints
 
-Verify layouts at **375 / 768 / 1024 / 1440px**. Below `md`, the sidebar becomes a Sheet (shadcn does this automatically), and tables either scroll horizontally or collapse to card rows. Pages must never scroll horizontally.
+Verify layouts at **375 / 768 / 1024 / 1440px**. Below `md`, the sidebar becomes a Sheet (shadcn does this automatically), and tables either scroll horizontally or collapse to card rows (`DataTable mobileCards`). Pages must never scroll horizontally. Mobile rules: KPI grid is 2 columns, `PageTitle` actions wrap under the title, `FilterBar` stacks to one column and hides secondary fields under "More filters", touch targets are at least 36px (use `density="comfortable"` or `"touch"` for door and counter screens), inputs are 16px.
 
 ---
 
@@ -181,7 +238,7 @@ Verify layouts at **375 / 768 / 1024 / 1440px**. Below `md`, the sidebar becomes
 | Feedback | Inline `<Notice>` (shadcn Alert) inside the form that triggered it. Add `sonner` `<Toaster />` to the layout only once there is non-form feedback to show. | Engine rule: Toaster in layout, never per page |
 | Async content | `Skeleton` with fixed height | Avoid layout shift (severity High) |
 | Command palette | `Command` (cmdk), opened with ⌘K | — |
-| Status | `Badge` variants: success, warning, danger, info, neutral → `--tbook-*-bg/text` | — |
+| Status | `Badge` variants: success, warning, danger, info, note, neutral → `--tbook-*` tone tokens (see 1.2a) | — |
 
 **Component specs (adjusted from the engine):**
 
@@ -197,19 +254,27 @@ Verify layouts at **375 / 768 / 1024 / 1440px**. Below `md`, the sidebar becomes
 
 ### App building blocks (`apps/web/src/components/`)
 
-Build pages from these plus `components/ui/*`. Don't use raw HTML controls or one-off CSS classes.
+Build pages from these plus `components/ui/*`. Don't use raw HTML controls or one-off CSS classes. Each file documents its props in the top comment.
 
 | Component | Use |
 |---|---|
-| `PageTitle` | Page heading, description, actions, optional `back` link |
-| `SectionCard` | Titled panel; `flush` for edge-to-edge tables |
-| `Stat`, `StatGrid` | KPI cards |
-| `EmptyState` | Empty tables/panels |
+| `PageTitle` | Page header: `title`, `description`, `status`, `actions`, `back`, `breadcrumbs` |
+| `Container` | Page wrapper rhythm and width: `width` "wide" / "default" / "narrow" |
+| `KpiTile`, `KpiGrid` | Headline number: `label`, `value`, `hint`, `tone`, `icon`, `href`. `KpiGrid cols` 2-6 |
+| `Stat`, `StatGrid` | Original KPI API, now thin wrappers over `KpiTile` / `KpiGrid` |
+| `Panel` | Dashboard card with optional "All" link (`href`, `hrefLabel`), `actions`, `flush`, `footer` |
+| `SectionCard` | Titled card: `title`, `description`, `icon`, `actions`, `flush`, `footer`, `id` |
+| `DataTable` | Compact table: `columns`, `rows`, `rowKey`, `sort`, `density`, `maxHeight`, `mobileCards`, `empty`, `rowClassName` |
+| `FilterBar` | GET-form filter strip with "More filters", Apply / Clear |
+| `EmptyState` | `title`, `hint`, `icon`, `action`, `variant` inline / panel / hero |
+| `Notice` | Inline message: `tone` info / success / warning / danger / note, `title`, `action` |
+| `AuthShell` | Frame for the sign-in screens |
+| `ThemeToggle`, `ThemeInitScript` | Light / Dark / System switch for the header; no-flash init script for the root layout |
 | `LinkPagination` | URL-driven paging |
 | `DescriptionList` | Label/value detail rows |
-| `Notice` | Status message (info/success/warning/danger) |
 | `FormField`, `NativeSelect`, `CheckboxField` | Form rows that submit through FormData |
-| `lib/status-tones.ts` | The only place a status picks its badge colour |
+| `lib/status-tones.ts` | The only place a status picks its colour |
+| `lib/table-sort.ts` | `parseSort`, `nextSortDir`, `hrefWithParams`, `sortRows` for URL-driven sorting |
 
 ## 5. Anti-patterns (do not)
 
@@ -224,6 +289,8 @@ Build pages from these plus `components/ui/*`. Don't use raw HTML controls or on
 - Focus states that are hidden. Keep the shadcn `focus-visible:ring`
 - Fonts loaded through a `<link>` or `@import` to Google
 - Status colours reused as chart series colours
+- A status or tone picking its own colour in a page (go through `lib/status-tones.ts`)
+- A hand-built `<Table>` list when `DataTable` fits; a hand-built KPI card instead of `KpiTile`
 
 ## 6. Pre-delivery checklist
 
@@ -233,7 +300,9 @@ Build pages from these plus `components/ui/*`. Don't use raw HTML controls or on
 - [ ] Contrast of at least 4.5:1 in both light and dark
 - [ ] Visible keyboard focus. `prefers-reduced-motion` turns off the pulse and transitions
 - [ ] Skeletons for every async region. No content popping in
-- [ ] Tables: sortable, sticky header, empty state, horizontal scroll on mobile
+- [ ] Tables: `DataTable` (sortable headers where the page has URL state, empty state, sideways scroll or `mobileCards` on phones)
+- [ ] Page opens with `PageTitle`, then a KPI row if the page has headline numbers, then filters, then the table
+- [ ] Prints cleanly (no chrome, light colours)
 - [ ] Checked at 375 / 768 / 1024 / 1440px. No horizontal page scroll
 - [ ] Numbers use `tabular-nums`. Codes and IDs use `font-mono`
 
@@ -253,5 +322,7 @@ python3 $S/search.py "B2B SaaS dashboard professional"           -d color      -
 python3 $S/search.py "dashboard layout sidebar data table"       --stack shadcn -n 5
 python3 $S/search.py "dashboard layout font performance"         --stack nextjs -n 4
 ```
+
+The 2026-11 revision follows the tCrm template (`~/programing/tCrm-templete`, read-only reference): `docs/06-design-tokenek.md` (tones, chart palette, rhythm, print), `docs/07-datatable.md` (table behaviour, URL state), `docs/08-ui-komponensek.md` (`KpiTile`, `Panel`, `Container`, screen export).
 
 Page overrides go in `design-system/pages/<page>.md`, generated with `--persist --page <name>` or written by hand.

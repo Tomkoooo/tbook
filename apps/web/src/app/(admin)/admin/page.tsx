@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { getOrganizationStats, listBookingsForOrg } from "@tbook/services";
-import { ArrowRight } from "lucide-react";
+import { CalendarDays, Clock, CreditCard, FolderTree, Plus, Ticket, Users, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { Notice } from "@/components/notice";
 import { PageTitle } from "@/components/page-title";
-import { SectionCard } from "@/components/section-card";
-import { Stat, StatGrid } from "@/components/stat";
+import { Panel } from "@/components/panel";
 import { BOOKING_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
 
@@ -50,9 +50,18 @@ export default async function AdminHomePage({
         description="Overview of this organization's events and bookings."
         actions={
           canReadBookings ? (
-            <Button asChild>
-              <Link href="/admin/bookings">All bookings</Link>
-            </Button>
+            <>
+              <Button variant="outline" asChild>
+                <Link href="/admin/bookings">All bookings</Link>
+              </Button>
+              {permissions.has("booking:manage") ? (
+                <Button asChild>
+                  <Link href="/admin/bookings/new">
+                    <Plus /> New registration
+                  </Link>
+                </Button>
+              ) : null}
+            </>
           ) : null
         }
       />
@@ -63,75 +72,117 @@ export default async function AdminHomePage({
         </Notice>
       ) : null}
 
-      <StatGrid>
-        <Stat label="Groups" value={stats.groupCount} />
-        <Stat label="Events" value={stats.eventCount} />
-        <Stat label="Members" value={stats.memberCount} />
-        {recent ? (
-          <>
-            <Stat label="Bookings" value={recent.total} hint={`${pendingCount} pending`} />
-            <Stat label="Guests sold" value={recent.paidGuests} hint="paid + confirmed" />
-            <Stat label="Revenue" value={formatRevenue(recent.revenueByCurrency)} hint="paid + confirmed" />
-          </>
-        ) : null}
-      </StatGrid>
-
-      {recent ? (
-        <SectionCard
-          title="Latest bookings"
-          flush
-          actions={
+      {recent && pendingCount > 0 ? (
+        <Notice
+          tone="warning"
+          title={`${pendingCount} pending booking${pendingCount === 1 ? "" : "s"}`}
+          action={
             <Button variant="outline" size="sm" asChild>
-              <Link href="/admin/bookings">
-                View all <ArrowRight />
-              </Link>
+              <Link href="/admin/bookings?status=pending">Review pending</Link>
             </Button>
           }
         >
-          {recent.bookings.length === 0 ? (
-            <EmptyState
-              title="No bookings yet"
-              hint="Bookings made through the storefront or the public API will appear here."
+          These are waiting for payment or confirmation.
+        </Notice>
+      ) : null}
+
+      <KpiGrid cols={recent ? 4 : 3}>
+        {recent ? (
+          <>
+            <KpiTile
+              label="Revenue"
+              value={formatRevenue(recent.revenueByCurrency)}
+              hint="paid + confirmed"
+              tone="success"
+              icon={<Wallet />}
+              href="/admin/bookings"
             />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Booked</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead className="text-right">Guests</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recent.bookings.map((booking) => (
-                  <TableRow key={String(booking._id)}>
-                    <TableCell className="text-muted-foreground">{formatDateTime(booking.createdAt)}</TableCell>
-                    <TableCell>
-                      <Link className="font-medium hover:underline" href={`/admin/bookings/${String(booking._id)}`}>
-                        {booking.customer?.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="whitespace-normal">{booking.eventName}</TableCell>
-                    <TableCell className="text-right">{booking.guests}</TableCell>
-                    <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell>
-                    <TableCell>
-                      <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </SectionCard>
+            <KpiTile
+              label="Bookings"
+              value={recent.total}
+              hint={`${pendingCount} pending`}
+              tone={pendingCount > 0 ? "warning" : "info"}
+              icon={<CreditCard />}
+              href="/admin/bookings"
+            />
+            <KpiTile label="Guests sold" value={recent.paidGuests} hint="paid + confirmed" tone="info" icon={<Ticket />} />
+          </>
+        ) : null}
+        <KpiTile
+          label="Events"
+          value={stats.eventCount}
+          icon={<CalendarDays />}
+          href={permissions.has("event:read") ? "/admin/events" : undefined}
+        />
+        <KpiTile
+          label="Groups"
+          value={stats.groupCount}
+          icon={<FolderTree />}
+          href={permissions.has("group:read") ? "/admin/groups" : undefined}
+        />
+        <KpiTile
+          label="Members"
+          value={stats.memberCount}
+          icon={<Users />}
+          href={permissions.has("member:read") ? "/admin/members" : undefined}
+        />
+      </KpiGrid>
+
+      {recent ? (
+        <Panel title="Latest bookings" description="The eight most recent, newest first." href="/admin/bookings" flush>
+          <DataTable
+            rows={recent.bookings}
+            rowKey={(booking) => String(booking._id)}
+            mobileCards
+            caption="Latest bookings"
+            empty={
+              <EmptyState
+                icon={<Clock />}
+                title="No bookings yet"
+                hint="Bookings made through the storefront or the public API will appear here."
+              />
+            }
+            columns={[
+              {
+                key: "customer",
+                header: "Customer",
+                mobile: "title",
+                cell: (booking) => (
+                  <Link className="font-medium hover:underline" href={`/admin/bookings/${String(booking._id)}`}>
+                    {booking.customer?.name}
+                  </Link>
+                ),
+              },
+              {
+                key: "booked",
+                header: "Booked",
+                className: "text-muted-foreground",
+                cell: (booking) => formatDateTime(booking.createdAt),
+              },
+              { key: "event", header: "Event", wrap: true, hideBelow: "md", cell: (booking) => booking.eventName },
+              { key: "guests", header: "Guests", align: "right", cell: (booking) => booking.guests },
+              {
+                key: "total",
+                header: "Total",
+                align: "right",
+                cell: (booking) => formatMoney(booking.totalHuf, booking.currency ?? "HUF"),
+              },
+              {
+                key: "status",
+                header: "Status",
+                cell: (booking) => (
+                  <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
+                ),
+              },
+            ]}
+          />
+        </Panel>
       ) : (
-        <SectionCard title="Bookings">
+        <Panel title="Bookings">
           <p className="text-muted-foreground text-sm">
             You don&apos;t have permission to read this organization&apos;s bookings.
           </p>
-        </SectionCard>
+        </Panel>
       )}
     </>
   );

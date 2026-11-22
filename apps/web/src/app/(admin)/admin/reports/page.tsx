@@ -52,6 +52,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     <>
       <PageTitle
         title="Reports"
+        back={{ href: `/admin/events/${eventId}`, label: event.name }}
         description={report.eventName}
         actions={
           <Button asChild variant="outline">

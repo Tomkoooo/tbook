@@ -3,7 +3,9 @@ import type { AttendeeFieldDef } from "@tbook/schemas";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DescriptionList } from "@/components/description-list";
+import { Banknote, DoorOpen, Receipt, Users } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
+import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, VOUCHER_STATUS_TONES, toneFor } from "@/lib/status-tones";
@@ -51,17 +53,42 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
   return (
     <>
       <PageTitle
-        back={{ href: "/admin/bookings", label: "Bookings" }}
+        breadcrumbs={[{ label: "Bookings", href: "/admin/bookings" }]}
         title={booking.customer?.name ?? "Booking"}
         description={`${booking.eventName} · booked ${formatDateTime(booking.createdAt)}`}
-        actions={
-          <div className="flex items-center gap-1">
+        status={
+          <>
             <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
             <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>invoice: {booking.invoiceStatus}</Badge>
             {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
-          </div>
+          </>
         }
       />
+
+      <KpiGrid cols={4}>
+        <KpiTile
+          label="Total"
+          value={formatMoney(booking.totalHuf, currency)}
+          hint={booking.paidAt ? `paid ${formatDateTime(booking.paidAt)}` : awaitingPayment ? "awaiting payment" : undefined}
+          tone={toneFor(BOOKING_STATUS_TONES, booking.status)}
+          icon={<Banknote />}
+        />
+        <KpiTile label="Guests" value={booking.guests} icon={<Users />} />
+        <KpiTile
+          label="Payment"
+          value={booking.offlinePayment ? (booking.paymentMethod ?? "transfer") : (booking.paymentMethod ?? "stripe")}
+          icon={<Receipt />}
+        />
+        {walkIn ? null : (
+          <KpiTile
+            label="Entries"
+            value={vouchers.length}
+            hint={`${vouchers.filter((voucher) => voucher.status === "checked_in").length} checked in`}
+            tone="info"
+            icon={<DoorOpen />}
+          />
+        )}
+      </KpiGrid>
 
       <BookingActions
         bookingId={bookingId}

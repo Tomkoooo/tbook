@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
-import { feedback } from "@tbook/modules";
+import { FEEDBACK, feedback } from "@tbook/modules";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { Stat } from "@/components/stat";
 import { requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { KioskLinkPanel, SurveyEditor } from "../survey-editor";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function SurveyPage({ params }: { params: Promise<{ surveyId: string }> }) {
   const { surveyId } = await params;
   const { organizationId } = await requireAdminPage("feedback:manage");
+  const off = await requireModule(organizationId, FEEDBACK, "Feedback");
+  if (off) return off;
   const { survey, total, bySource, questions } = await feedback.surveyResults(organizationId, surveyId);
   const eventId = String(survey.eventId);
   const ratings = questions.filter((q) => q.average != null);

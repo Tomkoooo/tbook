@@ -10,12 +10,15 @@ import { EventPicker } from "@/components/event-picker";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 
 export const dynamic = "force-dynamic";
 
 export default async function FeedbackListPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
   const { eventId: requested } = await searchParams;
   const { organizationId } = await requireAdminPage("feedback:manage");
+  const off = await requireModule(organizationId, FEEDBACK, "Feedback");
+  if (off) return off;
 
   const events = [];
   for (const event of await listEventsForOrg(organizationId)) {
@@ -39,6 +42,7 @@ export default async function FeedbackListPage({ searchParams }: { searchParams:
     <>
       <PageTitle
         title="Feedback"
+        back={{ href: `/admin/events/${eventId}`, label: event.name }}
         description="Surveys go to guests by email ({{feedbackUrl}} is each guest's personal link) or through the website API. A kiosk runs on a tablet at the venue."
         actions={
           <>

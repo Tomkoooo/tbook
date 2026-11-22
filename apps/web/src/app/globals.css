@@ -1,5 +1,6 @@
 /*
- * tBook theme — see design-system/MASTER.md.
+ * tBook theme — see design-system/MASTER.md (follows the tCrm template
+ * patterns: status tones, chart palette, print rules, row-height tokens).
  *
  * Two layers, one source of truth:
  *   1. --tbook-* brand tokens (light on :root, dark via prefers-color-scheme
@@ -7,7 +8,15 @@
  *   2. shadcn semantic tokens (--background, --primary, …) that point at the
  *      brand tokens, exposed to Tailwind through @theme inline.
  * Components use Tailwind semantic classes (bg-card, text-muted-foreground,
- * bg-success-muted …) and never raw hex.
+ * bg-success-soft …) and never raw hex.
+ *
+ * Status tones (success / warning / danger / info / note / neutral), per tone:
+ *   text-{tone} / bg-{tone} + text-{tone}-foreground   solid: dot, bar, count
+ *   bg-{tone}-soft + text-{tone}-soft-foreground         tinted surface: badge, notice
+ *   border-{tone}-border                                   frame of a tinted surface
+ * (bg-{tone}-muted / text-{tone} from the first token set keep working.)
+ * The dark block below appears twice (OS preference and [data-theme="dark"]);
+ * the two must stay identical.
  */
 
 @import "tailwindcss";
@@ -29,17 +38,46 @@
   --tbook-accent-hover: #075985;
   --tbook-accent-text: #ffffff;
 
+  /* Status tones: -bg = soft surface, -text = solid / text colour,
+   * -border = frame, -on = foreground to put on the solid colour. */
   --tbook-info-bg: #e0f2fe;
   --tbook-info-text: #075985;
+  --tbook-info-border: #bae6fd;
+  --tbook-info-on: #ffffff;
   --tbook-success-bg: #dcfce7;
   --tbook-success-text: #166534;
+  --tbook-success-border: #bbf7d0;
+  --tbook-success-on: #ffffff;
   --tbook-warning-bg: #fef3c7;
   --tbook-warning-text: #92400e;
+  --tbook-warning-border: #fde68a;
+  --tbook-warning-on: #ffffff;
   --tbook-danger-bg: #fee2e2;
   --tbook-danger-text: #991b1b;
+  --tbook-danger-border: #fecaca;
+  --tbook-danger-on: #ffffff;
   --tbook-danger: #dc2626;
+  --tbook-note-bg: #ede9fe;
+  --tbook-note-text: #5b21b6;
+  --tbook-note-border: #ddd6fe;
+  --tbook-note-on: #ffffff;
   --tbook-neutral-bg: #f1f5f9;
   --tbook-neutral-text: #475569;
+  --tbook-neutral-border: #e2e8f0;
+  --tbook-neutral-on: #ffffff;
+
+  /* Chart series, fixed order. Never reuse the status red/green for data. */
+  --tbook-chart-1: #0369a1;
+  --tbook-chart-2: #0d9488;
+  --tbook-chart-3: #d97706;
+  --tbook-chart-4: #7c3aed;
+  --tbook-chart-5: #64748b;
+
+  /* Rhythm: table row heights (compact desktop, comfortable, touch) and shell. */
+  --row-h-compact: 2.25rem;
+  --row-h-comfortable: 2.75rem;
+  --row-h-touch: 3.5rem;
+  --header-h: 3.5rem;
 }
 
 /* ---- Brand tokens: dark ------------------------------------------------
@@ -61,15 +99,35 @@
 
     --tbook-info-bg: #082f49;
     --tbook-info-text: #7dd3fc;
+    --tbook-info-border: #0c4a6e;
+    --tbook-info-on: #082f49;
     --tbook-success-bg: #052e16;
     --tbook-success-text: #86efac;
+    --tbook-success-border: #14532d;
+    --tbook-success-on: #052e16;
     --tbook-warning-bg: #422006;
     --tbook-warning-text: #fcd34d;
+    --tbook-warning-border: #713f12;
+    --tbook-warning-on: #422006;
     --tbook-danger-bg: #450a0a;
     --tbook-danger-text: #fca5a5;
+    --tbook-danger-border: #7f1d1d;
+    --tbook-danger-on: #450a0a;
     --tbook-danger: #ef4444;
+    --tbook-note-bg: #2e1065;
+    --tbook-note-text: #c4b5fd;
+    --tbook-note-border: #4c1d95;
+    --tbook-note-on: #2e1065;
     --tbook-neutral-bg: #1e293b;
     --tbook-neutral-text: #cbd5e1;
+    --tbook-neutral-border: #334155;
+    --tbook-neutral-on: #0f172a;
+
+    --tbook-chart-1: #38bdf8;
+    --tbook-chart-2: #2dd4bf;
+    --tbook-chart-3: #fbbf24;
+    --tbook-chart-4: #a78bfa;
+    --tbook-chart-5: #94a3b8;
   }
 }
 
@@ -88,15 +146,35 @@
 
   --tbook-info-bg: #082f49;
   --tbook-info-text: #7dd3fc;
+  --tbook-info-border: #0c4a6e;
+  --tbook-info-on: #082f49;
   --tbook-success-bg: #052e16;
   --tbook-success-text: #86efac;
+  --tbook-success-border: #14532d;
+  --tbook-success-on: #052e16;
   --tbook-warning-bg: #422006;
   --tbook-warning-text: #fcd34d;
+  --tbook-warning-border: #713f12;
+  --tbook-warning-on: #422006;
   --tbook-danger-bg: #450a0a;
   --tbook-danger-text: #fca5a5;
+  --tbook-danger-border: #7f1d1d;
+  --tbook-danger-on: #450a0a;
   --tbook-danger: #ef4444;
+  --tbook-note-bg: #2e1065;
+  --tbook-note-text: #c4b5fd;
+  --tbook-note-border: #4c1d95;
+  --tbook-note-on: #2e1065;
   --tbook-neutral-bg: #1e293b;
   --tbook-neutral-text: #cbd5e1;
+  --tbook-neutral-border: #334155;
+  --tbook-neutral-on: #0f172a;
+
+  --tbook-chart-1: #38bdf8;
+  --tbook-chart-2: #2dd4bf;
+  --tbook-chart-3: #fbbf24;
+  --tbook-chart-4: #a78bfa;
+  --tbook-chart-5: #94a3b8;
 }
 
 /* ---- shadcn semantic tokens, mapped onto the brand tokens ------------- */
@@ -120,6 +198,11 @@
   --input: var(--tbook-border-strong);
   --ring: var(--tbook-accent);
   --radius: 0.5rem;
+  --chart-1: var(--tbook-chart-1);
+  --chart-2: var(--tbook-chart-2);
+  --chart-3: var(--tbook-chart-3);
+  --chart-4: var(--tbook-chart-4);
+  --chart-5: var(--tbook-chart-5);
   --sidebar: var(--tbook-surface);
   --sidebar-foreground: var(--tbook-text-muted);
   --sidebar-primary: var(--tbook-accent);
@@ -154,23 +237,56 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Status tones: `text-success` on `bg-success-muted`, etc. Used by the
-   * Badge/Alert status variants and the check-in scanner. */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Status tones — see the header comment for which utility means what.
+   * `-muted` is the first-generation name for `-soft`; both stay. */
   --color-info: var(--tbook-info-text);
+  --color-info-foreground: var(--tbook-info-on);
+  --color-info-soft: var(--tbook-info-bg);
+  --color-info-soft-foreground: var(--tbook-info-text);
   --color-info-muted: var(--tbook-info-bg);
+  --color-info-border: var(--tbook-info-border);
   --color-success: var(--tbook-success-text);
+  --color-success-foreground: var(--tbook-success-on);
+  --color-success-soft: var(--tbook-success-bg);
+  --color-success-soft-foreground: var(--tbook-success-text);
   --color-success-muted: var(--tbook-success-bg);
+  --color-success-border: var(--tbook-success-border);
   --color-warning: var(--tbook-warning-text);
+  --color-warning-foreground: var(--tbook-warning-on);
+  --color-warning-soft: var(--tbook-warning-bg);
+  --color-warning-soft-foreground: var(--tbook-warning-text);
   --color-warning-muted: var(--tbook-warning-bg);
+  --color-warning-border: var(--tbook-warning-border);
   --color-danger: var(--tbook-danger-text);
+  --color-danger-foreground: var(--tbook-danger-on);
+  --color-danger-soft: var(--tbook-danger-bg);
+  --color-danger-soft-foreground: var(--tbook-danger-text);
   --color-danger-muted: var(--tbook-danger-bg);
+  --color-danger-border: var(--tbook-danger-border);
+  --color-note: var(--tbook-note-text);
+  --color-note-foreground: var(--tbook-note-on);
+  --color-note-soft: var(--tbook-note-bg);
+  --color-note-soft-foreground: var(--tbook-note-text);
+  --color-note-muted: var(--tbook-note-bg);
+  --color-note-border: var(--tbook-note-border);
   --color-neutral: var(--tbook-neutral-text);
+  --color-neutral-foreground: var(--tbook-neutral-on);
+  --color-neutral-soft: var(--tbook-neutral-bg);
+  --color-neutral-soft-foreground: var(--tbook-neutral-text);
   --color-neutral-muted: var(--tbook-neutral-bg);
+  --color-neutral-border: var(--tbook-neutral-border);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -180,6 +296,13 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Figures that must line up in columns (money, counts, times): the
+ * `num` helper from the tCrm template, an alias for tabular-nums. */
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 @layer base {
@@ -220,5 +343,100 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+/* ---- Print --------------------------------------------------------------
+ * The console prints as a plain document: chrome hidden, scroll containers
+ * opened, cards and rows kept whole, table headers repeated, light colours.
+ * `data-print="hide"` drops an element; `data-export="skip"` is reserved for
+ * a future screen export. */
+@media print {
+  /* Specificity beats both dark blocks, so a dark-mode user still prints light. */
+  html:root:not([data-theme="print"]) {
+    color-scheme: light;
+    --tbook-bg: #f8fafc;
+    --tbook-surface: #ffffff;
+    --tbook-surface-alt: #f1f5f9;
+    --tbook-border: #e2e8f0;
+    --tbook-border-strong: #cbd5e1;
+    --tbook-text: #020617;
+    --tbook-text-muted: #475569;
+    --tbook-text-faint: #64748b;
+    --tbook-accent: #0369a1;
+    --tbook-accent-hover: #075985;
+    --tbook-accent-text: #ffffff;
+    --tbook-info-bg: #e0f2fe;
+    --tbook-info-text: #075985;
+    --tbook-info-border: #bae6fd;
+    --tbook-info-on: #ffffff;
+    --tbook-success-bg: #dcfce7;
+    --tbook-success-text: #166534;
+    --tbook-success-border: #bbf7d0;
+    --tbook-success-on: #ffffff;
+    --tbook-warning-bg: #fef3c7;
+    --tbook-warning-text: #92400e;
+    --tbook-warning-border: #fde68a;
+    --tbook-warning-on: #ffffff;
+    --tbook-danger-bg: #fee2e2;
+    --tbook-danger-text: #991b1b;
+    --tbook-danger-border: #fecaca;
+    --tbook-danger-on: #ffffff;
+    --tbook-danger: #dc2626;
+    --tbook-note-bg: #ede9fe;
+    --tbook-note-text: #5b21b6;
+    --tbook-note-border: #ddd6fe;
+    --tbook-note-on: #ffffff;
+    --tbook-neutral-bg: #f1f5f9;
+    --tbook-neutral-text: #475569;
+    --tbook-neutral-border: #e2e8f0;
+    --tbook-neutral-on: #ffffff;
+    --tbook-chart-1: #0369a1;
+    --tbook-chart-2: #0d9488;
+    --tbook-chart-3: #d97706;
+    --tbook-chart-4: #7c3aed;
+    --tbook-chart-5: #64748b;
+  }
+
+  [data-slot="sidebar"],
+  [data-slot="sidebar-gap"],
+  [data-slot="sidebar-container"],
+  [data-slot="sidebar-inset"] > header,
+  [data-print="hide"],
+  [data-export="skip"],
+  nav[aria-label="Pagination"],
+  button {
+    display: none !important;
+  }
+
+  [data-slot="sidebar-wrapper"],
+  [data-slot="sidebar-inset"] {
+    display: block !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+
+  [data-slot="card"],
+  [data-slot="table-row"],
+  figure {
+    break-inside: avoid;
+  }
+
+  [data-slot="card"] {
+    box-shadow: none !important;
+  }
+
+  [data-slot="table-container"] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [data-slot="table-header"] {
+    display: table-header-group;
+  }
+
+  [data-slot="table-head"] {
+    position: static !important;
   }
 }

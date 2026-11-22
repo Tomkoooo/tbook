@@ -1,18 +1,21 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { TICKET_SALES } from "@tbook/modules";
 import { WALK_IN_CUSTOMER_EMAIL, bookingStatuses, invoiceStatuses } from "@tbook/schemas";
 import { listBookingFilterOptions, listBookingsForOrg, summarizeBookingGuests } from "@tbook/services";
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Plus } from "lucide-react";
+import { CalendarX, CreditCard, Download, Plus, Ticket, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataTable, type DataColumn } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { LinkPagination } from "@/components/link-pagination";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
-import { Stat } from "@/components/stat";
 import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, toneFor } from "@/lib/status-tones";
+import { firstParam, hrefWithParams, parseSort } from "@/lib/table-sort";
 import { formatDateTime, formatMoney, formatRevenue, requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { BookingFilters } from "./booking-filters";
 import { ColumnPicker } from "./column-picker";
 import { BOOKING_COLUMNS_COOKIE, FIELD_PREFIX, TOGGLEABLE_COLUMNS, parseColumns } from "./columns";
@@ -27,11 +30,7 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-function one(params: SearchParams, key: string): string | undefined {
-  const value = params[key];
-  const raw = Array.isArray(value) ? value[0] : value;
-  return raw?.trim() || undefined;
-}
+const one = firstParam;
 
 /** Narrows a query param to a known enum value, dropping anything unrecognized. */
 function enumList<T extends string>(raw: string | undefined, allowed: readonly T[]): T[] | undefined {
@@ -59,11 +58,13 @@ const SORTABLE = [
 
 export default async function BookingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const { organizationId, permissions } = await requireAdminPage("booking:read");
+  const off = await requireModule(organizationId, TICKET_SALES, "Ticket selling");
+  if (off) return off;
   const params = await searchParams;
 
-  const sortByRaw = one(params, "sortBy");
-  const sortBy = (SORTABLE.find((entry) => entry.key === sortByRaw)?.key ?? "createdAt") as (typeof SORTABLE)[number]["key"];
-  const sortDir = one(params, "sortDir") === "asc" ? "asc" : "desc";
+  const sorted = parseSort(params, SORTABLE.map((entry) => entry.key), { key: "createdAt", dir: "desc" });
+  const sortBy = sorted.key as (typeof SORTABLE)[number]["key"];
+  const sortDir = sorted.dir;
 
   const filter = {
     status: enumList(one(params, "status"), bookingStatuses),
@@ -94,25 +95,16 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
   // Columns: the saved choice, or by default everything plus the guests' identifying answer (e.g. employee ID).
   const identifierKeys = options.guestFields.filter((field) => field.identifier).map((field) => field.key);
   const saved = parseColumns((await cookies()).get(BOOKING_COLUMNS_COOKIE)?.value, options.guestFields.map((field) => field.key));
-  const columns = saved ?? [...TOGGLEABLE_COLUMNS.map((column) => column.key as string), ...identifierKeys.map((key) => FIELD_PREFIX + key)];
-  const show = (key: string) => columns.includes(key);
+  const visibleKeys = saved ?? [...TOGGLEABLE_COLUMNS.map((column) => column.key as string), ...identifierKeys.map((key) => FIELD_PREFIX + key)];
+  const show = (key: string) => visibleKeys.includes(key);
   const shownFields = options.guestFields.filter((field) => show(FIELD_PREFIX + field.key));
   const guestSummaries = await summarizeBookingGuests(result.bookings.map((booking) => String(booking._id)));
 
   /** Rebuilds the current URL with some params replaced — keeps filters when paging or sorting. */
-  function hrefWith(overrides: Record<string, string | undefined>): string {
-    const next = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      const single = Array.isArray(value) ? value[0] : value;
-      if (single) next.set(key, single);
-    }
-    for (const [key, value] of Object.entries(overrides)) {
-      if (value === undefined) next.delete(key);
-      else next.set(key, value);
-    }
-    const query = next.toString();
-    return query ? `/admin/bookings?${query}` : "/admin/bookings";
-  }
+  const hrefWith = (overrides: Record<string, string | undefined>) => hrefWithParams("/admin/bookings", params, overrides);
+
+  const FILTER_KEYS = ["search", "status", "invoiceStatus", "eventId", "groupId", "tag", "checkIn", "createdFrom", "createdTo"] as const;
+  const activeFilters = FILTER_KEYS.filter((key) => firstParam(params, key)).length;
 
   const exportQuery = new URLSearchParams();
   if (filter.status) exportQuery.set("status", filter.status.join(","));
@@ -124,6 +116,151 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
   if (filter.createdTo) exportQuery.set("createdTo", filter.createdTo.toISOString());
 
 
+  const sortLabel = new Map<string, string>(SORTABLE.map((entry) => [entry.key, entry.label]));
+  type Row = (typeof result.bookings)[number];
+
+  const columns: DataColumn<Row>[] = [
+    {
+      key: "createdAt",
+      header: sortLabel.get("createdAt"),
+      sortKey: "createdAt",
+      className: "text-muted-foreground",
+      cell: (booking) => formatDateTime(booking.createdAt),
+    },
+    {
+      key: "customerName",
+      header: sortLabel.get("customerName"),
+      sortKey: "customerName",
+      mobile: "title",
+      cell: (booking) => (
+        <>
+          <Link className="font-medium hover:underline" href={`/admin/bookings/${String(booking._id)}`}>
+            {booking.customer?.name}
+          </Link>
+          <div className="text-muted-foreground text-xs">
+            {booking.customer?.email === WALK_IN_CUSTOMER_EMAIL ? "walk-in · printed receipt" : booking.customer?.email}
+          </div>
+        </>
+      ),
+    },
+  ];
+  if (show("event")) {
+    columns.push({
+      key: "eventName",
+      header: sortLabel.get("eventName"),
+      sortKey: "eventName",
+      wrap: true,
+      className: "min-w-48",
+      cell: (booking) => (
+        <>
+          {booking.eventName}
+          {booking.hotelName ? <div className="text-muted-foreground text-xs">{booking.hotelName}</div> : null}
+        </>
+      ),
+    });
+  }
+  if (show("total")) {
+    columns.push({
+      key: "totalHuf",
+      header: sortLabel.get("totalHuf"),
+      sortKey: "totalHuf",
+      align: "right",
+      cell: (booking) => formatMoney(booking.totalHuf, booking.currency ?? "HUF"),
+    });
+  }
+  for (const field of shownFields) {
+    columns.push({
+      key: field.key,
+      header: field.label,
+      wrap: true,
+      cell: (booking) =>
+        (booking.attendees ?? [])
+          .map((attendee) => attendee.fields?.[field.key])
+          .filter((value) => value !== undefined && value !== null && String(value) !== "")
+          .map(String)
+          .join(", ") || <span className="text-muted-foreground">–</span>,
+    });
+  }
+  if (show("guests")) {
+    columns.push({
+      key: "guests",
+      header: "Guests",
+      align: "right",
+      cell: (booking) => {
+        const summary = guestSummaries.get(String(booking._id));
+        return (
+          <>
+            {booking.guests}
+            {summary ? (
+              <div className="text-muted-foreground text-xs whitespace-nowrap">
+                {summary.checkedIn}/{summary.guests} checked in
+              </div>
+            ) : null}
+          </>
+        );
+      },
+    });
+  }
+  if (show("status")) {
+    columns.push({
+      key: "status",
+      header: "Status",
+      cell: (booking) => {
+        const summary = guestSummaries.get(String(booking._id));
+        return (
+          <>
+            <div className="flex gap-1">
+              <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
+              {booking.source === "admin" ? <Badge variant="info">admin</Badge> : null}
+              {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
+            </div>
+            {summary && summary.tags.length > 0 ? (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {summary.tags.map((tag) => (
+                  <Badge key={tag} variant="note">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+          </>
+        );
+      },
+    });
+  }
+  if (show("paidVia")) {
+    columns.push({
+      key: "paidVia",
+      header: "Paid via",
+      className: "text-muted-foreground",
+      hideBelow: "lg",
+      cell: (booking) => booking.paymentMethod ?? "stripe",
+    });
+  }
+  if (show("invoice")) {
+    columns.push({
+      key: "invoice",
+      header: "Invoice",
+      cell: (booking) => (
+        <div className="flex gap-1">
+          <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>{booking.invoiceStatus}</Badge>
+          {booking.invoiceSource === "manual" ? <Badge variant="neutral">manual</Badge> : null}
+        </div>
+      ),
+    });
+  }
+  columns.push({
+    key: "open",
+    header: <span className="sr-only">Actions</span>,
+    align: "right",
+    mobile: "footer",
+    cell: (booking) => (
+      <Button variant="ghost" size="sm" asChild>
+        <Link href={`/admin/bookings/${String(booking._id)}`}>Open</Link>
+      </Button>
+    ),
+  });
+
   return (
     <>
       <PageTitle
@@ -134,7 +271,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
             <ColumnPicker
               builtIn={TOGGLEABLE_COLUMNS.map((column) => ({ key: column.key, label: column.label }))}
               fields={options.guestFields.map((field) => ({ key: FIELD_PREFIX + field.key, label: field.label }))}
-              selected={columns}
+              selected={visibleKeys}
             />
             {permissions.has("booking:export") ? (
               <Button variant="outline" asChild>
@@ -154,140 +291,49 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Stat label="Matching" value={result.total} />
-        <Stat label="Guests" value={result.paidGuests} hint="paid + confirmed" />
-        <Stat label="Revenue" value={formatRevenue(result.revenueByCurrency)} hint="paid + confirmed" />
-      </div>
+      <KpiGrid cols={3}>
+        <KpiTile label="Matching" value={result.total} hint={activeFilters > 0 ? `${activeFilters} filter${activeFilters === 1 ? "" : "s"} applied` : "all bookings"} icon={<CreditCard />} />
+        <KpiTile label="Guests" value={result.paidGuests} hint="paid + confirmed" tone="info" icon={<Ticket />} />
+        <KpiTile label="Revenue" value={formatRevenue(result.revenueByCurrency)} hint="paid + confirmed" tone="success" icon={<Wallet />} className="col-span-2 md:col-span-1" />
+      </KpiGrid>
 
-      <SectionCard title="Filters">
-        <BookingFilters options={options} params={params} />
-      </SectionCard>
+      <BookingFilters options={options} params={params} activeCount={activeFilters} />
 
       <SectionCard flush>
-        {result.bookings.length === 0 ? (
-          <EmptyState title="No bookings match these filters" hint="Try clearing the search or widening the date range." />
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {SORTABLE.filter((column) => column.key === "createdAt" || column.key === "customerName" || (column.key === "eventName" && show("event")) || (column.key === "totalHuf" && show("total"))).map((column) => {
-                    const active = sortBy === column.key;
-                    const nextDir = active && sortDir === "desc" ? "asc" : "desc";
-                    const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
-                    return (
-                      <TableHead
-                        key={column.key}
-                        className={column.key === "totalHuf" ? "text-right" : undefined}
-                        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                      >
-                        <Link
-                          className="hover:text-foreground inline-flex items-center gap-1"
-                          href={hrefWith({ sortBy: column.key, sortDir: nextDir, page: undefined })}
-                        >
-                          {column.label}
-                          <Icon className={active ? "size-3.5" : "size-3.5 opacity-40"} />
-                        </Link>
-                      </TableHead>
-                    );
-                  })}
-                  {shownFields.map((field) => (
-                    <TableHead key={field.key}>{field.label}</TableHead>
-                  ))}
-                  {show("guests") ? <TableHead className="text-right">Guests</TableHead> : null}
-                  {show("status") ? <TableHead>Status</TableHead> : null}
-                  {show("paidVia") ? <TableHead>Paid via</TableHead> : null}
-                  {show("invoice") ? <TableHead>Invoice</TableHead> : null}
-                  <TableHead>
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {result.bookings.map((booking) => {
-                  const id = String(booking._id);
-                  const summary = guestSummaries.get(id);
-                  return (
-                    <TableRow key={id}>
-                      <TableCell className="text-muted-foreground">{formatDateTime(booking.createdAt)}</TableCell>
-                      <TableCell>
-                        <Link className="font-medium hover:underline" href={`/admin/bookings/${id}`}>
-                          {booking.customer?.name}
-                        </Link>
-                        <div className="text-muted-foreground text-xs">
-                          {booking.customer?.email === WALK_IN_CUSTOMER_EMAIL ? "walk-in · printed receipt" : booking.customer?.email}
-                        </div>
-                      </TableCell>
-                      {show("event") ? (
-                      <TableCell className="min-w-48 whitespace-normal">
-                        {booking.eventName}
-                        {booking.hotelName ? <div className="text-muted-foreground text-xs">{booking.hotelName}</div> : null}
-                      </TableCell>
-                      ) : null}
-                      {show("total") ? <TableCell className="text-right">{formatMoney(booking.totalHuf, booking.currency ?? "HUF")}</TableCell> : null}
-                      {shownFields.map((field) => (
-                        <TableCell key={field.key} className="whitespace-normal">
-                          {(booking.attendees ?? [])
-                            .map((attendee) => attendee.fields?.[field.key])
-                            .filter((value) => value !== undefined && value !== null && String(value) !== "")
-                            .map(String)
-                            .join(", ") || <span className="text-muted-foreground">–</span>}
-                        </TableCell>
-                      ))}
-                      {show("guests") ? (
-                      <TableCell className="text-right">
-                        {booking.guests}
-                        {summary ? (
-                          <div className="text-muted-foreground text-xs whitespace-nowrap">
-                            {summary.checkedIn}/{summary.guests} checked in
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      ) : null}
-                      {show("status") ? (
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
-                          {booking.source === "admin" ? <Badge variant="info">admin</Badge> : null}
-                          {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
-                        </div>
-                        {summary && summary.tags.length > 0 ? (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {summary.tags.map((tag) => (
-                              <Badge key={tag} variant="info">{tag}</Badge>
-                            ))}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      ) : null}
-                      {show("paidVia") ? <TableCell className="text-muted-foreground">{booking.paymentMethod ?? "stripe"}</TableCell> : null}
-                      {show("invoice") ? (
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>{booking.invoiceStatus}</Badge>
-                          {booking.invoiceSource === "manual" ? <Badge variant="neutral">manual</Badge> : null}
-                        </div>
-                      </TableCell>
-                      ) : null}
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/admin/bookings/${id}`}>Open</Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            <LinkPagination
-              page={result.page}
-              pageCount={result.pageCount}
-              total={result.total}
-              hrefForPage={(target) => hrefWith({ page: String(target) })}
+        <DataTable
+          rows={result.bookings}
+          rowKey={(booking) => String(booking._id)}
+          columns={columns}
+          mobileCards
+          maxHeight="lg"
+          caption="Bookings"
+          sort={{
+            state: { key: sortBy, dir: sortDir },
+            hrefFor: (key, dir) => hrefWith({ sortBy: key, sortDir: dir, page: undefined }),
+          }}
+          empty={
+            <EmptyState
+              icon={<CalendarX />}
+              title="No bookings match these filters"
+              hint="Try clearing the search or widening the date range."
+              action={
+                activeFilters > 0 ? (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/admin/bookings">Clear filters</Link>
+                  </Button>
+                ) : undefined
+              }
             />
-          </>
-        )}
+          }
+        />
+        {result.bookings.length > 0 ? (
+          <LinkPagination
+            page={result.page}
+            pageCount={result.pageCount}
+            total={result.total}
+            hrefForPage={(target) => hrefWith({ page: String(target) })}
+          />
+        ) : null}
       </SectionCard>
     </>
   );

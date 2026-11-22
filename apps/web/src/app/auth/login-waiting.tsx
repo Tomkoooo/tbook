@@ -3,6 +3,7 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Notice } from "@/components/notice";
 import { pollLoginRequestAction } from "./login-request-actions";
 
 /**
@@ -43,31 +44,29 @@ export function LoginWaiting({ token, title, description }: { token: string; tit
 
   if (state === "denied") {
     return (
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Sign-in declined</CardTitle>
-          <CardDescription>The request was declined on the other device. Go back and try again.</CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="w-full max-w-sm">
+        <Notice tone="danger" title="Sign-in declined">
+          The request was declined on the other device. Go back and try again.
+        </Notice>
+      </div>
     );
   }
 
   if (state === "expired") {
     return (
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>This sign-in request expired</CardTitle>
-          <CardDescription>Go back and start again.</CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="w-full max-w-sm">
+        <Notice tone="warning" title="This sign-in request expired">
+          Go back and start again.
+        </Notice>
+      </div>
     );
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card className="w-full max-w-sm border-dashed shadow-none" role="status">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Loader2 className="size-5 animate-spin" /> {title}
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Loader2 className="text-muted-foreground size-4 animate-spin" /> {title}
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>

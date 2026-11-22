@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
+import { ThemeInitScript } from "@/components/theme-init-script";
 
 /* Self-hosted by next/font (no runtime Google request, no layout shift).
  * latin-ext carries the Hungarian ő/ű. globals.css maps these variables
@@ -20,7 +21,10 @@ export const viewport = { themeColor: "#18181b" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeInitScript />
+      </head>
       <body className={`${sans.variable} ${mono.variable}`}>
         {children}
         <PwaRegister />

@@ -12,6 +12,8 @@ import {
   resolveModules,
 } from "@tbook/services";
 import { PageTitle } from "@/components/page-title";
+import { EventToolsNav } from "@/components/shell/event-tools-nav";
+import { EVENT_TOOLS, filterEventTools, toolLabelsForModule } from "@/lib/event-tools";
 import { requireAdminPage, toDateInput, toDateTimeInput } from "@/lib/admin-page";
 import { EMPTY_DAY_PASS, EMPTY_ELIGIBILITY, EventForm, type EventFormValues } from "./event-form";
 import { DayAvailabilityTable } from "./day-availability-table";
@@ -74,11 +76,19 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   });
   if (!event) notFound();
 
+  const modules = await resolveModules({ organizationId, event });
+  const toolContext = { eventId, groupId: event.groupId ? String(event.groupId) : null };
+  const tools = filterEventTools(EVENT_TOOLS, { permissions, isOn: modules.isOn, hasVipList: Boolean(event.vipListId) });
+
   if (!permissions.has("event:write")) {
-    return <PageTitle title={event.name} description="You have read-only access to this event." />;
+    return (
+      <>
+        <PageTitle title={event.name} description="You have read-only access to this event." back={{ href: "/admin/events", label: "Events" }} />
+        <EventToolsNav tools={tools} context={toolContext} emptyHint="Nothing is switched on for this event. Ask someone who can manage modules." />
+      </>
+    );
   }
 
-  const modules = await resolveModules({ organizationId, event });
   const choiceSources = extensions
     .choiceProviders()
     .filter((provider) => modules.isOn(provider.moduleKey))
@@ -93,6 +103,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
       key: definition.key,
       name: definition.name,
       description: definition.description,
+      adds: toolLabelsForModule(definition.key),
       on: modules.isOn(definition.key),
       configFields: (definition.configFields ?? []).map((field) => ({ ...field, options: field.options ? [...field.options] : undefined })),
       config: Object.fromEntries(Object.entries(modules.config(definition.key)).map(([k, v]) => [k, String(v ?? "")])),
@@ -103,8 +114,21 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
 
   return (
     <>
-      <PageTitle title={event.name} />
-      {moduleRows.length > 0 ? <EventModulesCard eventId={eventId} modules={moduleRows} canManage={permissions.has("module:manage")} /> : null}
+      <PageTitle title={event.name} back={{ href: "/admin/events", label: "Events" }} />
+      <EventToolsNav
+        tools={tools}
+        context={toolContext}
+        emptyHint={
+          moduleRows.length > 0
+            ? "Switch on what this event uses in the Modules section below, and its tools will appear here."
+            : "Your organization has no modules yet. Ask a system administrator to grant the ones you need."
+        }
+      />
+      {moduleRows.length > 0 ? (
+        <div id="modules">
+          <EventModulesCard eventId={eventId} modules={moduleRows} canManage={permissions.has("module:manage")} />
+        </div>
+      ) : null}
       <EventForm
         eventId={eventId}
         groups={groups}

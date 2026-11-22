@@ -11,14 +11,19 @@ export const dynamic = "force-dynamic";
 
 const dateTime = new Intl.DateTimeFormat("hu-HU", { timeZone: "Europe/Budapest", dateStyle: "short", timeStyle: "short" });
 
-export default async function VipPage() {
+export default async function VipPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
+  const { eventId: requested } = await searchParams;
   const { organizationId } = await requireAdminPage("booking:read");
-  const events = (await listEventsForOrg(organizationId)).filter((event) => event.vipListId);
+  const withVip = (await listEventsForOrg(organizationId)).filter((event) => event.vipListId);
+  // Arriving from an event shows that event's list; otherwise every event with a VIP list.
+  const selected = withVip.find((event) => String(event._id) === requested) ?? null;
+  const events = selected ? [selected] : withVip;
+  const back = selected ? { href: `/admin/events/${String(selected._id)}`, label: selected.name } : undefined;
 
   if (events.length === 0) {
     return (
       <>
-        <PageTitle title="VIP guests" />
+        <PageTitle title="VIP guests" back={back} />
         <SectionCard>
           <EmptyState icon={<Star />} title="No event has a VIP list" hint="Set an event's VIP list (a name list in Data) to let VIPs register by name from their own seat pool." />
         </SectionCard>
@@ -28,7 +33,7 @@ export default async function VipPage() {
 
   return (
     <>
-      <PageTitle title="VIP guests" description="The VIP name list and who from it has registered. VIPs use their own seats and are tagged VIP on the scan." />
+      <PageTitle title="VIP guests" description="The VIP name list and who from it has registered. VIPs use their own seats and are tagged VIP on the scan." back={back} />
       {await Promise.all(
         events.map(async (event) => {
           const roster = await vipRoster(String(event._id));

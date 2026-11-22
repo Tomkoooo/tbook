@@ -10,6 +10,7 @@ import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { Stat } from "@/components/stat";
 import { formatDateTime, requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { ProcessWaitlistButton, RemoveEntryButton } from "./waitlist-controls";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,8 @@ const STATUS: Record<string, { label: string; variant: "default" | "secondary" |
 export default async function WaitlistPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
   const { eventId: requested } = await searchParams;
   const { organizationId } = await requireAdminPage("waitlist:manage");
+  const off = await requireModule(organizationId, WAITLIST, "Waitlist");
+  if (off) return off;
 
   const events = [];
   for (const event of await listEventsForOrg(organizationId)) {
@@ -53,6 +56,7 @@ export default async function WaitlistPage({ searchParams }: { searchParams: Pro
     <>
       <PageTitle
         title="Waitlist"
+        back={{ href: `/admin/events/${eventId}`, label: event.name }}
         description={
           mode === "auto"
             ? "A freed place goes to the first in line automatically."

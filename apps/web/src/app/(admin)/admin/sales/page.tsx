@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { ArrowLeft, Ticket } from "lucide-react";
+import { CalendarX, ChevronRight, Ticket } from "lucide-react";
 import { ActionError } from "@tbook/actions";
+import { POINT_OF_SALE } from "@tbook/modules";
 import { getDayPassSaleOptions, listRegistrableEvents, listSellableReaders, previewAdminRegistration } from "@tbook/services";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
+import { Notice } from "@/components/notice";
 import { PageTitle } from "@/components/page-title";
 import { SalesTabs } from "./sales-tabs";
 import { formatDate, requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { SaleForm } from "./sale-form";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +27,15 @@ export default async function SalesPage({
   searchParams: Promise<{ eventId?: string; tickets?: string }>;
 }) {
   const { organizationId, permissions } = await requireAdminPage();
+  const off = await requireModule(organizationId, POINT_OF_SALE, "Point of sale");
+  if (off) return off;
   if (!permissions.has("sale:create") && !permissions.has("booking:manage")) {
-    return <PageTitle title="Point of sale" description="You don't have permission to sell tickets." />;
+    return (
+      <>
+        <PageTitle title="Point of sale" description="You don't have permission to sell tickets." />
+        <Notice tone="warning">Ask an organization admin for the sale:create permission.</Notice>
+      </>
+    );
   }
 
   const { eventId, tickets: rawTickets } = await searchParams;
@@ -40,37 +50,45 @@ export default async function SalesPage({
         <PageTitle title="Point of sale" description="Pick the event you're selling tickets for." />
         <SalesTabs active="tickets" />
         {events.length === 0 ? (
-          <Alert>
-            <AlertTitle>Nothing on sale</AlertTitle>
-            <AlertDescription>There are no active events. Activate one under Events first.</AlertDescription>
-          </Alert>
+          <EmptyState
+            variant="hero"
+            icon={<CalendarX />}
+            title="Nothing on sale"
+            hint="There are no active events. Activate one under Events first."
+          />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="grid gap-3 sm:grid-cols-2 md:gap-4 xl:grid-cols-3">
             {events.map((event) => {
               const left = event.capacity == null ? null : Math.max(event.capacity - event.soldGuestCount, 0);
+              const scarce = left !== null && event.capacity ? left / event.capacity <= 0.1 : false;
               return (
-                <Link key={event.id} href={`/admin/sales?eventId=${event.id}`} className="group">
-                  <Card className="group-hover:border-primary h-full transition-colors">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Ticket className="size-4" /> {event.name}
-                      </CardTitle>
-                      <CardDescription>{event.startDate ? formatDate(event.startDate) : "No date"}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
+                <li key={event.id}>
+                  <Link
+                    href={`/admin/sales?eventId=${event.id}`}
+                    className="focus-visible:ring-ring/50 group block rounded-xl outline-none focus-visible:ring-[3px]"
+                  >
+                    <Card className="group-hover:border-ring/60 group-hover:bg-muted/40 flex-row items-center gap-3 p-4 shadow-xs transition-colors">
+                      <span className="bg-info-soft text-info-soft-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+                        <Ticket className="size-5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{event.name}</span>
+                        <span className="text-muted-foreground block text-xs">{event.startDate ? formatDate(event.startDate) : "No date"}</span>
+                      </span>
                       {left === null ? (
-                        <Badge variant="secondary">No limit</Badge>
+                        <Badge variant="neutral">No limit</Badge>
                       ) : left === 0 ? (
-                        <Badge variant="destructive">Sold out</Badge>
+                        <Badge variant="danger">Sold out</Badge>
                       ) : (
-                        <Badge variant="secondary">{left} left</Badge>
+                        <Badge variant={scarce ? "warning" : "success"}>{left} left</Badge>
                       )}
-                    </CardContent>
-                  </Card>
-                </Link>
+                      <ChevronRight className="text-muted-foreground size-5 shrink-0" />
+                    </Card>
+                  </Link>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </>
     );
@@ -107,17 +125,12 @@ export default async function SalesPage({
       <PageTitle
         title={selected.name}
         description="Take payment, then either email the ticket and invoice, or print a receipt for a walk-in."
-        actions={
-          <Link className="text-muted-foreground inline-flex items-center gap-1 text-sm hover:underline" href="/admin/sales">
-            <ArrowLeft className="size-4" /> Other event
-          </Link>
-        }
+        back={{ href: "/admin/sales", label: "Other event" }}
       />
       {blocked || !preview ? (
-        <Alert variant="destructive">
-          <AlertTitle>This event can&apos;t be sold right now</AlertTitle>
-          <AlertDescription>{blocked}</AlertDescription>
-        </Alert>
+        <Notice tone="danger" title="This event can't be sold right now">
+          {blocked}
+        </Notice>
       ) : (
         <SaleForm
           event={{

@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { Tablet } from "lucide-react";
-import { feedback } from "@tbook/modules";
+import { FEEDBACK, feedback } from "@tbook/modules";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 
 export const dynamic = "force-dynamic";
 
 /** Kiosks a signed-in member (feedback:kiosk) can start on this device — no link needed. */
 export default async function KioskListPage() {
   const { organizationId } = await requireAdminPage("feedback:kiosk");
+  const off = await requireModule(organizationId, FEEDBACK, "Kiosk");
+  if (off) return off;
   const kiosks = await feedback.listOpenKiosks(organizationId);
 
   return (

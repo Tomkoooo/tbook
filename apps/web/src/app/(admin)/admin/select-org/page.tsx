@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { organizationRepository } from "@tbook/db";
 import { listOrganizationsForUser } from "@tbook/services";
-import { Plus } from "lucide-react";
+import { Building2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Container } from "@/components/container";
+import { EmptyState } from "@/components/empty-state";
 import { Notice } from "@/components/notice";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
@@ -30,7 +32,7 @@ export default async function SelectOrgPage({ searchParams }: { searchParams: Pr
     : await listOrganizationsForUser(user.id);
 
   return (
-    <div className="mx-auto grid w-full max-w-xl gap-6">
+    <Container width="narrow">
       <PageTitle
         title="Select an organization"
         description="Everything in the console is scoped to one organization at a time."
@@ -51,9 +53,11 @@ export default async function SelectOrgPage({ searchParams }: { searchParams: Pr
 
       <SectionCard flush>
         {organizations.length === 0 ? (
-          <p className="text-muted-foreground p-5 text-sm">
-            You aren&apos;t a member of any organization yet. Ask an org admin to invite you, then reload this page.
-          </p>
+          <EmptyState
+            icon={<Building2 />}
+            title="No organizations yet"
+            hint="You aren't a member of any organization yet. Ask an org admin to invite you, then reload this page."
+          />
         ) : (
           <SelectOrgForm organizations={organizations} />
         )}
@@ -65,6 +69,6 @@ export default async function SelectOrgPage({ searchParams }: { searchParams: Pr
           Sign out
         </Link>
       </p>
-    </div>
+    </Container>
   );
 }

@@ -1,6 +1,6 @@
 import { ensureDbConnection, loginRequestRepository } from "@tbook/db";
 import { redirect } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth-shell";
 import { ClaimButton } from "./claim-button";
 
 /** Opened by the camera of the device that scans a "sign in another device" QR code. Nothing happens until the button is pressed. */
@@ -14,22 +14,15 @@ export default async function DeviceLinkPage({ searchParams }: { searchParams: P
   const valid = !!request && request.purpose === "device-link" && request.status === "confirmed" && request.expiresAt.getTime() > Date.now();
 
   return (
-    <main className="bg-background flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Sign in on this device</CardTitle>
-          <CardDescription>
-            {valid
-              ? `You will be signed in as ${request!.confirmedEmail}. Only continue if you scanned this code yourself.`
-              : "This code has expired or was already used. Show a new one on the signed-in device."}
-          </CardDescription>
-        </CardHeader>
-        {valid ? (
-          <CardContent>
-            <ClaimButton token={token} />
-          </CardContent>
-        ) : null}
-      </Card>
-    </main>
+    <AuthShell
+      title="Sign in on this device"
+      description={
+        valid
+          ? `You will be signed in as ${request!.confirmedEmail}. Only continue if you scanned this code yourself.`
+          : "This code has expired or was already used. Show a new one on the signed-in device."
+      }
+    >
+      {valid ? <ClaimButton token={token} /> : null}
+    </AuthShell>
   );
 }

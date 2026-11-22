@@ -10,6 +10,7 @@ import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
 import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
+import { requireModule } from "@/lib/require-module";
 import { BusEventPicker, BusRouteDialog, BusRouteRowActions, RecountSeatsButton } from "./bus-controls";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,8 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
   // Captains (bus:board) see the list and open a bus to mark boarding; only bus:manage edits.
   const { organizationId, permissions } = await requireAdminPage("bus:board");
   const canManage = hasPermissionOrFallback(permissions, "bus:manage");
+  const off = await requireModule(organizationId, BUS_TRANSPORT, "Bus transfers");
+  if (off) return off;
 
   const events = await listEventsForOrg(organizationId);
   const busEvents = [];
@@ -59,6 +62,7 @@ export default async function BusPage({ searchParams }: { searchParams: Promise<
     <>
       <PageTitle
         title="Buses"
+        back={{ href: `/admin/events/${eventId}`, label: event.name }}
         description="Routes guests choose at registration, their seats, captains and boarding."
         actions={
           <>

@@ -5,6 +5,9 @@ import { registerGuestPortalModule } from "./guest-portal";
 import { registerWaitlistModule } from "./waitlist";
 import { registerFeedbackModule } from "./feedback";
 import { registerStandModeModule } from "./stand-mode";
+import { registerPointOfSaleModule } from "./point-of-sale";
+import { registerHotelsModule } from "./hotels";
+import { registerTicketSalesModule } from "./ticket-sales";
 
 /**
  * Every feature module shipped with tBook. Importing this package registers
@@ -20,6 +23,9 @@ export function registerAllModules(): void {
   registerWaitlistModule();
   registerFeedbackModule();
   registerStandModeModule();
+  registerPointOfSaleModule();
+  registerHotelsModule();
+  registerTicketSalesModule();
 }
 
 registerAllModules();
@@ -37,6 +43,9 @@ export { GUEST_PORTAL } from "./guest-portal";
 export { WAITLIST } from "./waitlist";
 export { FEEDBACK } from "./feedback";
 export { STAND_MODE } from "./stand-mode";
+export { POINT_OF_SALE } from "./point-of-sale";
+export { HOTELS } from "./hotels";
+export { TICKET_SALES } from "./ticket-sales";
 export { setModuleMailTransporter } from "./shared/mail";
 export * as testData from "./test-data";
 export { systemEmailDefault, type SystemEmailDefault } from "./system-email-defaults";

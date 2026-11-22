@@ -19,11 +19,17 @@ const badgeVariants = cva(
         link: "text-primary underline-offset-4 [a&]:hover:underline",
         // Semantic status tones (see lib/status-tones.ts) — tinted, not solid,
         // so a table full of statuses stays calm.
-        neutral: "bg-neutral-muted text-neutral",
-        info: "bg-info-muted text-info",
-        success: "bg-success-muted text-success",
-        warning: "bg-warning-muted text-warning",
-        danger: "bg-danger-muted text-danger",
+        neutral: "border-neutral-border bg-neutral-soft text-neutral-soft-foreground",
+        info: "border-info-border bg-info-soft text-info-soft-foreground",
+        success: "border-success-border bg-success-soft text-success-soft-foreground",
+        warning: "border-warning-border bg-warning-soft text-warning-soft-foreground",
+        danger: "border-danger-border bg-danger-soft text-danger-soft-foreground",
+        note: "border-note-border bg-note-soft text-note-soft-foreground",
+        // Solid fills: counters and "live" markers, used sparingly.
+        "solid-success": "bg-success text-success-foreground",
+        "solid-warning": "bg-warning text-warning-foreground",
+        "solid-danger": "bg-danger text-danger-foreground",
+        "solid-info": "bg-info text-info-foreground",
       },
     },
     defaultVariants: {

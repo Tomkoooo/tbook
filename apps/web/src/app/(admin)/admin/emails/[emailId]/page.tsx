@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { formatDateTime, requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { EmailForm, SendPanel } from "../email-controls";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export default async function EmailPage({ params, searchParams }: { params: Prom
   const { emailId } = await params;
   const { eventId: eventIdParam, status, trigger: triggerParam } = await searchParams;
   const { organizationId } = await requireAdminPage("email:send");
+  const off = await requireModule(organizationId, EVENT_EMAILS, "Emails");
+  if (off) return off;
   const isNew = emailId === "new";
 
   const email = isNew

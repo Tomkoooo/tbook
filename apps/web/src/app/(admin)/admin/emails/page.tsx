@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { formatDateTime, requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { EmailEventPicker } from "./email-controls";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ const AUDIENCE_LABELS: Record<string, string> = {
 export default async function EmailsPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
   const { eventId: requested } = await searchParams;
   const { organizationId } = await requireAdminPage("email:send");
+  const off = await requireModule(organizationId, EVENT_EMAILS, "Emails");
+  if (off) return off;
 
   const events = [];
   for (const event of await listEventsForOrg(organizationId)) {
@@ -63,6 +66,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
     <>
       <PageTitle
         title="Emails"
+        back={{ href: `/admin/events/${eventId}`, label: event.name }}
         description="Automatic emails go out when someone registers. Manual ones go out when you press Send — there is no scheduler, so send each on its day."
         actions={
           <>

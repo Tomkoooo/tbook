@@ -5,7 +5,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signIn } from "@/auth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { describeDevice } from "../device-label";
@@ -44,31 +44,26 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   }
 
   return (
-    <main className="bg-background flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="text-xl">Sign in to tBook</CardTitle>
-          <CardDescription>Enter your email and we&apos;ll send you a one-time sign-in link.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={sendMagicLink} className="grid gap-4">
-            <div className="grid gap-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" name="email" placeholder="you@example.com" required autoFocus />
-            </div>
-            <Button type="submit" className="w-full">
-              <Mail /> Send sign-in link
-            </Button>
-          </form>
-          <div className="mt-4 text-center">
-            <Button variant="link" asChild>
-              <Link href={`/auth/qr${callbackUrl ? `?callbackUrl=${encodeURIComponent(callbackUrl)}` : ""}`}>
-                <QrCode /> Sign in with a QR code instead
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </main>
+    <AuthShell
+      title="Sign in to tBook"
+      description="Enter your email and we'll send you a one-time sign-in link."
+    >
+      <form action={sendMagicLink} className="grid gap-4">
+        <div className="grid gap-1.5">
+          <Label htmlFor="email">Email</Label>
+          <Input id="email" type="email" name="email" placeholder="you@example.com" required autoFocus />
+        </div>
+        <Button type="submit" className="w-full">
+          <Mail /> Send sign-in link
+        </Button>
+      </form>
+      <div className="mt-4 text-center">
+        <Button variant="link" asChild>
+          <Link href={`/auth/qr${callbackUrl ? `?callbackUrl=${encodeURIComponent(callbackUrl)}` : ""}`}>
+            <QrCode /> Sign in with a QR code instead
+          </Link>
+        </Button>
+      </div>
+    </AuthShell>
   );
 }

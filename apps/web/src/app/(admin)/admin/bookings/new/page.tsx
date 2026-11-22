@@ -32,7 +32,7 @@ export default async function NewRegistrationPage({
   if (events.length === 0) {
     return (
       <>
-        <PageTitle back={{ href: "/admin/bookings", label: "Bookings" }} title="New registration" />
+        <PageTitle breadcrumbs={[{ label: "Bookings", href: "/admin/bookings" }]} title="New registration" />
         <SectionCard>
           <EmptyState title="No events yet" hint="Create an event before registering anyone into it." />
         </SectionCard>
@@ -44,7 +44,7 @@ export default async function NewRegistrationPage({
     return (
       <>
         <PageTitle
-          back={{ href: "/admin/bookings", label: "Bookings" }}
+          breadcrumbs={[{ label: "Bookings", href: "/admin/bookings" }]}
           title="New registration"
           description="Register someone who paid outside the storefront — by transfer, in cash, or as a comped entry."
         />

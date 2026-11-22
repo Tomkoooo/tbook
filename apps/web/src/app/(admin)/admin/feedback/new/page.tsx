@@ -1,7 +1,9 @@
+import { FEEDBACK } from "@tbook/modules";
 import { getEventForOrg } from "@tbook/services";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
+import { requireModule } from "@/lib/require-module";
 import { SurveyEditor } from "../survey-editor";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +11,8 @@ export const dynamic = "force-dynamic";
 export default async function NewSurveyPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
   const { eventId = "" } = await searchParams;
   const { organizationId } = await requireAdminPage("feedback:manage");
+  const off = await requireModule(organizationId, FEEDBACK, "Feedback");
+  if (off) return off;
   const event = await getEventForOrg(organizationId, eventId);
   return (
     <>
