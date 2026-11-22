@@ -1,73 +1,55 @@
-import { Store } from "lucide-react";
+import Link from "next/link";
+import { CalendarX, ChevronRight, Store } from "lucide-react";
+import { redirect } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { EventPicker } from "@/components/event-picker";
 import { PageTitle } from "@/components/page-title";
-import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
-import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
-import { toDayDto } from "./dto";
-import { OpenDayForm } from "./open-day-form";
-import { SellScreen } from "./sell-screen";
-import { standEvents, stand } from "./shared";
-import { StandTabs } from "./stand-tabs";
+import { eventPath } from "@/lib/event-routes";
+import { standEvents } from "@/lib/stand-events";
 
+/**
+ * Station picker for the stand: the events that have stand mode on, today's
+ * first. The sell screen and the stand tools live under the event
+ * (`/admin/events/[eventId]/stand`); with a single candidate we go straight there.
+ */
 export const dynamic = "force-dynamic";
 
-export default async function StandPage({ searchParams }: { searchParams: Promise<{ eventId?: string }> }) {
-  const { eventId: requested } = await searchParams;
-  const { organizationId, permissions } = await requireAdminPage("stand:operate");
-  const { events, event } = await standEvents(organizationId, requested);
-  if (!event) {
-    return (
-      <>
-        <PageTitle title="Pult" />
-        <SectionCard>
-          <EmptyState icon={<Store />} title="No event uses stand mode" hint="Switch on “Stand mode” in an event's Modules section." />
-        </SectionCard>
-      </>
-    );
-  }
-  const eventId = String(event._id);
-  const manage = hasPermissionOrFallback(permissions, "stand:manage");
-  const [realDay, sandboxDay, settings] = await Promise.all([stand.getOpenDay(eventId), stand.getSandboxDay(eventId), stand.standSettings(event)]);
-  // A real open day always wins; the practice run is only shown while there is none.
-  const openDay = realDay ?? sandboxDay;
-  const today = stand.todayKey();
-  const proposal = openDay ? null : await stand.proposeOpening(eventId, today);
-  const products = openDay ? await stand.listProducts(eventId, { activeOnly: true }) : [];
-  const missing = openDay ? products.filter((p) => !openDay.lines.some((l) => String(l.productId) === String(p._id))) : [];
+export default async function StandIndexPage() {
+  const { organizationId } = await requireAdminPage("stand:operate");
+  const events = await standEvents(organizationId);
+  if (events.length === 1) redirect(eventPath(String(events[0]!.event._id), "stand"));
 
   return (
     <>
-      <PageTitle
-        title={event.name}
-        description={openDay ? (openDay.sandbox ? "Gyakorló mód" : `Nyitva: ${openDay.date}`) : "Nincs nyitott nap"}
-        actions={
-          <>
-            {events.length > 1 ? <EventPicker basePath="/admin/stand" events={events.map((e) => ({ id: String(e._id), name: e.name }))} value={eventId} /> : null}
-            <StandTabs active="sell" eventId={eventId} manage={manage} />
-          </>
-        }
-      />
-      {openDay ? (
-        <SellScreen
-          key={String(openDay._id)}
-          eventId={eventId}
-          initial={toDayDto(openDay)}
-          packs={settings.packs}
-          defaultEmail={settings.reportEmail}
-          missing={missing.map((p) => ({ id: String(p._id), name: p.name }))}
+      <PageTitle title="Pult" description="Válaszd ki az eseményt, amelynek a pultját viszed." />
+      {events.length === 0 ? (
+        <EmptyState
+          variant="hero"
+          icon={<CalendarX />}
+          title="No event uses stand mode"
+          hint="Switch on “Stand mode” in an event's Modules section."
         />
       ) : (
-        <OpenDayForm
-          eventId={eventId}
-          date={today}
-          previousDate={proposal!.previousDate}
-          previousFloat={proposal!.floatHuf}
-          items={proposal!.items}
-          manage={manage}
-          defaultEmail={settings.reportEmail}
-        />
+        <ul className="grid gap-3 sm:grid-cols-2 md:gap-4 xl:grid-cols-3">
+          {events.map(({ event, today }) => (
+            <li key={String(event._id)}>
+              <Link href={eventPath(String(event._id), "stand")} className="focus-visible:ring-ring/50 group block rounded-xl outline-none focus-visible:ring-[3px]">
+                <Card className="group-hover:border-ring/60 group-hover:bg-muted/40 flex-row items-center gap-3 p-4 shadow-xs transition-colors">
+                  <span className="bg-info-soft text-info-soft-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+                    <Store className="size-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{event.name}</span>
+                    {today ? <Badge variant="success">ma</Badge> : null}
+                  </span>
+                  <ChevronRight className="text-muted-foreground size-5 shrink-0" />
+                </Card>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </>
   );

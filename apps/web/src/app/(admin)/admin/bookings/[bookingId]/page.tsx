@@ -10,6 +10,7 @@ import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, VOUCHER_STATUS_TONES, toneFor } from "@/lib/status-tones";
 import { formatDateTime, formatMoney, requireAdminPage } from "@/lib/admin-page";
+import { eventPath } from "@/lib/event-routes";
 import { BookingActions } from "./booking-actions";
 import { ReceiptPanel } from "./receipt-panel";
 import { AttachInvoicePanel, EditBookingPanel, MarkPaidPanel } from "./manage-panels";
@@ -49,11 +50,16 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
   const awaitingPayment = booking.status === "pending" || booking.status === "checkout_started";
   const walkIn = booking.delivery === "receipt";
   const quoteLines = ((booking.quote?.lines ?? []) as QuoteLine[]).filter((line) => line.amountHuf != null);
+  const eventId = String(booking.eventId);
 
   return (
     <>
       <PageTitle
-        breadcrumbs={[{ label: "Bookings", href: "/admin/bookings" }]}
+        breadcrumbs={[
+          { label: "Events", href: "/admin/events" },
+          { label: booking.eventName, href: eventPath(eventId) },
+          { label: "Bookings", href: eventPath(eventId, "bookings") },
+        ]}
         title={booking.customer?.name ?? "Booking"}
         description={`${booking.eventName} · booked ${formatDateTime(booking.createdAt)}`}
         status={

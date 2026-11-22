@@ -1,62 +1,19 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { Download } from "lucide-react";
+import { notFound, redirect } from "next/navigation";
 import { ActionError } from "@tbook/actions";
-import { BUS_TRANSPORT, busTransport } from "@tbook/modules";
-import { Button } from "@/components/ui/button";
-import { PageTitle } from "@/components/page-title";
-import { SectionCard } from "@/components/section-card";
+import { busTransport } from "@tbook/modules";
 import { requireAdminPage } from "@/lib/admin-page";
-import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
-import { requireModule } from "@/lib/require-module";
-import { setBoardingAdminAction } from "../../bus-actions";
-import { PassengerList } from "../passenger-list";
+import { eventPath } from "@/lib/event-routes";
 
 export const dynamic = "force-dynamic";
 
-export default async function BusRoutePage({ params }: { params: Promise<{ routeId: string }> }) {
+/** Old URL `/admin/bus/[routeId]`: a bus knows its event, so send the visitor to `/admin/events/[eventId]/bus/[routeId]`. */
+export default async function LegacyBusRoutePage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = await params;
-  const { organizationId, permissions } = await requireAdminPage("bus:board");
-  const canManage = hasPermissionOrFallback(permissions, "bus:manage");
-  const off = await requireModule(organizationId, BUS_TRANSPORT, "Bus transfers");
-  if (off) return off;
+  const { organizationId } = await requireAdminPage("bus:board");
   const route = await busTransport.getRouteForOrg(organizationId, routeId).catch((error) => {
     if (error instanceof ActionError) return null;
     throw error;
   });
   if (!route) notFound();
-  const passengers = await busTransport.listPassengers(route);
-
-  async function setBoarding(attendeeKey: string, leg: "outbound" | "return", status: "boarded" | "not_boarded" | null) {
-    "use server";
-    return setBoardingAdminAction(routeId, attendeeKey, leg, status);
-  }
-
-  return (
-    <>
-      <PageTitle
-        title={`${route.code} · ${route.city}`}
-        description={[
-          ...(route.stops?.length ? busTransport.routeStops(route).map((stop) => busTransport.stopShortLabel(stop)) : [route.pickupPoint, busTransport.formatDeparture(route.departureAt)]),
-          route.captainName && `captain: ${route.captainName} ${route.captainPhone}`].filter(Boolean).join(" · ")}
-        back={{ href: `/admin/bus?eventId=${String(route.eventId)}`, label: "Buses" }}
-        actions={
-          canManage ? (
-            <Button asChild variant="outline">
-              <Link href={`/admin/bus/export?eventId=${String(route.eventId)}&routeId=${routeId}`} prefetch={false}>
-                <Download /> Export (xlsx)
-              </Link>
-            </Button>
-          ) : undefined
-        }
-      />
-      <SectionCard title={`Passengers (${passengers.length} / ${route.capacity})`}>
-        <PassengerList
-          passengers={passengers.map((p) => ({ attendeeKey: p.attendeeKey, name: p.name, registrationNumber: p.registrationNumber, phone: p.phone, stop: route.stops?.length ? p.stop : "", outbound: p.outbound, return: p.return }))}
-          onSet={setBoarding}
-          refreshSeconds={30}
-        />
-      </SectionCard>
-    </>
-  );
+  redirect(eventPath(String(route.eventId), "bus", routeId));
 }

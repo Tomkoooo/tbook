@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
+import type { Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
-import { ThemeInitScript } from "@/components/theme-init-script";
+import { ThemeProvider } from "next-themes";
 
 /* Self-hosted by next/font (no runtime Google request, no layout shift).
  * latin-ext carries the Hungarian ő/ű. globals.css maps these variables
@@ -17,16 +18,22 @@ export const metadata = {
   icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },
 };
 
-export const viewport = { themeColor: "#18181b" };
+/* Matches --background in globals.css (white / zinc-950). */
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <ThemeInitScript />
-      </head>
       <body className={`${sans.variable} ${mono.variable}`}>
-        {children}
+        {/* `.dark` class on <html>; storageKey keeps the choice saved by the first toggle. */}
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="tbook-theme">
+          {children}
+        </ThemeProvider>
         <PwaRegister />
       </body>
     </html>

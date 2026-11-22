@@ -16,6 +16,8 @@ export function BookingFilters({
   options,
   params,
   activeCount,
+  basePath = "/admin/bookings",
+  eventPreset = false,
 }: {
   options: {
     groups: Array<{ id: string; name: string }>;
@@ -24,18 +26,22 @@ export function BookingFilters({
   };
   params: Record<string, string | string[] | undefined>;
   activeCount: number;
+  /** The page the form submits to (the event's bookings page on an event). */
+  basePath?: string;
+  /** Event page: the event is fixed by the path, so the event and group filters are not offered. */
+  eventPreset?: boolean;
 }) {
   const value = (key: string): string => {
     const raw = params[key];
     const single = Array.isArray(raw) ? raw[0] : raw;
     return single ?? "";
   };
-  const advancedActive = ["invoiceStatus", "groupId", "tag", "checkIn", "createdFrom", "createdTo"].some((key) => value(key) !== "");
+  const advancedActive = (eventPreset ? ["invoiceStatus", "tag", "checkIn", "createdFrom", "createdTo"] : ["invoiceStatus", "groupId", "tag", "checkIn", "createdFrom", "createdTo"]).some((key) => value(key) !== "");
 
   return (
     <FilterBar
-      action="/admin/bookings"
-      clearHref="/admin/bookings"
+      action={basePath}
+      clearHref={basePath}
       activeCount={activeCount}
       submitLabel="Apply filters"
       moreActive={advancedActive}
@@ -43,8 +49,10 @@ export function BookingFilters({
         <>
           <FilterSelect id="invoiceStatus" label="Invoice" placeholder="Any invoice state" defaultValue={value("invoiceStatus")}
             options={invoiceStatuses.map((status) => ({ value: status, label: status }))} />
-          <FilterSelect id="groupId" label="Group" placeholder="All groups" defaultValue={value("groupId")}
-            options={options.groups.map((group) => ({ value: group.id, label: group.name }))} />
+          {eventPreset ? null : (
+            <FilterSelect id="groupId" label="Group" placeholder="All groups" defaultValue={value("groupId")}
+              options={options.groups.map((group) => ({ value: group.id, label: group.name }))} />
+          )}
           <FilterSelect id="tag" label="Guest tag" placeholder="Any tag" defaultValue={value("tag")}
             options={options.tags.map((tag) => ({ value: tag, label: tag }))} />
           <FilterSelect id="checkIn" label="Check-in" placeholder="Any" defaultValue={value("checkIn")}
@@ -63,8 +71,10 @@ export function BookingFilters({
       </FormField>
       <FilterSelect id="status" label="Status" placeholder="Any status" defaultValue={value("status")}
         options={bookingStatuses.map((status) => ({ value: status, label: status }))} />
-      <FilterSelect id="eventId" label="Event" placeholder="All events" defaultValue={value("eventId")}
-        options={options.events.map((event) => ({ value: event.id, label: event.name }))} />
+      {eventPreset ? null : (
+        <FilterSelect id="eventId" label="Event" placeholder="All events" defaultValue={value("eventId")}
+          options={options.events.map((event) => ({ value: event.id, label: event.name }))} />
+      )}
     </FilterBar>
   );
 }

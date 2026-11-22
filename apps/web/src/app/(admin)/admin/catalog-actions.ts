@@ -263,7 +263,7 @@ export async function saveHotelAction(hotelId: string | null, formData: FormData
       packages: jsonRows(formData, "packages"),
     });
 
-    revalidatePath("/admin/hotels");
+    revalidatePath("/admin/groups", "layout");
     if (hotelId) {
       await updateHotel(organizationId, hotelId, input);
       return { ok: true, id: hotelId, message: "Hotel saved." };

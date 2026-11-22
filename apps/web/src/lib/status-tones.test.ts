@@ -12,7 +12,7 @@ describe("toneFor", () => {
 describe("TONE_CLASSES", () => {
   it("defines every tone with all surfaces", () => {
     for (const tone of ["neutral", "info", "success", "warning", "danger", "note"] as const) {
-      expect(Object.keys(TONE_CLASSES[tone]).sort()).toEqual(["border", "chip", "dot", "soft", "text"]);
+      expect(Object.keys(TONE_CLASSES[tone]).sort()).toEqual(["border", "chip", "dot", "soft", "solid", "text"]);
     }
   });
 });

@@ -11,8 +11,10 @@ import {
   listModuleDefinitions,
   resolveModules,
 } from "@tbook/services";
+import { Puzzle } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
-import { EventToolsNav } from "@/components/shell/event-tools-nav";
+import { SectionCard } from "@/components/section-card";
 import { EVENT_TOOLS, filterEventTools, toolLabelsForModule } from "@/lib/event-tools";
 import { requireAdminPage, toDateInput, toDateTimeInput } from "@/lib/admin-page";
 import { EMPTY_DAY_PASS, EMPTY_ELIGIBILITY, EventForm, type EventFormValues } from "./event-form";
@@ -77,14 +79,16 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   if (!event) notFound();
 
   const modules = await resolveModules({ organizationId, event });
-  const toolContext = { eventId, groupId: event.groupId ? String(event.groupId) : null };
   const tools = filterEventTools(EVENT_TOOLS, { permissions, isOn: modules.isOn, hasVipList: Boolean(event.vipListId) });
+
+  // The tool tabs live in the workspace layout; this page only explains an empty set.
+  const noTools = tools.length === 0;
 
   if (!permissions.has("event:write")) {
     return (
       <>
-        <PageTitle title={event.name} description="You have read-only access to this event." back={{ href: "/admin/events", label: "Events" }} />
-        <EventToolsNav tools={tools} context={toolContext} emptyHint="Nothing is switched on for this event. Ask someone who can manage modules." />
+        <PageTitle title="Overview" description="You have read-only access to this event." />
+        {noTools ? <NoTools hint="Nothing is switched on for this event. Ask someone who can manage modules." /> : null}
       </>
     );
   }
@@ -114,16 +118,16 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
 
   return (
     <>
-      <PageTitle title={event.name} back={{ href: "/admin/events", label: "Events" }} />
-      <EventToolsNav
-        tools={tools}
-        context={toolContext}
-        emptyHint={
-          moduleRows.length > 0
-            ? "Switch on what this event uses in the Modules section below, and its tools will appear here."
-            : "Your organization has no modules yet. Ask a system administrator to grant the ones you need."
-        }
-      />
+      <PageTitle title="Overview" description="Settings, modules and registration rules for this event." />
+      {noTools ? (
+        <NoTools
+          hint={
+            moduleRows.length > 0
+              ? "Switch on what this event uses in the Modules section below, and its tools will appear as tabs above."
+              : "Your organization has no modules yet. Ask a system administrator to grant the ones you need."
+          }
+        />
+      ) : null}
       {moduleRows.length > 0 ? (
         <div id="modules">
           <EventModulesCard eventId={eventId} modules={moduleRows} canManage={permissions.has("module:manage")} />
@@ -226,5 +230,14 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
       />
       <DayAvailabilityTable days={describeDayPassAvailability(event)} currency={event.currency} />
     </>
+  );
+}
+
+/** Shown when no tool is on for the event (the tabs above would be only "Overview"). */
+function NoTools({ hint }: { hint: string }) {
+  return (
+    <SectionCard>
+      <EmptyState icon={<Puzzle />} title="No tools are switched on yet" hint={hint} />
+    </SectionCard>
   );
 }

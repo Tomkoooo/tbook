@@ -60,7 +60,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     permissions: ["event:write"],
     links: [
       { href: "/admin/events", label: "Események" },
-      { href: "/admin/preview", label: "Előnézet" },
+      { href: "/admin/events", label: "Események → Előnézet" },
     ],
     sections: [
       {
@@ -203,7 +203,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     summary: "Járatok, helyfoglalás regisztrációkor, kapitányok, felszállás jelölése oda és vissza.",
     module: "bus-transport",
     permissions: ["bus:manage", "bus:board"],
-    links: [{ href: "/admin/bus", label: "Buszok" }],
+    links: [{ href: "/admin/events", label: "Események → Buszok" }],
     sections: [
       {
         heading: "Járatok felvétele",
@@ -238,7 +238,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     summary: "Automatikus visszaigazolás, kampányok, feltételek, helyettesítők.",
     module: "event-emails",
     permissions: ["email:send"],
-    links: [{ href: "/admin/emails", label: "E-mailek" }],
+    links: [{ href: "/admin/events", label: "Események → E-mailek" }],
     sections: [
       {
         heading: "Automatikus és kézi e-mailek",
@@ -265,7 +265,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     summary: "Betelt eseménynél a felszabaduló hely a sorban következőé.",
     module: "waitlist",
     permissions: ["waitlist:manage"],
-    links: [{ href: "/admin/waitlist", label: "Várólista" }],
+    links: [{ href: "/admin/events", label: "Események → Várólista" }],
     sections: [
       {
         heading: "Működés",
@@ -301,8 +301,8 @@ export const HELP_TOPICS: HelpTopic[] = [
     module: "feedback",
     permissions: ["feedback:manage", "feedback:kiosk"],
     links: [
-      { href: "/admin/feedback", label: "Visszajelzés" },
-      { href: "/admin/kiosk", label: "Kioszk" },
+      { href: "/admin/events", label: "Események → Visszajelzés" },
+      { href: "/admin/events", label: "Események → Kioszk" },
     ],
     sections: [
       {
@@ -357,7 +357,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: "Előnézet",
     summary: "Próbáld ki, mit lát a vendég, a buszkapitány, a beléptető és a kioszk, mentés nélkül.",
     permissions: ["event:read"],
-    links: [{ href: "/admin/preview", label: "Előnézet" }],
+    links: [{ href: "/admin/events", label: "Események → Előnézet" }],
     sections: [
       {
         heading: "Mire jó",

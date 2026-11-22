@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { Building2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Notice } from "@/components/notice";
 import { selectOrganizationAction, type ActionResult } from "../actions";
 
@@ -11,7 +12,7 @@ import { selectOrganizationAction, type ActionResult } from "../actions";
  * of orgs it is one click instead of two, and it degrades to plain form
  * posts without JS.
  */
-export function SelectOrgForm({ organizations }: { organizations: Array<{ id: string; name: string; slug: string }> }) {
+export function SelectOrgForm({ organizations, next }: { organizations: Array<{ id: string; name: string; slug: string }>; next?: string }) {
   const [state, action, pending] = useActionState(
     async (_prev: ActionResult | null, formData: FormData) => selectOrganizationAction(formData),
     null,
@@ -19,6 +20,7 @@ export function SelectOrgForm({ organizations }: { organizations: Array<{ id: st
 
   return (
     <form action={action}>
+      {next ? <Input type="hidden" name="next" value={next} /> : null}
       {state && !state.ok ? (
         <div className="p-4">
           <Notice tone="danger">{state.message}</Notice>

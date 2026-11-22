@@ -6,10 +6,12 @@ import { permissionWithFallbacks } from "./permission-fallbacks";
  * decides what one member sees. Kept free of React so it can be unit
  * tested; the sidebar and the command palette both render from it.
  *
- * Only global pages live here. Tools that belong to a particular event or
- * event group (hotels, buses, VIP guests, waitlist, feedback, emails,
- * reports, data, preview) are reached from that event's page — see
- * event-tools.ts.
+ * Only organization-level pages live here: Home, the catalog (events and
+ * groups), org tools (bookings, products, merch register, data lists, team,
+ * settings) and STATIONS (door / counter / stand staff who only hold
+ * event:read). Tools that belong to one event or event group live under
+ * /admin/events/[id]/… and /admin/groups/[id]/… — see event-tools.ts; the
+ * sidebar shows them in a contextual section while you are inside one.
  */
 
 export type NavIconKey =
@@ -24,7 +26,9 @@ export type NavIconKey =
   | "products"
   | "team"
   | "settings"
-  | "organizations";
+  | "organizations"
+  | "merch"
+  | "data";
 
 export interface NavItem {
   href: string;
@@ -45,22 +49,34 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Overview",
+    label: "Home",
     items: [
-      { href: "/admin", label: "Dashboard", icon: "dashboard", permission: null },
+      { href: "/admin", label: "Home", icon: "dashboard", permission: null },
       { href: "/admin/help", label: "Help", icon: "help", permission: null },
     ],
   },
   {
     label: "Events",
     items: [
-      { href: "/admin/groups", label: "Event groups", icon: "groups", permission: "group:read" },
       { href: "/admin/events", label: "Events", icon: "events", permission: "event:read" },
+      { href: "/admin/groups", label: "Event groups", icon: "groups", permission: "group:read" },
     ],
   },
   {
-    label: "Sales",
+    label: "Organization",
     items: [
+      { href: "/admin/bookings", label: "Bookings", icon: "bookings", permission: "booking:read", module: "ticket-sales" },
+      { href: "/admin/products", label: "Products", icon: "products", permission: ["product:read", "product:write", "event:read"] },
+      { href: "/admin/merch", label: "Merch register", icon: "merch", permission: ["sale:create", "booking:manage"], module: "point-of-sale" },
+      { href: "/admin/data", label: "Data lists", icon: "data", permission: ["list:manage", "event:write"] },
+      { href: "/admin/members", label: "Team", icon: "team", permission: "member:read" },
+      { href: "/admin/settings", label: "Settings", icon: "settings", permission: "org:update", alsoActiveOn: ["/admin/integrations"] },
+    ],
+  },
+  {
+    label: "Stations",
+    items: [
+      { href: "/admin/check-in", label: "Check-in", icon: "checkin", permission: "voucher:read", module: "ticket-sales" },
       { href: "/admin/sales", label: "Point of sale", icon: "pos", permission: ["sale:create", "booking:manage"], module: "point-of-sale" },
       {
         href: "/admin/stand",
@@ -69,19 +85,6 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: ["stand:operate", "stand:manage", "sale:create", "event:write"],
         module: "stand-mode",
       },
-      { href: "/admin/bookings", label: "Ticket bookings", icon: "bookings", permission: "booking:read", module: "ticket-sales" },
-      { href: "/admin/check-in", label: "Check-in", icon: "checkin", permission: "voucher:read", module: "ticket-sales" },
-    ],
-  },
-  {
-    label: "Catalog",
-    items: [{ href: "/admin/products", label: "Products", icon: "products", permission: ["product:read", "product:write", "event:read"] }],
-  },
-  {
-    label: "Organization",
-    items: [
-      { href: "/admin/members", label: "Team", icon: "team", permission: "member:read" },
-      { href: "/admin/settings", label: "Settings", icon: "settings", permission: "org:update", alsoActiveOn: ["/admin/integrations"] },
     ],
   },
 ];
@@ -132,4 +135,10 @@ export function filterNavGroups(groups: readonly NavGroup[], access: NavAccess):
 export function isNavItemActive(item: Pick<NavItem, "href" | "alsoActiveOn">, pathname: string): boolean {
   if (item.href === "/admin") return pathname === "/admin";
   return [item.href, ...(item.alsoActiveOn ?? [])].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+/** Whether a tab/link is the current page; `exact` links (an overview) match only their own path. */
+export function isTabActive(link: { href: string; exact?: boolean }, pathname: string): boolean {
+  const path = link.href.split("?")[0]!;
+  return link.exact ? pathname === path || pathname === `${path}/` : pathname === path || pathname.startsWith(`${path}/`);
 }

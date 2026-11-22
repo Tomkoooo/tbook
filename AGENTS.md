@@ -11,6 +11,7 @@ storefronts and the webshop use its APIs.
 | Ticket/booking API (v1, public) | [docs/storefront-api.md](docs/storefront-api.md) |
 | Products & stock API (v2 inventory) | [docs/inventory-api.md](docs/inventory-api.md) |
 | Any console UI change | [design-system/MASTER.md](design-system/MASTER.md) |
+| Where a console page lives, the event/group workspace, redirects | [docs/console-structure.md](docs/console-structure.md) |
 | Operations, deployment, migrations | [README.md](README.md) |
 
 ## Layout
@@ -50,6 +51,8 @@ app building blocks in `apps/web/src/components` (`PageTitle`, `SectionCard`,
 inline styles, no one-off CSS classes. Colours come only from semantic
 tokens (`bg-card`, `text-muted-foreground`, `bg-success-muted`); status colours
 come from `lib/status-tones.ts`. Long forms end with `StickyFormFooter`.
+
+**Console routes carry the business context.** Event tools live under `/admin/events/[eventId]/…`, group tools (hotels) under `/admin/groups/[groupId]/…`. Build links with `lib/event-routes.ts` (`eventPath`, `groupPath`) — never `?eventId=` — and start every event page with `requireEvent` + `requireEventModule` (`lib/require-module.tsx`). Sidebar, tabs, ⌘K and the home page all read one registry (`lib/nav-config.ts`, `lib/event-tools.ts`).
 
 **Server actions** re-check the permission themselves (`requireOrgPermission`)
 and return a plain `{ ok, message }` result for inline display. Never trust a

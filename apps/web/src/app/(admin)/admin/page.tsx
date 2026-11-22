@@ -54,10 +54,11 @@ export default async function AdminHomePage({
               <Button variant="outline" asChild>
                 <Link href="/admin/bookings">All bookings</Link>
               </Button>
-              {permissions.has("booking:manage") ? (
+              {permissions.has("booking:manage") && permissions.has("event:read") ? (
+                // A registration belongs to an event: pick it, then Guests › New registration.
                 <Button asChild>
-                  <Link href="/admin/bookings/new">
-                    <Plus /> New registration
+                  <Link href="/admin/events">
+                    <Plus /> Register a guest
                   </Link>
                 </Button>
               ) : null}

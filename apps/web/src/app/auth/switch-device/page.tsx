@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { AuthShell } from "@/components/auth-shell";
 import { ConfirmButtons } from "../confirm-buttons";
+import { safeRelativePath } from "@/lib/safe-redirect";
 import { SAME_DEVICE_COOKIE } from "../same-device-cookie";
 
 /**
@@ -19,7 +20,8 @@ export const dynamic = "force-dynamic";
 
 export default async function SwitchDevicePage({ searchParams }: { searchParams: Promise<{ token?: string; next?: string }> }) {
   const { token, next } = await searchParams;
-  const destination = next || "/admin";
+  // `next` comes from the URL: only a same-site relative path may be followed.
+  const destination = safeRelativePath(next, "/");
   if (!token) redirect(destination);
 
   const session = await auth();

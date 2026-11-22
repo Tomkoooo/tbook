@@ -1,22 +1,30 @@
 import Link from "next/link";
 import { CalendarX, ChevronRight, DoorOpen } from "lucide-react";
-import { listBookingFilterOptions } from "@tbook/services";
+import { TICKET_SALES } from "@tbook/modules";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { PageTitle } from "@/components/page-title";
-import { requireAdminPage } from "@/lib/admin-page";
+import { formatDate, requireAdminPage } from "@/lib/admin-page";
+import { eventPath } from "@/lib/event-routes";
+import { requireModule } from "@/lib/require-module";
+import { stationEvents } from "@/lib/station-events-server";
 
 /**
- * Event picker for the door. Deliberately a separate step from the roster:
- * scanning is always scoped to one event so a ticket for the wrong day
- * reports "wrong event" rather than being admitted.
+ * Station picker for the door: events with ticket sales on, today's first.
+ * Deliberately a separate step from the roster — scanning is always scoped to
+ * one event so a ticket for the wrong day reports "wrong event" rather than
+ * being admitted. The roster itself lives at /admin/events/[eventId]/check-in.
  */
 export const dynamic = "force-dynamic";
 
 export default async function CheckInIndexPage() {
   const { organizationId } = await requireAdminPage("voucher:read");
-  const { events } = await listBookingFilterOptions(organizationId);
+  const off = await requireModule(organizationId, TICKET_SALES, "Ticket selling");
+  if (off) return off;
+  const events = await stationEvents(organizationId, TICKET_SALES);
+  const todayCount = events.filter((row) => row.today).length;
 
   return (
     <>
@@ -33,12 +41,13 @@ export default async function CheckInIndexPage() {
         <>
           <KpiGrid cols={3}>
             <KpiTile label="Events" value={events.length} hint="available at the door" icon={<DoorOpen />} tone="info" />
+            <KpiTile label="Today" value={todayCount} hint="running today" icon={<DoorOpen />} tone={todayCount > 0 ? "success" : "neutral"} />
           </KpiGrid>
           <ul className="grid gap-3 sm:grid-cols-2 md:gap-4 xl:grid-cols-3">
-            {events.map((event) => (
-              <li key={event.id}>
+            {events.map(({ event, today }) => (
+              <li key={String(event._id)}>
                 <Link
-                  href={`/admin/check-in/${event.id}`}
+                  href={eventPath(String(event._id), "check-in")}
                   className="focus-visible:ring-ring/50 group block rounded-xl outline-none focus-visible:ring-[3px]"
                 >
                   <Card className="group-hover:border-ring/60 group-hover:bg-muted/40 flex-row items-center gap-3 p-4 shadow-xs transition-colors">
@@ -47,8 +56,9 @@ export default async function CheckInIndexPage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">{event.name}</span>
-                      <span className="text-muted-foreground block text-xs">Open door</span>
+                      <span className="text-muted-foreground block text-xs">{formatDate(event.startDate)}</span>
                     </span>
+                    {today ? <Badge variant="success">Today</Badge> : null}
                     <ChevronRight className="text-muted-foreground size-5 shrink-0" />
                   </Card>
                 </Link>

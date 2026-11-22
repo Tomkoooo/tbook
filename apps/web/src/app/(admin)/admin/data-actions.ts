@@ -121,8 +121,8 @@ export async function applyImportTargetAction(input: {
     const { organizationId, userId } = await requireOrgPermission("list:manage");
     const session = await getImportSessionForOrg(organizationId, input.sessionId);
     const result = await applyImportTarget({ organizationId, userId, eventId: input.eventId || null }, input.targetKey, session, input.sheetName, input.mapping);
-    if (input.eventId) revalidatePath(`/admin/events/${input.eventId}`);
-    revalidatePath("/admin/bus");
+    if (input.eventId) revalidatePath(`/admin/events/${input.eventId}`, "layout");
+    else revalidatePath("/admin/events/[eventId]", "layout");
     const details = [...(result.skipped ? [`${result.skipped} rows skipped (missing required values).`] : []), ...result.errors.slice(0, 20)];
     return { ok: result.errors.length === 0, message: result.message, details };
   } catch (error) {

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageTitle } from "@/components/page-title";
+import { eventPath } from "@/lib/event-routes";
 import { formatDate, formatMoney, requireAdminPage } from "@/lib/admin-page";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ export default async function EventsPage() {
               events.map((event) => (
                 <TableRow key={String(event._id)}>
                   <TableCell>
-                    <Link className="font-medium hover:underline" href={`/admin/events/${event._id}`}>
+                    <Link className="font-medium hover:underline" href={eventPath(String(event._id))}>
                       {event.name}
                     </Link>
                     {event.kind === "day_pass" ? <Badge variant="outline" className="ml-2">day passes</Badge> : null}

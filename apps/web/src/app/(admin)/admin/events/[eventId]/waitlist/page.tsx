@@ -1,0 +1,107 @@
+import Link from "next/link";
+import { WAITLIST, waitlist } from "@tbook/modules";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-state";
+import { PageTitle } from "@/components/page-title";
+import { SectionCard } from "@/components/section-card";
+import { Stat } from "@/components/stat";
+import { formatDateTime, requireAdminPage } from "@/lib/admin-page";
+import { eventPath } from "@/lib/event-routes";
+import { requireEvent, requireEventModule } from "@/lib/require-module";
+import { ProcessWaitlistButton, RemoveEntryButton } from "./waitlist-controls";
+
+export const dynamic = "force-dynamic";
+
+const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
+  waiting: { label: "Waiting", variant: "outline" },
+  offered: { label: "Offered", variant: "default" },
+  registered: { label: "Registered", variant: "secondary" },
+  expired: { label: "Offer expired", variant: "outline" },
+  declined: { label: "Declined", variant: "outline" },
+  failed: { label: "Couldn't register", variant: "destructive" },
+  removed: { label: "Removed", variant: "outline" },
+};
+
+export default async function WaitlistPage({ params }: { params: Promise<{ eventId: string }> }) {
+  const { eventId } = await params;
+  const { organizationId } = await requireAdminPage("waitlist:manage");
+  const event = await requireEvent(organizationId, eventId);
+  const off = await requireEventModule(organizationId, event, WAITLIST, "Waitlist");
+  if (off) return off;
+
+  const { rows, mode, hours, free } = await waitlist.listWaitlist(organizationId, eventId);
+  // Test entries (v1 X-TBook-Test) are listed with a badge but never counted.
+  const count = (status: string) => rows.filter((row) => row.status === status && !row.isTest).length;
+
+  return (
+    <>
+      <PageTitle
+        title="Waitlist"
+        back={{ href: eventPath(eventId), label: event.name }}
+        description={
+          mode === "auto"
+            ? "A freed place goes to the first in line automatically."
+            : `A freed place is offered to the first in line by email and held for ${hours} hours.`
+        }
+        actions={<ProcessWaitlistButton eventId={eventId} />}
+      />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat label="Waiting" value={count("waiting")} />
+        <Stat label="Open offers" value={count("offered")} />
+        <Stat label="Registered from waitlist" value={count("registered")} />
+        <Stat label="Free places" value={free == null ? "∞" : free} />
+      </div>
+      <SectionCard title={event.name} flush>
+        {rows.length === 0 ? (
+          <EmptyState title="Nobody is waiting" hint="When the event is full, the website can offer the waitlist (API: POST /api/v1/waitlist/join)." />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Guests</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Joined</TableHead>
+                <TableHead>
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="tabular-nums">{row.position ?? "—"}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">
+                      {row.name} {row.isTest ? <Badge variant="warning">TESZT</Badge> : null}
+                    </div>
+                    <div className="text-muted-foreground text-xs">{[row.email, row.phone].filter(Boolean).join(" · ")}</div>
+                    {row.lastError ? <div className="text-destructive text-xs">{row.lastError}</div> : null}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{row.guests}</TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS[row.status]?.variant ?? "outline"}>{STATUS[row.status]?.label ?? row.status}</Badge>
+                    {row.status === "offered" && row.offerExpiresAt ? (
+                      <div className="text-muted-foreground text-xs">until {formatDateTime(row.offerExpiresAt)}</div>
+                    ) : null}
+                    {row.bookingId ? (
+                      <div className="text-xs">
+                        <Link className="underline" href={`/admin/bookings/${row.bookingId}`}>
+                          Booking
+                        </Link>
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>{formatDateTime(row.createdAt)}</TableCell>
+                  <TableCell>{row.status === "waiting" || row.status === "offered" ? <RemoveEntryButton entryId={row.id} /> : null}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </SectionCard>
+    </>
+  );
+}

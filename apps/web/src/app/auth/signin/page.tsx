@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { AuthShell } from "@/components/auth-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { safeRelativePath } from "@/lib/safe-redirect";
 import { describeDevice } from "../device-label";
 import { sameDeviceCookieOptions } from "../same-device-cookie";
 
@@ -15,12 +16,14 @@ import { sameDeviceCookieOptions } from "../same-device-cookie";
 export const dynamic = "force-dynamic";
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ callbackUrl?: string }> }) {
-  const { callbackUrl } = await searchParams;
+  const { callbackUrl: rawCallbackUrl } = await searchParams;
+  // Where to land after signing in: the home page unless a page sent us here. Same-site paths only.
+  const callbackUrl = safeRelativePath(rawCallbackUrl, "/");
 
   async function sendMagicLink(formData: FormData) {
     "use server";
     const email = String(formData.get("email") ?? "").trim();
-    const destination = callbackUrl || "/admin";
+    const destination = callbackUrl;
 
     // Tracks which browser requested the link, so switch-device/page.tsx can
     // tell "opened on the same device" (skip the chooser) from "opened
@@ -45,8 +48,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
 
   return (
     <AuthShell
-      title="Sign in to tBook"
-      description="Enter your email and we'll send you a one-time sign-in link."
+      title="Staff sign-in"
+      description="Enter your work email and we'll send you a one-time sign-in link. You'll land on your event shortcuts."
     >
       <form action={sendMagicLink} className="grid gap-4">
         <div className="grid gap-1.5">
@@ -59,7 +62,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
       </form>
       <div className="mt-4 text-center">
         <Button variant="link" asChild>
-          <Link href={`/auth/qr${callbackUrl ? `?callbackUrl=${encodeURIComponent(callbackUrl)}` : ""}`}>
+          <Link href={`/auth/qr?callbackUrl=${encodeURIComponent(callbackUrl)}`}>
             <QrCode /> Sign in with a QR code instead
           </Link>
         </Button>

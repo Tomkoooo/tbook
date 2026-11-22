@@ -75,7 +75,7 @@ export async function saveBusRouteAction(eventId: string, routeId: string | null
     } else {
       await busTransport.createRoute(organizationId, eventId, input);
     }
-    revalidatePath("/admin/bus");
+    revalidatePath(`/admin/events/${eventId}`, "layout");
     return { ok: true, message: routeId ? "Bus saved." : "Bus added." };
   } catch (error) {
     return fail(error, "saveBusRouteAction");
@@ -86,7 +86,7 @@ export async function deleteBusRouteAction(routeId: string): Promise<BusActionRe
   try {
     const { organizationId } = await requireOrgPermission("bus:manage");
     await busTransport.deleteRoute(organizationId, routeId);
-    revalidatePath("/admin/bus");
+    revalidatePath("/admin/events/[eventId]", "layout");
     return { ok: true, message: "Bus deleted." };
   } catch (error) {
     return fail(error, "deleteBusRouteAction");
@@ -106,7 +106,7 @@ export async function rotateCaptainLinkAction(routeId: string): Promise<BusActio
   try {
     const { organizationId } = await requireOrgPermission("bus:manage");
     const token = await busTransport.rotateCaptainToken(organizationId, routeId);
-    revalidatePath("/admin/bus");
+    revalidatePath("/admin/events/[eventId]", "layout");
     return { ok: true, message: "New captain link created. Any earlier link stops working.", captainUrl: `${await appBaseUrl()}/captain/${token}` };
   } catch (error) {
     return fail(error, "rotateCaptainLinkAction");
@@ -117,7 +117,7 @@ export async function revokeCaptainLinkAction(routeId: string): Promise<BusActio
   try {
     const { organizationId } = await requireOrgPermission("bus:manage");
     await busTransport.revokeCaptainToken(organizationId, routeId);
-    revalidatePath("/admin/bus");
+    revalidatePath("/admin/events/[eventId]", "layout");
     return { ok: true, message: "Captain link revoked." };
   } catch (error) {
     return fail(error, "revokeCaptainLinkAction");
@@ -128,7 +128,7 @@ export async function recountBusSeatsAction(eventId: string): Promise<BusActionR
   try {
     const { organizationId } = await requireBusEvent(eventId);
     const routes = await busTransport.recountSeats(organizationId, eventId);
-    revalidatePath("/admin/bus");
+    revalidatePath(`/admin/events/${eventId}`, "layout");
     return { ok: true, message: `Seats recounted from the registrations on ${routes} buses.` };
   } catch (error) {
     return fail(error, "recountBusSeatsAction");
@@ -142,7 +142,7 @@ export async function sendCaptainNoticeAction(routeId: string): Promise<BusActio
     const route = await busTransport.getRouteForOrg(organizationId, routeId);
     await requireBusEvent(String(route.eventId));
     const result = await busTransport.sendCaptainNotice(organizationId, routeId);
-    revalidatePath("/admin/bus");
+    revalidatePath("/admin/events/[eventId]", "layout");
     const parts = [`${result.sent} of ${result.total} passengers emailed the captain's details.`];
     if (result.failed > 0) parts.push(`${result.failed} failed (see the email's delivery log on the Emails page).`);
     if (result.createdTemplate) parts.push("The “Bus: captain's details” email was created from the built-in text; edit it on the Emails page.");
@@ -159,7 +159,7 @@ export async function setBoardingAdminAction(routeId: string, attendeeKey: strin
     if (!(busTransport.busLegs as readonly string[]).includes(leg)) throw ActionError.validation("Unknown leg.");
     if (status !== null && !(busTransport.boardingStatuses as readonly string[]).includes(status)) throw ActionError.validation("Unknown status.");
     await busTransport.setBoarding(route, attendeeKey, leg as busTransport.BusLeg, status as busTransport.BoardingStatus | null, `user:${userId}`);
-    revalidatePath(`/admin/bus/${routeId}`);
+    revalidatePath(`/admin/events/${route.eventId}/bus/${routeId}`);
     return { ok: true };
   } catch (error) {
     return fail(error, "setBoardingAdminAction");

@@ -1,12 +1,15 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CommandPalette } from "@/components/shell/command-palette";
-import { loadShellEntitiesAction, type ShellEntities } from "@/components/shell/shell-actions";
+import { buildCrumbs } from "@/lib/crumbs";
+import { useShellEntities } from "@/components/shell/use-shell-entities";
+import { useWorkspace } from "@/components/shell/workspace-store";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Breadcrumb,
@@ -16,44 +19,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { routeContext } from "@/lib/event-routes";
 import { EXTRA_PAGES, NAV_GROUPS, PLATFORM_ITEMS, filterNavGroups, isNavItemVisible, type NavItem } from "@/lib/nav-config";
-
-/** Path segments that read better than their raw URL form. */
-const SEGMENT_LABELS: Record<string, string> = {
-  admin: "Dashboard",
-  "check-in": "Check-in",
-  "select-org": "Select organization",
-  members: "Team",
-  email: "Booking email",
-  new: "New",
-  bus: "Bus transfers",
-  vip: "VIP guests",
-  "device-link": "Device link",
-};
-
-const OBJECT_ID = /^[0-9a-f]{24}$/i;
-/** Parent segments whose child id is an event / an event group. */
-const EVENT_PARENTS = new Set(["events", "check-in"]);
-const GROUP_PARENTS = new Set(["groups"]);
-
-const NO_ENTITIES: ShellEntities = { events: [], groups: [] };
-
-export function crumbLabel(segment: string, previous: string | undefined, entities: ShellEntities): string {
-  if (OBJECT_ID.test(segment)) {
-    if (previous && EVENT_PARENTS.has(previous)) {
-      const event = entities.events.find((candidate) => candidate.id === segment);
-      if (event) return event.name;
-    }
-    if (previous && GROUP_PARENTS.has(previous)) {
-      const group = entities.groups.find((candidate) => candidate.id === segment);
-      if (group) return group.name;
-    }
-    // Other opaque ids (a hotel, a booking, a route) have no cheap name here.
-    return "Details";
-  }
-  if (SEGMENT_LABELS[segment]) return SEGMENT_LABELS[segment];
-  return segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, " ");
-}
 
 export function AdminHeader({
   permissions,
@@ -66,26 +33,20 @@ export function AdminHeader({
   isSystemAdmin: boolean;
 }) {
   const pathname = usePathname();
-  const segments = pathname.split("/").filter(Boolean);
-  const [entities, setEntities] = useState<ShellEntities>(NO_ENTITIES);
-  const loadedAt = useRef(0);
+  const context = routeContext(pathname);
+  const contextId = context.kind === "event" ? context.eventId : context.kind === "group" ? context.groupId : null;
+  const workspace = useWorkspace(context.kind === "group" ? "group" : "event", contextId);
 
-  const refresh = useCallback(() => {
-    // Cheap guard against reloading on every palette toggle.
-    if (Date.now() - loadedAt.current < 30_000) return;
-    loadedAt.current = Date.now();
-    loadShellEntitiesAction()
-      .then(setEntities)
-      .catch(() => {
-        loadedAt.current = 0;
-      });
-  }, []);
-
-  // Names are needed up front only when the page's URL contains an event or group id.
-  const needsNames = segments.some((segment, index) => OBJECT_ID.test(segment) && (EVENT_PARENTS.has(segments[index - 1] ?? "") || GROUP_PARENTS.has(segments[index - 1] ?? "")));
-  useEffect(() => {
-    if (needsNames) refresh();
-  }, [needsNames, pathname, refresh]);
+  // The workspace layout registers its name before paint; the shared cached lookup only
+  // covers the instant before that (and keeps the palette's lists warm).
+  const { entities, refresh } = useShellEntities(contextId !== null && !workspace);
+  const lookedUp =
+    context.kind === "event"
+      ? entities.events.find((event) => event.id === context.eventId)?.name
+      : context.kind === "group"
+        ? entities.groups.find((group) => group.id === context.groupId)?.name
+        : undefined;
+  const workspaceName = workspace?.name ?? lookedUp ?? null;
 
   const pages = useMemo<NavItem[]>(() => {
     const access = { permissions, modules };
@@ -95,10 +56,7 @@ export function AdminHeader({
     return [...fromNav, ...platform, ...extra];
   }, [permissions, modules, isSystemAdmin]);
 
-  const crumbs = segments.map((segment, index) => ({
-    label: crumbLabel(segment, segments[index - 1], entities),
-    href: `/${segments.slice(0, index + 1).join("/")}`,
-  }));
+  const crumbs = buildCrumbs(pathname, { event: workspaceName, group: workspaceName });
 
   return (
     <header className="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -106,23 +64,27 @@ export function AdminHeader({
       <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
       <Breadcrumb className="min-w-0">
         <BreadcrumbList className="flex-nowrap">
-          {crumbs.map((crumb, index) => (
-            <Fragment key={crumb.href}>
-              {index > 0 ? <BreadcrumbSeparator className="max-sm:hidden" /> : null}
-              <BreadcrumbItem className={index === crumbs.length - 1 ? "min-w-0" : "max-sm:hidden"}>
-                {index === crumbs.length - 1 ? (
-                  <BreadcrumbPage className="truncate">{crumb.label}</BreadcrumbPage>
-                ) : (
-                  <BreadcrumbLink asChild>
-                    <Link href={crumb.href}>{crumb.label}</Link>
-                  </BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-            </Fragment>
-          ))}
+          {crumbs.map((crumb, index) => {
+            const last = index === crumbs.length - 1;
+            const label = crumb.label ?? <Skeleton className="h-4 w-24" />;
+            return (
+              <Fragment key={crumb.href}>
+                {index > 0 ? <BreadcrumbSeparator className="max-sm:hidden" /> : null}
+                <BreadcrumbItem className={last ? "min-w-0" : "max-sm:hidden"}>
+                  {last ? (
+                    <BreadcrumbPage className="truncate">{label}</BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbLink asChild>
+                      <Link href={crumb.href}>{label}</Link>
+                    </BreadcrumbLink>
+                  )}
+                </BreadcrumbItem>
+              </Fragment>
+            );
+          })}
         </BreadcrumbList>
       </Breadcrumb>
-      <CommandPalette pages={pages} entities={entities} onOpen={refresh} />
+      <CommandPalette pages={pages} entities={entities} workspace={workspace} onOpen={refresh} />
       <ThemeToggle />
     </header>
   );

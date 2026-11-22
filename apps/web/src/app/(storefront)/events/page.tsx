@@ -1,13 +1,25 @@
+import Link from "next/link";
+import { LogIn, Globe } from "lucide-react";
+import { AuthShell } from "@/components/auth-shell";
+import { Button } from "@/components/ui/button";
+
 /**
- * Placeholder for the public event listing page (legacy: TBookEventList /
- * the /jegyek route). Phase 6 replaces this with the real, group/org-scoped
- * listing backed by the v2 API.
+ * This site is the admin back end: public event pages live on each
+ * organizer's own website (see docs/site-integration-guide.md). The route is
+ * kept so old links land on an honest explanation instead of a 404.
  */
 export default function EventsPage() {
   return (
-    <main className="mx-auto grid max-w-3xl gap-2 px-4 py-16">
-      <h1 className="text-3xl font-semibold tracking-tight">tBook</h1>
-      <p className="text-muted-foreground">Event listing — implemented in Phase 6.</p>
-    </main>
+    <AuthShell
+      icon={<Globe />}
+      title="Event pages are on the organizer's website"
+      description="This site is the admin back end of tBook. The public event pages live on the organizer's own website — use the link from the event's website or your confirmation email."
+    >
+      <Button asChild className="w-full">
+        <Link href="/auth/signin?callbackUrl=/">
+          <LogIn /> Staff sign-in
+        </Link>
+      </Button>
+    </AuthShell>
   );
 }

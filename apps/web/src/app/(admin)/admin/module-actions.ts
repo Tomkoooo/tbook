@@ -38,7 +38,7 @@ export async function setEventModuleAction(eventId: string, moduleKey: string, e
     const { organizationId, userId } = await requireOrgPermission("module:manage");
     await getEventForOrg(organizationId, eventId);
     await setEventModule(organizationId, eventId, moduleKey, { enabled }, userId);
-    revalidatePath(`/admin/events/${eventId}`);
+    revalidatePath(`/admin/events/${eventId}`, "layout");
     return { ok: true, message: enabled ? "Switched on for this event." : "Switched off for this event." };
   } catch (error) {
     return fail(error, "setEventModuleAction");
@@ -51,7 +51,7 @@ export async function saveEventModuleConfigAction(eventId: string, moduleKey: st
     await getEventForOrg(organizationId, eventId);
     const config = cleanModuleConfig(moduleKey, Object.fromEntries(formData.entries()));
     await setEventModule(organizationId, eventId, moduleKey, { config }, userId);
-    revalidatePath(`/admin/events/${eventId}`);
+    revalidatePath(`/admin/events/${eventId}`, "layout");
     return { ok: true, message: "Settings saved." };
   } catch (error) {
     return fail(error, "saveEventModuleConfigAction");

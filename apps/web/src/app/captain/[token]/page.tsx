@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { BUS_TRANSPORT, busTransport } from "@tbook/modules";
 import { eventRepository } from "@tbook/db";
 import { resolveModules } from "@tbook/services";
-import { PassengerList } from "@/app/(admin)/admin/bus/passenger-list";
+import { PassengerList } from "@/components/bus/passenger-list";
 import { captainSetBoardingAction } from "./actions";
 
 export const dynamic = "force-dynamic";

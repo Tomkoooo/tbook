@@ -154,7 +154,7 @@ out-of-band booking edit made directly in the database). Pass
 
 The admin console covers the cases the storefront cannot:
 
-- **Register by hand** (`/admin/bookings/new`) — individual or team/pair
+- **Register by hand** (`/admin/events/[eventId]/bookings/new`) — individual or team/pair
   entries. The event's own `registrationUnit` / `playersPerTicket` /
   `teamMemberFieldSchema` drive the form, so a pairs event asks for both
   players and a 5-a-side team asks for its roster. Four rules can be
@@ -237,8 +237,8 @@ Tickets → Day pass pricing) or the CLI via `event create`/`event edit
 
 ## Point of sale
 
-`/admin/sales` is the seller screen: pick an event (or, for a day-pass
-event, the days), take cash or card, enter the customer and billing
+`/admin/sales` lists today's events first; `/admin/events/[eventId]/sales` is the seller screen
+(for a day-pass event, pick the days), take cash or card, enter the customer and billing
 details. The sale is recorded as paid (`source: "pos"`), the ticket PDF is
 emailed, the Számlázz.hu invoice is issued with the real payment method
 and its PDF is emailed too. A seller needs the `sale:create` permission;

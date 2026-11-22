@@ -1,77 +1,117 @@
 /*
- * tBook theme — see design-system/MASTER.md (follows the tCrm template
- * patterns: status tones, chart palette, print rules, row-height tokens).
+ * tBook theme: the tCrm template's token system (tCrm-templete/docs/06-design-tokenek.md),
+ * documented in design-system/MASTER.md.
  *
- * Two layers, one source of truth:
- *   1. --tbook-* brand tokens (light on :root, dark via prefers-color-scheme
- *      or [data-theme="dark"]). Change colours here only.
- *   2. shadcn semantic tokens (--background, --primary, …) that point at the
- *      brand tokens, exposed to Tailwind through @theme inline.
- * Components use Tailwind semantic classes (bg-card, text-muted-foreground,
- * bg-success-soft …) and never raw hex.
+ *   :root / .dark   shadcn variables written directly in oklch (zinc neutrals).
+ *   @theme inline   exposes them to Tailwind (bg-card, text-muted-foreground …).
  *
- * Status tones (success / warning / danger / info / note / neutral), per tone:
- *   text-{tone} / bg-{tone} + text-{tone}-foreground   solid: dot, bar, count
- *   bg-{tone}-soft + text-{tone}-soft-foreground         tinted surface: badge, notice
- *   border-{tone}-border                                   frame of a tinted surface
- * (bg-{tone}-muted / text-{tone} from the first token set keep working.)
- * The dark block below appears twice (OS preference and [data-theme="dark"]);
- * the two must stay identical.
+ * Brand = --primary (orange) and --secondary (deep blue). In dark mode --primary
+ * turns neutral-light and the orange moves to --sidebar-primary. Everything else
+ * stays; status tones carry meaning, not brand.
+ *
+ * Dark mode is the `.dark` class on <html>, set by next-themes (root layout).
+ * There is exactly ONE .dark block, below. It is wrapped in `@media not print`,
+ * so a dark-mode user always prints with the light tokens.
+ *
+ * Status tones (success / warning / danger / info / note / neutral), five roles each:
+ *   bg-{tone} + text-{tone}-foreground            solid: dot, bar, counter
+ *   text-{tone}                                   emphasised text/icon on the page background
+ *   bg-{tone}-soft + text-{tone}-soft-foreground  tinted surface: badge, notice, row
+ *   border-{tone}-border                          frame of a tinted surface
+ * (bg-{tone}-muted from the first token set is an alias of -soft and keeps working.)
+ *
+ * Contrast (WCAG AA, checked by src/lib/theme-contrast.test.ts): every foreground
+ * on its background >= 4.5:1. Orange is --primary at L 0.58 (the template's 0.687
+ * gives only 3.0:1 with white).
  */
 
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is([data-theme="dark"] *));
+@custom-variant dark (&:is(.dark *));
 
-/* ---- Brand tokens: light (slate neutrals + sky-700 accent) ------------ */
 :root {
-  --tbook-bg: #f8fafc;
-  --tbook-surface: #ffffff;
-  --tbook-surface-alt: #f1f5f9;
-  --tbook-border: #e2e8f0;
-  --tbook-border-strong: #cbd5e1;
-  --tbook-text: #020617;
-  --tbook-text-muted: #475569;
-  --tbook-text-faint: #64748b;
-  --tbook-accent: #0369a1;
-  --tbook-accent-hover: #075985;
-  --tbook-accent-text: #ffffff;
+  color-scheme: light;
+  --radius: 0.625rem;
 
-  /* Status tones: -bg = soft surface, -text = solid / text colour,
-   * -border = frame, -on = foreground to put on the solid colour. */
-  --tbook-info-bg: #e0f2fe;
-  --tbook-info-text: #075985;
-  --tbook-info-border: #bae6fd;
-  --tbook-info-on: #ffffff;
-  --tbook-success-bg: #dcfce7;
-  --tbook-success-text: #166534;
-  --tbook-success-border: #bbf7d0;
-  --tbook-success-on: #ffffff;
-  --tbook-warning-bg: #fef3c7;
-  --tbook-warning-text: #92400e;
-  --tbook-warning-border: #fde68a;
-  --tbook-warning-on: #ffffff;
-  --tbook-danger-bg: #fee2e2;
-  --tbook-danger-text: #991b1b;
-  --tbook-danger-border: #fecaca;
-  --tbook-danger-on: #ffffff;
-  --tbook-danger: #dc2626;
-  --tbook-note-bg: #ede9fe;
-  --tbook-note-text: #5b21b6;
-  --tbook-note-border: #ddd6fe;
-  --tbook-note-on: #ffffff;
-  --tbook-neutral-bg: #f1f5f9;
-  --tbook-neutral-text: #475569;
-  --tbook-neutral-border: #e2e8f0;
-  --tbook-neutral-on: #ffffff;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
 
-  /* Chart series, fixed order. Never reuse the status red/green for data. */
-  --tbook-chart-1: #0369a1;
-  --tbook-chart-2: #0d9488;
-  --tbook-chart-3: #d97706;
-  --tbook-chart-4: #7c3aed;
-  --tbook-chart-5: #64748b;
+  /* Brand: orange. The template's oklch(0.687 0.1972 43.33) fails AA with white
+   * button text (3.03:1), so lightness is lowered to 0.58 (4.60:1) and chroma
+   * trimmed to the sRGB limit at that lightness. Same hue. */
+  --primary: oklch(0.58 0.1714 43.33);
+  --primary-foreground: oklch(1 0 0);
+  /* Brand: deep blue (as given by the template). */
+  --secondary: oklch(0.1711 0.0689 268.79);
+  --secondary-foreground: oklch(0.985 0 0);
+
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.54 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+
+  /* Chart series, fixed order: blue, orange, aqua, yellow, amber. */
+  --chart-1: oklch(0.546 0.17 255);
+  --chart-2: oklch(0.646 0.222 41.116);
+  --chart-3: oklch(0.6 0.118 184.704);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.58 0.1714 43.33);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.705 0.015 286.067);
+
+  /* Status tones: solid, foreground (on solid), soft, soft-foreground, border. */
+  --success: oklch(0.508 0.118 165.612);
+  --success-foreground: oklch(1 0 0);
+  --success-soft: oklch(0.95 0.052 163.051);
+  --success-soft-foreground: oklch(0.432 0.095 166.913);
+  --success-border: oklch(0.905 0.093 164.15);
+
+  --warning: oklch(0.555 0.163 48.998);
+  --warning-foreground: oklch(1 0 0);
+  --warning-soft: oklch(0.962 0.059 95.617);
+  --warning-soft-foreground: oklch(0.473 0.137 46.201);
+  --warning-border: oklch(0.924 0.12 95.746);
+
+  --danger: oklch(0.505 0.213 27.518);
+  --danger-foreground: oklch(1 0 0);
+  --danger-soft: oklch(0.936 0.032 17.717);
+  --danger-soft-foreground: oklch(0.444 0.177 26.899);
+  --danger-border: oklch(0.885 0.062 18.334);
+
+  --info: oklch(0.5 0.134 242.749);
+  --info-foreground: oklch(1 0 0);
+  --info-soft: oklch(0.951 0.026 236.824);
+  --info-soft-foreground: oklch(0.443 0.11 240.79);
+  --info-border: oklch(0.901 0.058 230.902);
+
+  --note: oklch(0.491 0.27 292.581);
+  --note-foreground: oklch(1 0 0);
+  --note-soft: oklch(0.943 0.029 294.588);
+  --note-soft-foreground: oklch(0.432 0.232 292.759);
+  --note-border: oklch(0.894 0.057 293.283);
+
+  --neutral: oklch(0.442 0.017 285.786);
+  --neutral-foreground: oklch(1 0 0);
+  --neutral-soft: oklch(0.967 0.001 286.375);
+  --neutral-soft-foreground: oklch(0.442 0.017 285.786);
+  --neutral-border: oklch(0.92 0.004 286.32);
 
   /* Rhythm: table row heights (compact desktop, comfortable, touch) and shell. */
   --row-h-compact: 2.25rem;
@@ -80,137 +120,86 @@
   --header-h: 3.5rem;
 }
 
-/* ---- Brand tokens: dark ------------------------------------------------
- * Follows the OS by default (never forced dark); [data-theme] overrides
- * either way. The two blocks must stay identical. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --tbook-bg: #020617;
-    --tbook-surface: #0f172a;
-    --tbook-surface-alt: #1e293b;
-    --tbook-border: #1e293b;
-    --tbook-border-strong: #334155;
-    --tbook-text: #f1f5f9;
-    --tbook-text-muted: #cbd5e1;
-    --tbook-text-faint: #94a3b8;
-    --tbook-accent: #38bdf8;
-    --tbook-accent-hover: #7dd3fc;
-    --tbook-accent-text: #020617;
+/* The one dark block. `not print`: paper is always light. */
+@media not print {
+  .dark {
+    color-scheme: dark;
 
-    --tbook-info-bg: #082f49;
-    --tbook-info-text: #7dd3fc;
-    --tbook-info-border: #0c4a6e;
-    --tbook-info-on: #082f49;
-    --tbook-success-bg: #052e16;
-    --tbook-success-text: #86efac;
-    --tbook-success-border: #14532d;
-    --tbook-success-on: #052e16;
-    --tbook-warning-bg: #422006;
-    --tbook-warning-text: #fcd34d;
-    --tbook-warning-border: #713f12;
-    --tbook-warning-on: #422006;
-    --tbook-danger-bg: #450a0a;
-    --tbook-danger-text: #fca5a5;
-    --tbook-danger-border: #7f1d1d;
-    --tbook-danger-on: #450a0a;
-    --tbook-danger: #ef4444;
-    --tbook-note-bg: #2e1065;
-    --tbook-note-text: #c4b5fd;
-    --tbook-note-border: #4c1d95;
-    --tbook-note-on: #2e1065;
-    --tbook-neutral-bg: #1e293b;
-    --tbook-neutral-text: #cbd5e1;
-    --tbook-neutral-border: #334155;
-    --tbook-neutral-on: #0f172a;
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
 
-    --tbook-chart-1: #38bdf8;
-    --tbook-chart-2: #2dd4bf;
-    --tbook-chart-3: #fbbf24;
-    --tbook-chart-4: #a78bfa;
-    --tbook-chart-5: #94a3b8;
+    /* Neutral-light primary; the orange lives in --sidebar-primary. */
+    --primary: oklch(0.92 0.004 286.32);
+    --primary-foreground: oklch(0.21 0.006 285.885);
+    /* The deep blue lifted so it stays visible on a near-black page. */
+    --secondary: oklch(0.3 0.06 268.79);
+    --secondary-foreground: oklch(0.985 0 0);
+
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
+
+    --chart-1: oklch(0.65 0.16 250);
+    --chart-2: oklch(0.72 0.19 45);
+    --chart-3: oklch(0.72 0.12 185);
+    --chart-4: oklch(0.86 0.17 90);
+    --chart-5: oklch(0.78 0.17 70);
+
+    --sidebar: oklch(0.21 0.006 285.885);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.58 0.1714 43.33);
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent: oklch(0.274 0.006 286.033);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.552 0.016 285.938);
+
+    --success: oklch(0.765 0.177 163.223);
+    --success-foreground: oklch(0.262 0.051 172.552);
+    --success-soft: oklch(0.262 0.051 172.552);
+    --success-soft-foreground: oklch(0.845 0.143 164.978);
+    --success-border: oklch(0.378 0.077 168.94);
+
+    --warning: oklch(0.828 0.189 84.429);
+    --warning-foreground: oklch(0.279 0.077 45.635);
+    --warning-soft: oklch(0.279 0.077 45.635);
+    --warning-soft-foreground: oklch(0.879 0.169 91.605);
+    --warning-border: oklch(0.414 0.112 45.904);
+
+    --danger: oklch(0.704 0.191 22.216);
+    --danger-foreground: oklch(0.258 0.092 26.042);
+    --danger-soft: oklch(0.258 0.092 26.042);
+    --danger-soft-foreground: oklch(0.808 0.114 19.571);
+    --danger-border: oklch(0.396 0.141 25.723);
+
+    --info: oklch(0.746 0.16 232.661);
+    --info-foreground: oklch(0.293 0.066 243.157);
+    --info-soft: oklch(0.293 0.066 243.157);
+    --info-soft-foreground: oklch(0.828 0.111 230.318);
+    --info-border: oklch(0.391 0.09 240.876);
+
+    --note: oklch(0.702 0.183 293.541);
+    --note-foreground: oklch(0.283 0.141 291.089);
+    --note-soft: oklch(0.283 0.141 291.089);
+    --note-soft-foreground: oklch(0.811 0.111 293.571);
+    --note-border: oklch(0.38 0.189 293.745);
+
+    --neutral: oklch(0.705 0.015 286.067);
+    --neutral-foreground: oklch(0.141 0.005 285.823);
+    --neutral-soft: oklch(0.274 0.006 286.033);
+    --neutral-soft-foreground: oklch(0.871 0.006 286.286);
+    --neutral-border: oklch(0.37 0.013 285.805);
   }
-}
-
-:root[data-theme="dark"] {
-  --tbook-bg: #020617;
-  --tbook-surface: #0f172a;
-  --tbook-surface-alt: #1e293b;
-  --tbook-border: #1e293b;
-  --tbook-border-strong: #334155;
-  --tbook-text: #f1f5f9;
-  --tbook-text-muted: #cbd5e1;
-  --tbook-text-faint: #94a3b8;
-  --tbook-accent: #38bdf8;
-  --tbook-accent-hover: #7dd3fc;
-  --tbook-accent-text: #020617;
-
-  --tbook-info-bg: #082f49;
-  --tbook-info-text: #7dd3fc;
-  --tbook-info-border: #0c4a6e;
-  --tbook-info-on: #082f49;
-  --tbook-success-bg: #052e16;
-  --tbook-success-text: #86efac;
-  --tbook-success-border: #14532d;
-  --tbook-success-on: #052e16;
-  --tbook-warning-bg: #422006;
-  --tbook-warning-text: #fcd34d;
-  --tbook-warning-border: #713f12;
-  --tbook-warning-on: #422006;
-  --tbook-danger-bg: #450a0a;
-  --tbook-danger-text: #fca5a5;
-  --tbook-danger-border: #7f1d1d;
-  --tbook-danger-on: #450a0a;
-  --tbook-danger: #ef4444;
-  --tbook-note-bg: #2e1065;
-  --tbook-note-text: #c4b5fd;
-  --tbook-note-border: #4c1d95;
-  --tbook-note-on: #2e1065;
-  --tbook-neutral-bg: #1e293b;
-  --tbook-neutral-text: #cbd5e1;
-  --tbook-neutral-border: #334155;
-  --tbook-neutral-on: #0f172a;
-
-  --tbook-chart-1: #38bdf8;
-  --tbook-chart-2: #2dd4bf;
-  --tbook-chart-3: #fbbf24;
-  --tbook-chart-4: #a78bfa;
-  --tbook-chart-5: #94a3b8;
-}
-
-/* ---- shadcn semantic tokens, mapped onto the brand tokens ------------- */
-:root {
-  --background: var(--tbook-bg);
-  --foreground: var(--tbook-text);
-  --card: var(--tbook-surface);
-  --card-foreground: var(--tbook-text);
-  --popover: var(--tbook-surface);
-  --popover-foreground: var(--tbook-text);
-  --primary: var(--tbook-accent);
-  --primary-foreground: var(--tbook-accent-text);
-  --secondary: var(--tbook-neutral-bg);
-  --secondary-foreground: var(--tbook-text);
-  --muted: var(--tbook-surface-alt);
-  --muted-foreground: var(--tbook-text-muted);
-  --accent: var(--tbook-info-bg);
-  --accent-foreground: var(--tbook-info-text);
-  --destructive: var(--tbook-danger);
-  --border: var(--tbook-border);
-  --input: var(--tbook-border-strong);
-  --ring: var(--tbook-accent);
-  --radius: 0.5rem;
-  --chart-1: var(--tbook-chart-1);
-  --chart-2: var(--tbook-chart-2);
-  --chart-3: var(--tbook-chart-3);
-  --chart-4: var(--tbook-chart-4);
-  --chart-5: var(--tbook-chart-5);
-  --sidebar: var(--tbook-surface);
-  --sidebar-foreground: var(--tbook-text-muted);
-  --sidebar-primary: var(--tbook-accent);
-  --sidebar-primary-foreground: var(--tbook-accent-text);
-  --sidebar-accent: var(--tbook-info-bg);
-  --sidebar-accent-foreground: var(--tbook-info-text);
-  --sidebar-border: var(--tbook-border);
-  --sidebar-ring: var(--tbook-accent);
 }
 
 @theme inline {
@@ -243,51 +232,6 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
-  /* Status tones — see the header comment for which utility means what.
-   * `-muted` is the first-generation name for `-soft`; both stay. */
-  --color-info: var(--tbook-info-text);
-  --color-info-foreground: var(--tbook-info-on);
-  --color-info-soft: var(--tbook-info-bg);
-  --color-info-soft-foreground: var(--tbook-info-text);
-  --color-info-muted: var(--tbook-info-bg);
-  --color-info-border: var(--tbook-info-border);
-  --color-success: var(--tbook-success-text);
-  --color-success-foreground: var(--tbook-success-on);
-  --color-success-soft: var(--tbook-success-bg);
-  --color-success-soft-foreground: var(--tbook-success-text);
-  --color-success-muted: var(--tbook-success-bg);
-  --color-success-border: var(--tbook-success-border);
-  --color-warning: var(--tbook-warning-text);
-  --color-warning-foreground: var(--tbook-warning-on);
-  --color-warning-soft: var(--tbook-warning-bg);
-  --color-warning-soft-foreground: var(--tbook-warning-text);
-  --color-warning-muted: var(--tbook-warning-bg);
-  --color-warning-border: var(--tbook-warning-border);
-  --color-danger: var(--tbook-danger-text);
-  --color-danger-foreground: var(--tbook-danger-on);
-  --color-danger-soft: var(--tbook-danger-bg);
-  --color-danger-soft-foreground: var(--tbook-danger-text);
-  --color-danger-muted: var(--tbook-danger-bg);
-  --color-danger-border: var(--tbook-danger-border);
-  --color-note: var(--tbook-note-text);
-  --color-note-foreground: var(--tbook-note-on);
-  --color-note-soft: var(--tbook-note-bg);
-  --color-note-soft-foreground: var(--tbook-note-text);
-  --color-note-muted: var(--tbook-note-bg);
-  --color-note-border: var(--tbook-note-border);
-  --color-neutral: var(--tbook-neutral-text);
-  --color-neutral-foreground: var(--tbook-neutral-on);
-  --color-neutral-soft: var(--tbook-neutral-bg);
-  --color-neutral-soft-foreground: var(--tbook-neutral-text);
-  --color-neutral-muted: var(--tbook-neutral-bg);
-  --color-neutral-border: var(--tbook-neutral-border);
-
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -296,6 +240,50 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Status tones; -muted is the first-generation name for -soft. */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-success-soft-foreground: var(--success-soft-foreground);
+  --color-success-muted: var(--success-soft);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-soft-foreground: var(--warning-soft-foreground);
+  --color-warning-muted: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-foreground: var(--danger-soft-foreground);
+  --color-danger-muted: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+  --color-info-soft-foreground: var(--info-soft-foreground);
+  --color-info-muted: var(--info-soft);
+  --color-info-border: var(--info-border);
+  --color-note: var(--note);
+  --color-note-foreground: var(--note-foreground);
+  --color-note-soft: var(--note-soft);
+  --color-note-soft-foreground: var(--note-soft-foreground);
+  --color-note-muted: var(--note-soft);
+  --color-note-border: var(--note-border);
+  --color-neutral: var(--neutral);
+  --color-neutral-foreground: var(--neutral-foreground);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-neutral-soft-foreground: var(--neutral-soft-foreground);
+  --color-neutral-muted: var(--neutral-soft);
+  --color-neutral-border: var(--neutral-border);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 }
 
 /* Figures that must line up in columns (money, counts, times): the
@@ -308,18 +296,6 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-  }
-
-  html {
-    color-scheme: light dark;
-  }
-
-  :root[data-theme="light"] {
-    color-scheme: light;
-  }
-
-  :root[data-theme="dark"] {
-    color-scheme: dark;
   }
 
   body {
@@ -349,53 +325,13 @@
 /* ---- Print --------------------------------------------------------------
  * The console prints as a plain document: chrome hidden, scroll containers
  * opened, cards and rows kept whole, table headers repeated, light colours.
+ * The .dark block above is not applied in print, so the :root tokens win;
+ * next-themes also writes an inline color-scheme on <html>, hence the override.
  * `data-print="hide"` drops an element; `data-export="skip"` is reserved for
  * a future screen export. */
 @media print {
-  /* Specificity beats both dark blocks, so a dark-mode user still prints light. */
-  html:root:not([data-theme="print"]) {
-    color-scheme: light;
-    --tbook-bg: #f8fafc;
-    --tbook-surface: #ffffff;
-    --tbook-surface-alt: #f1f5f9;
-    --tbook-border: #e2e8f0;
-    --tbook-border-strong: #cbd5e1;
-    --tbook-text: #020617;
-    --tbook-text-muted: #475569;
-    --tbook-text-faint: #64748b;
-    --tbook-accent: #0369a1;
-    --tbook-accent-hover: #075985;
-    --tbook-accent-text: #ffffff;
-    --tbook-info-bg: #e0f2fe;
-    --tbook-info-text: #075985;
-    --tbook-info-border: #bae6fd;
-    --tbook-info-on: #ffffff;
-    --tbook-success-bg: #dcfce7;
-    --tbook-success-text: #166534;
-    --tbook-success-border: #bbf7d0;
-    --tbook-success-on: #ffffff;
-    --tbook-warning-bg: #fef3c7;
-    --tbook-warning-text: #92400e;
-    --tbook-warning-border: #fde68a;
-    --tbook-warning-on: #ffffff;
-    --tbook-danger-bg: #fee2e2;
-    --tbook-danger-text: #991b1b;
-    --tbook-danger-border: #fecaca;
-    --tbook-danger-on: #ffffff;
-    --tbook-danger: #dc2626;
-    --tbook-note-bg: #ede9fe;
-    --tbook-note-text: #5b21b6;
-    --tbook-note-border: #ddd6fe;
-    --tbook-note-on: #ffffff;
-    --tbook-neutral-bg: #f1f5f9;
-    --tbook-neutral-text: #475569;
-    --tbook-neutral-border: #e2e8f0;
-    --tbook-neutral-on: #ffffff;
-    --tbook-chart-1: #0369a1;
-    --tbook-chart-2: #0d9488;
-    --tbook-chart-3: #d97706;
-    --tbook-chart-4: #7c3aed;
-    --tbook-chart-5: #64748b;
+  html {
+    color-scheme: light !important;
   }
 
   [data-slot="sidebar"],

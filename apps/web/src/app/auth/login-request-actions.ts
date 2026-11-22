@@ -6,6 +6,7 @@ import { ensureDbConnection, loginRequestRepository } from "@tbook/db";
 import { generateLoginQrDataUrl } from "@tbook/services";
 import { auth } from "@/auth";
 import { issueSessionCookie } from "@/lib/session-cookie";
+import { safeRelativePath } from "@/lib/safe-redirect";
 import { describeDevice } from "./device-label";
 
 export async function createQrLoginRequestAction(callbackUrl: string): Promise<{ token: string; qrDataUrl: string }> {
@@ -14,7 +15,7 @@ export async function createQrLoginRequestAction(callbackUrl: string): Promise<{
   const request = await loginRequestRepository.create({
     purpose: "qr",
     requesterLabel: describeDevice(userAgent),
-    callbackUrl,
+    callbackUrl: safeRelativePath(callbackUrl, "/"),
   });
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "";
   const confirmUrl = new URL(`/auth/qr/confirm?token=${request.token}`, appUrl).toString();
@@ -48,7 +49,7 @@ export async function pollLoginRequestAction(token: string): Promise<LoginReques
     name: claimed.confirmedName,
     image: claimed.confirmedImage,
   });
-  return { status: "ready", redirectTo: claimed.callbackUrl };
+  return { status: "ready", redirectTo: safeRelativePath(claimed.callbackUrl, "/") };
 }
 
 /** Called from the *approving* device, which must already have a real session. */
@@ -91,5 +92,5 @@ export async function claimDeviceLinkAction(token: string): Promise<{ ok: false;
   const claimed = await loginRequestRepository.claimDeviceLink(token);
   if (!claimed?.confirmedUserId || !claimed.confirmedEmail) return { ok: false, message: "This code has expired or was already used. Show a new one." };
   await issueSessionCookie({ id: String(claimed.confirmedUserId), email: claimed.confirmedEmail, name: claimed.confirmedName, image: claimed.confirmedImage });
-  redirect(claimed.callbackUrl);
+  redirect(safeRelativePath(claimed.callbackUrl, "/"));
 }

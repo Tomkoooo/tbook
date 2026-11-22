@@ -2,6 +2,7 @@ import { Mail, QrCode } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { AuthShell } from "@/components/auth-shell";
+import { safeRelativePath } from "@/lib/safe-redirect";
 import { createQrLoginRequestAction } from "../login-request-actions";
 import { LoginWaiting } from "../login-waiting";
 
@@ -9,8 +10,9 @@ import { LoginWaiting } from "../login-waiting";
 export const dynamic = "force-dynamic";
 
 export default async function QrSignInPage({ searchParams }: { searchParams: Promise<{ callbackUrl?: string }> }) {
-  const { callbackUrl } = await searchParams;
-  const { token, qrDataUrl } = await createQrLoginRequestAction(callbackUrl || "/admin");
+  const { callbackUrl: rawCallbackUrl } = await searchParams;
+  const callbackUrl = safeRelativePath(rawCallbackUrl, "/");
+  const { token, qrDataUrl } = await createQrLoginRequestAction(callbackUrl);
 
   return (
     <AuthShell
@@ -23,7 +25,7 @@ export default async function QrSignInPage({ searchParams }: { searchParams: Pro
         {/* eslint-disable-next-line @next/next/no-img-element -- server-generated data: URL, not a static asset */}
         <img src={qrDataUrl} alt="QR code to confirm sign-in on your phone" width={224} height={224} className="rounded-md border bg-white p-2" />
         <Button variant="link" asChild>
-          <Link href={`/auth/signin${callbackUrl ? `?callbackUrl=${encodeURIComponent(callbackUrl)}` : ""}`}>
+          <Link href={`/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`}>
             <Mail /> Use email instead
           </Link>
         </Button>

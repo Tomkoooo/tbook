@@ -9,6 +9,7 @@ import { Notice } from "@/components/notice";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { getSessionUser } from "@/lib/admin-auth";
+import { safeRelativePath } from "@/lib/safe-redirect";
 import { redirect } from "next/navigation";
 import { SelectOrgForm } from "./select-org-form";
 
@@ -19,11 +20,11 @@ import { SelectOrgForm } from "./select-org-form";
  */
 export const dynamic = "force-dynamic";
 
-export default async function SelectOrgPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+export default async function SelectOrgPage({ searchParams }: { searchParams: Promise<{ error?: string; next?: string }> }) {
   const user = await getSessionUser();
   if (!user) redirect("/auth/signin?callbackUrl=/admin/select-org");
 
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
 
   // A system admin may hold no membership anywhere, yet still needs to be
   // able to enter a tenant's console to support it.
@@ -59,7 +60,7 @@ export default async function SelectOrgPage({ searchParams }: { searchParams: Pr
             hint="You aren't a member of any organization yet. Ask an org admin to invite you, then reload this page."
           />
         ) : (
-          <SelectOrgForm organizations={organizations} />
+          <SelectOrgForm organizations={organizations} next={safeRelativePath(next, "/")} />
         )}
       </SectionCard>
 

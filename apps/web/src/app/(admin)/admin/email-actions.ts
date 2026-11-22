@@ -79,7 +79,7 @@ export async function saveEventEmailAction(eventId: string, emailId: string | nu
     } else {
       id = String((await eventEmails.createEventEmail(organizationId, eventId, input))._id);
     }
-    revalidatePath("/admin/emails");
+    revalidatePath(`/admin/events/${eventId}`, "layout");
     return { ok: true, message: "Email saved.", id: id ?? undefined };
   } catch (error) {
     return fail(error, "saveEventEmailAction");
@@ -90,7 +90,7 @@ export async function deleteEventEmailAction(emailId: string): Promise<EmailActi
   try {
     const { organizationId } = await requireOrgPermission("email:send");
     await eventEmails.deleteEventEmail(organizationId, emailId);
-    revalidatePath("/admin/emails");
+    revalidatePath("/admin/events/[eventId]", "layout");
     return { ok: true, message: "Email deleted." };
   } catch (error) {
     return fail(error, "deleteEventEmailAction");

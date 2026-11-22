@@ -16,6 +16,7 @@ import { billingInfoSchema, customerSchema, posPaymentMethodSchema } from "@tboo
 import { z } from "zod";
 import { getSessionUser, requireOrgPermission } from "@/lib/admin-auth";
 import { parseAttendeesFromForm } from "@/lib/attendee-form";
+import { eventPath } from "@/lib/event-routes";
 
 export interface PosSaleActionResult {
   ok: boolean;
@@ -60,6 +61,7 @@ export async function createPosSaleAction(formData: FormData): Promise<PosSaleAc
     const sale = await createPosSale(organizationId, input, { userId: user?.id ?? null });
 
     revalidatePath("/admin/bookings");
+    revalidatePath(eventPath(input.eventId, "bookings"));
     return { ok: true, sale };
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };
@@ -151,12 +153,10 @@ export async function startCardSaleAction(formData: FormData): Promise<CardSaleA
     const readerId = String(formData.get("readerId") ?? "").trim();
     if (!readerId) return { ok: false, message: "Choose a reader." };
 
-    const { bookingId } = await startSumUpCardSale(
-      organizationId,
-      { ...parseSaleForm(formData, "card"), readerId },
-      { userId: user?.id ?? null },
-    );
+    const cardInput = parseSaleForm(formData, "card");
+    const { bookingId } = await startSumUpCardSale(organizationId, { ...cardInput, readerId }, { userId: user?.id ?? null });
     revalidatePath("/admin/bookings");
+    revalidatePath(eventPath(cardInput.eventId, "bookings"));
     return { ok: true, state: "waiting", bookingId };
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };
@@ -171,7 +171,10 @@ export async function pollCardSaleAction(bookingId: string): Promise<CardSaleAct
     const { organizationId } = await requireSellerContext();
     await assertBookingInOrg(organizationId, bookingId);
     const outcome = await settleSumUpCheckout(bookingId);
-    if (outcome.state === "paid") revalidatePath("/admin/bookings");
+    if (outcome.state === "paid") {
+      revalidatePath("/admin/bookings");
+      revalidatePath("/admin/events/[eventId]/bookings", "page");
+    }
     return cardResult(outcome, bookingId);
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };
@@ -185,6 +188,7 @@ export async function cancelCardSaleAction(bookingId: string): Promise<CardSaleA
     const { organizationId } = await requireSellerContext();
     const outcome = await cancelSumUpCardSale(organizationId, bookingId);
     revalidatePath("/admin/bookings");
+    revalidatePath("/admin/events/[eventId]/bookings", "page");
     return cardResult(outcome, bookingId);
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };

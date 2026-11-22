@@ -14,7 +14,7 @@ import {
   type ActionResult,
   type UpdateBookingResult,
 } from "../../actions";
-import { AttendeeField } from "../new/attendee-fields";
+import { AttendeeField } from "@/components/attendee-fields";
 
 /**
  * Record a payment taken outside the platform. Shown only while the

@@ -28,8 +28,10 @@ import {
   adminWebhookUpsertSchema,
 } from "@tbook/schemas";
 import { parseInput } from "@tbook/actions";
+import { eventPath } from "@/lib/event-routes";
 import { getSessionUser, requireOrgPermission } from "@/lib/admin-auth";
 import { activeOrgCookieOptions } from "@/lib/org-cookie";
+import { safeRelativePath } from "@/lib/safe-redirect";
 import { parseAttendeesFromForm } from "@/lib/attendee-form";
 
 /**
@@ -125,7 +127,7 @@ export async function scanAction(eventId: string, formData: FormData): Promise<S
     const day = dayRaw === "any" || /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : undefined;
     const outcome = await scanVoucherAsAdmin(organizationId, code, { eventId, userId: user?.id ?? null, day });
 
-    revalidatePath(`/admin/check-in/${eventId}`);
+    revalidatePath(eventPath(eventId, "check-in"));
     return {
       ok: outcome.result === "valid",
       result: outcome.result,
@@ -147,7 +149,7 @@ export async function checkInFromRosterAction(eventId: string, voucherId: string
     const { organizationId } = await requireOrgPermission("voucher:scan");
     const user = await getSessionUser();
     const outcome = await checkInVoucherByIdAsAdmin(organizationId, eventId, voucherId, { userId: user?.id ?? null, day: "any" });
-    revalidatePath(`/admin/check-in/${eventId}`);
+    revalidatePath(eventPath(eventId, "check-in"));
     return { ok: outcome.result === "valid", result: outcome.result, message: outcome.message, attendeeName: outcome.voucher?.displayName ?? null };
   } catch (error) {
     if (error instanceof ActionError) return { ok: false, message: error.message };
@@ -163,7 +165,7 @@ export async function revertCheckInAction(eventId: string, voucherId: string): P
     return "Check-in undone.";
   });
 
-  if (result.ok) revalidatePath(`/admin/check-in/${eventId}`);
+  if (result.ok) revalidatePath(eventPath(eventId, "check-in"));
   return result;
 }
 
@@ -174,6 +176,8 @@ export async function revertCheckInAction(eventId: string, voucherId: string): P
  */
 export async function selectOrganizationAction(formData: FormData): Promise<ActionResult> {
   const organizationId = String(formData.get("organizationId") ?? "").trim();
+  // Where to go afterwards: the home page (role-aware shortcuts) unless the picker was opened for a specific page.
+  const next = safeRelativePath(String(formData.get("next") ?? ""), "/");
 
   const result = await attempt(async () => {
     const user = await getSessionUser();
@@ -186,7 +190,7 @@ export async function selectOrganizationAction(formData: FormData): Promise<Acti
   });
 
   // redirect() signals by throwing, so it has to happen outside `attempt`.
-  if (result.ok) redirect("/admin");
+  if (result.ok) redirect(next);
   return result;
 }
 
@@ -316,6 +320,7 @@ export async function createRegistrationAction(formData: FormData): Promise<Crea
     const bookingId = String(booking._id);
 
     revalidatePath("/admin/bookings");
+    revalidatePath(eventPath(input.eventId, "bookings"));
     return {
       ok: true,
       bookingId,

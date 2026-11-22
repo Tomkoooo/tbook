@@ -7,17 +7,15 @@
 **Stack:** Next.js 15 (App Router, RSC) · Tailwind CSS v4 (CSS-first `@theme`) · shadcn/ui (`new-york`, Radix, Lucide)
 **Generated:** 2026-10-31 with the `ui-ux-pro-max` engine (v2.15), then mapped onto this codebase. See [Sources](#sources).
 **Revised:** 2026-11 to follow the **tCrm template patterns** (`tCrm-templete/docs/06-design-tokenek.md`, `07-datatable.md`, `08-ui-komponensek.md`): status tone set with solid / soft / border variants, chart palette, `KpiTile` / `Panel` / `Container`, the page header pattern, empty-state variants, compact data tables, mobile rules, print rules. The template describes a different (Hungarian ERP) app, so only its patterns are used. The console keeps English labels and tBook's own rules in `AGENTS.md`.
+**Tokens revised:** 2026-11, a second pass moved the colour tokens themselves onto the template's system: oklch zinc neutrals, orange `--primary`, deep-blue `--secondary`, `.dark` class via `next-themes`. The old sky/slate palette and the `--tbook-*` layer are gone (see §1).
 
 ---
 
 ## 0. How this maps onto the code
 
-The theme already has two layers in `apps/web/src/app/globals.css`, and this file keeps them:
+`apps/web/src/app/globals.css` follows the tCrm template (`06-design-tokenek.md`): the shadcn variables are written **directly in oklch** on `:root` (light) and in one `.dark` block, and `@theme inline` exposes them to Tailwind as `bg-background`, `text-primary`, `bg-success-soft` … There is no intermediate `--tbook-*` layer any more. Change colours in those two blocks only.
 
-1. **Brand tokens:** `--tbook-*` on `:root`, redefined for dark mode. **Change colours here only.**
-2. **shadcn aliases:** `--background`, `--primary`, `--sidebar-*`, … point at the `--tbook-*` tokens, and `@theme inline` exposes them to Tailwind as `bg-background`, `text-primary`, etc.
-
-So in components, use Tailwind semantic classes (`bg-card`, `text-muted-foreground`, `border-border`) and never raw hex.
+In components, use Tailwind semantic classes (`bg-card`, `text-muted-foreground`, `border-border`) and never raw hex or palette classes (`bg-red-500`). The only `dark:` utilities left are the shadcn defaults inside `components/ui/*`, which work because of `@custom-variant dark (&:is(.dark *))`; pages do not need their own `dark:` because every token already has a dark value.
 
 ### Where the engine was overridden
 
@@ -32,96 +30,93 @@ So in components, use Tailwind semantic classes (`bg-card`, `text-muted-foregrou
 
 ## 1. Colour
 
-### 1.1 Engine palette: "B2B Service — professional navy + blue CTA"
+### 1.1 Brand: orange and deep blue
 
-Picked by the `--design-system` run, and also the top hit of the color-domain search for "B2B SaaS dashboard professional".
+Brand is exactly two tokens (template rule 4). A customer's colours replace these and nothing else.
 
-| Role | Hex | Tailwind equivalent | Maps to token |
+| Token | Light | Dark | Notes |
 |---|---|---|---|
-| Primary (ink/navy) | `#0F172A` | slate-900 | headings, sidebar active text, `--tbook-text` (strong) |
-| Secondary | `#334155` | slate-700 | `--tbook-text-muted` (body-secondary) |
-| CTA / Accent | `#0369A1` | sky-700 | `--tbook-accent` → `--primary`, `--ring`, `--sidebar-primary` |
-| Background | `#F8FAFC` | slate-50 | `--tbook-bg` → `--background` |
-| Text | `#020617` | slate-950 | `--tbook-text` → `--foreground` |
+| `--primary` | `oklch(0.58 0.1714 43.33)` (orange) | `oklch(0.92 0.004 286.32)` (neutral light) | Main button, link, active control. In dark mode it is deliberately neutral. |
+| `--primary-foreground` | `oklch(1 0 0)` (white) | `oklch(0.21 0.006 285.885)` | Text on `--primary`. |
+| `--secondary` | `oklch(0.1711 0.0689 268.79)` (deep blue) | `oklch(0.3 0.06 268.79)` | Lifted in dark so it stays visible on a near-black page. |
+| `--secondary-foreground` | `oklch(0.985 0 0)` | `oklch(0.985 0 0)` | |
+| `--sidebar-primary` | `oklch(0.58 0.1714 43.33)` | `oklch(0.58 0.1714 43.33)` | In dark mode the orange shows up here (active sidebar item, brand marks). |
 
-Contrast: `#0369A1` on white is about 5.9:1 and white on `#0369A1` is the same, so it passes AA for text and buttons. `#334155` on `#F8FAFC` is about 9.9:1.
+**AA adjustment.** The template's orange, `oklch(0.687 0.1972 43.33)`, gives only **3.03:1** with white button text. The hue is kept and the lightness lowered to **0.58** (chroma trimmed to 0.1714, the sRGB limit at that lightness), which gives **4.60:1**. It is still orange.
 
-### 1.2 Full light token set (proposed values for `:root`)
+### 1.2 Neutrals and base tokens (shadcn New York + zinc)
 
-Neutrals are the slate ramp, chosen to match the engine palette. Status colours keep the engine's real-time-monitoring semantics (critical red, warning orange/amber, normal green, info blue), shifted to AA-safe text tones.
+| Token | Light | Dark |
+|---|---|---|
+| `--background` / `--foreground` | `oklch(1 0 0)` / `oklch(0.141 0.005 285.823)` (19.9:1) | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` |
+| `--card`, `--popover` (+ `-foreground`) | white / foreground | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` |
+| `--muted` | `oklch(0.967 0.001 286.375)` | `oklch(0.274 0.006 286.033)` |
+| `--muted-foreground` | `oklch(0.54 0.016 285.938)` (4.6:1 on muted, 5.1:1 on white) | `oklch(0.705 0.015 286.067)` |
+| `--accent` / `--accent-foreground` | = muted / `oklch(0.21 0.006 285.885)` | = muted / `oklch(0.985 0 0)` |
+| `--destructive` | `oklch(0.577 0.245 27.325)` (white on it 4.76:1) | `oklch(0.704 0.191 22.216)` |
+| `--border`, `--input` | `oklch(0.92 0.004 286.32)` | `oklch(1 0 0 / 10%)`, `oklch(1 0 0 / 15%)` |
+| `--ring` | `oklch(0.705 0.015 286.067)` | `oklch(0.552 0.016 285.938)` |
+| `--sidebar`, `--sidebar-foreground` | `oklch(0.985 0 0)` / `oklch(0.141 0.005 285.823)` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` |
+| `--sidebar-accent` (+ `-foreground`), `--sidebar-border`, `--sidebar-ring` | muted-like zinc | muted-like zinc, border `oklch(1 0 0 / 10%)` |
 
-```css
-:root {
-  --tbook-bg:            #F8FAFC; /* slate-50  — engine Background */
-  --tbook-surface:       #FFFFFF;
-  --tbook-surface-alt:   #F1F5F9; /* slate-100 — muted, table header, zebra */
-  --tbook-border:        #E2E8F0; /* slate-200 — engine input border */
-  --tbook-border-strong: #CBD5E1; /* slate-300 */
-  --tbook-text:          #020617; /* slate-950 — engine Text */
-  --tbook-text-muted:    #475569; /* slate-600 — one step lighter than the engine Secondary (#334155) so muted text reads as secondary next to body text */
-  --tbook-text-faint:    #64748B; /* slate-500 — meta only, ≥4.5:1 on white */
-  --tbook-accent:        #0369A1; /* sky-700   — engine CTA */
-  --tbook-accent-hover:  #075985; /* sky-800 */
-  --tbook-accent-text:   #FFFFFF;
+`--muted-foreground` is `0.54` rather than the template's `0.552`: at 0.552 it reads only 4.39:1 on `--muted` (table headers, tinted rows), which fails AA.
 
-  --tbook-info-bg:    #E0F2FE; --tbook-info-text:    #075985;
-  --tbook-success-bg: #DCFCE7; --tbook-success-text: #166534; /* normal  #22C55E family */
-  --tbook-warning-bg: #FEF3C7; --tbook-warning-text: #92400E; /* warning #FFA500 family */
-  --tbook-danger-bg:  #FEE2E2; --tbook-danger-text:  #991B1B; /* critical #DC2626 family */
-  --tbook-neutral-bg: #F1F5F9; --tbook-neutral-text: #475569;
-}
-```
+### 1.3 Status tones (tCrm pattern)
 
-`--destructive` maps to `--tbook-danger` (`#DC2626`, the engine's `--critical-color`).
+Six tones carry meaning, not brand: `success`, `warning`, `danger`, `info`, `note`, `neutral`. Never retint them for a customer. Each has the template's **five token roles** (`--{tone}`, `--{tone}-foreground`, `--{tone}-soft`, `--{tone}-soft-foreground`, `--{tone}-border`) and these Tailwind utilities:
 
-### 1.2a Status tones (tCrm pattern)
-
-Six tones carry meaning, not brand: `success`, `warning`, `danger`, `info`, `note`, `neutral`. Each has four brand tokens in `globals.css` (`--tbook-{tone}-bg`, `-text`, `-border`, `-on`, plus the `--tbook-danger` solid used by `--destructive`) and these Tailwind utilities:
-
-| Utility | Use |
-|---|---|
-| `bg-{tone}` + `text-{tone}-foreground` | Solid fill: dot, counter, bar |
-| `text-{tone}` | Emphasised text or icon on the page background |
-| `bg-{tone}-soft` + `text-{tone}-soft-foreground` | Tinted surface: badge, notice, highlighted row, KPI icon chip |
-| `border-{tone}-border` | Frame of a tinted surface |
-| `bg-{tone}-muted` | Older name for `-soft`; still works |
+| Utility | Role | Use |
+|---|---|---|
+| `bg-{tone}` + `text-{tone}-foreground` | solid + foreground | Solid fill: dot, counter, bar |
+| `text-{tone}` | solid, as text | Emphasised text or icon on the page background (e.g. `text-warning`) |
+| `bg-{tone}-soft` + `text-{tone}-soft-foreground` | soft + soft-foreground | Tinted surface: badge, notice, highlighted row, KPI icon chip |
+| `border-{tone}-border` | border | Frame of a tinted surface |
+| `bg-{tone}-muted` | alias of `-soft` | Older name; still works |
 
 | Tone | Scale | Meaning |
 |---|---|---|
-| `success` | green | done, valid, healthy |
+| `success` | emerald | done, valid, healthy |
 | `warning` | amber | pending, needs attention |
 | `danger` | red | failed, cancelled, error |
 | `info` | sky | new, informational |
 | `note` | violet | log, remark, system entry (tags) |
-| `neutral` | slate | expired, off, no state |
+| `neutral` | zinc | expired, off, no state |
 
-`Badge` has the matching variants (`success`, `warning`, `danger`, `info`, `note`, `neutral`, plus `solid-*` for counters), and so do `Alert` / `Notice`. **A status never picks a colour in a page.** It goes through `lib/status-tones.ts`: `*_STATUS_TONES` maps, `toneFor()`, and `TONE_CLASSES` for non-badge surfaces.
+Light: solid = the 700 step (white foreground, 5.0 to 7.7:1; red 6.4:1), soft = 100, soft-foreground = 800, border = 200. Dark: solid = the 400 step with a 950 foreground, soft = 950, soft-foreground = 300, border = 900. The solid doubles as text colour, so it also passes 4.5:1 on `--background` and `--card`.
 
-### 1.3 Dark mode
+`Badge` has the matching variants (`success`, `warning`, `danger`, `info`, `note`, `neutral`, plus `solid-*` for counters), and so do `Alert` / `Notice`. **A status never picks a colour in a page.** It goes through `lib/status-tones.ts`: `*_STATUS_TONES` maps, `toneFor()`, and `TONE_CLASSES` (`chip`, `soft`, `solid`, `text`, `dot`, `border`) for non-badge surfaces.
 
-Engine anti-pattern: **"Dark mode by default."** The current behaviour already fits this rule: dark mode follows `prefers-color-scheme`, and `[data-theme]` lets the user override it. Keep it. The values below are derived from the same slate/sky ramps and are not engine output:
+**Contrast is tested.** `src/lib/theme-contrast.test.ts` reads `globals.css` and asserts at least 4.5:1 for every foreground/background pair above in light and dark. Change a token and run `npm test`.
 
-```css
---tbook-bg: #020617;  --tbook-surface: #0F172A;  --tbook-surface-alt: #1E293B;
---tbook-border: #1E293B;  --tbook-border-strong: #334155;
---tbook-text: #F1F5F9;  --tbook-text-muted: #CBD5E1;  --tbook-text-faint: #94A3B8;
---tbook-accent: #38BDF8;  --tbook-accent-hover: #7DD3FC;  --tbook-accent-text: #020617;
-```
+### 1.4 Dark mode
 
-### 1.4 Data / chart colours
+Dark mode is the **`.dark` class on `<html>`**, managed by `next-themes`: the root layout wraps the app in `<ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="tbook-theme">` and `<html>` has `suppressHydrationWarning`. The default follows the OS (`system`); dark is never forced. `ThemeToggle` (Light / Dark / System menu, no props) calls `useTheme().setTheme`. `storageKey="tbook-theme"` is the key the first toggle used, so choices saved earlier carry over; there is no inline init script of our own (next-themes injects its own).
 
-Data-Dense style: neutral chrome, with colour reserved for data (blue, green, red). For series, use `--chart-1..5` (`var(--chart-N)`, in fixed order): blue `#0369A1`, teal `#0D9488`, amber `#D97706`, violet `#7C3AED`, slate `#64748B`, with lighter dark-mode values. One y-axis per chart. **Do not** reuse the status red or green as series colours, because they mean alerts. For anything with charts, run the `dataviz` skill.
+`globals.css` has **one** `.dark { … }` block (inside `@media not print`, so paper is always light; print also forces `color-scheme: light`). Tailwind's `dark:` variant is `@custom-variant dark (&:is(.dark *))`. Never add a second dark block or a `data-theme` attribute.
 
-### 1.5 Other tokens
+Engine anti-pattern: **"Dark mode by default."** Respected.
+
+### 1.5 Data / chart colours
+
+Data-Dense style: neutral chrome, with colour reserved for data. For series, use `--chart-1..5` (`var(--chart-N)` or `bg-chart-N`, in this fixed order, as in the template): **blue, orange, aqua, yellow, amber**. Dark mode has its own, brighter values. One y-axis per chart. **Do not** reuse the status red or green as series colours, because they mean alerts. Yellow and amber are close, so don't rely on them alone to tell two series apart (add labels or markers). When a chart library can't take a CSS variable, read the theme from `useTheme().resolvedTheme`. For anything with charts, run the `dataviz` skill.
+
+### 1.6 Other tokens
 
 | Token | Value | Use |
 |---|---|---|
-| `--radius` | 0.5rem; `rounded-sm/md/lg/xl/2xl` derive from it (-4, -2, 0, +4, +8px) | Cards use `rounded-xl`, controls `rounded-md` |
+| `--radius` | 0.625rem (10px); `rounded-sm/md/lg/xl/2xl` derive from it (-4, -2, 0, +4, +8px) | Cards use `rounded-xl`, controls `rounded-md` |
 | `--row-h-compact` / `--row-h-comfortable` / `--row-h-touch` | 2.25 / 2.75 / 3.5rem | Table row heights (`DataTable` `density`) |
 | `--header-h` | 3.5rem | Console header |
 | `num` utility | `tabular-nums` | Figures that line up in columns |
 
-Theme: light and dark follow `prefers-color-scheme`; `[data-theme="light|dark"]` on `<html>` overrides it. `components/theme-toggle.tsx` (`ThemeToggle`) sets the attribute and remembers it in `localStorage`; `ThemeInitScript` avoids a flash on first paint.
+`viewport.themeColor` in the root layout is a light/dark pair (`#ffffff` / `#09090b`, the `--background` values); the web app manifest uses `#ffffff` for `theme_color` and `background_color`, `start_url: "/"`, `scope: "/"`.
+
+### 1.7 Changing the brand (white-label)
+
+1. `--primary`, `--secondary` (light) and `--sidebar-primary` (dark) in oklch.
+2. Run `npm test` (the contrast test) and check white (or the chosen foreground) on `--primary` is at least 4.5:1.
+3. Update `themeColor` / manifest colours if the surface colours changed.
+4. Do not touch the tones: they carry meaning, not brand.
 
 ---
 
@@ -171,7 +166,7 @@ Inputs must be at least **16px on mobile** (the engine's input spec) so that iOS
 |---|---|---|
 | `--sidebar-width` | 240px | shadcn Sidebar default is 16rem (256px). Either is fine; set `--sidebar-width: 15rem` on `SidebarProvider` to match. |
 | `--header-height` | 56px | `AdminHeader`: `h-14`, sticky, `border-b` |
-| `--grid-gap` | 8px | Use **8px inside widgets** and **16px (`gap-4`) between cards**. The existing `--tbook-gap` of 16px stays as the page rhythm. |
+| `--grid-gap` | 8px | Use **8px inside widgets** and **16px (`gap-4`) between cards**. `gap-4` (16px) stays as the page rhythm. |
 | `--card-padding` | 12px | `p-3` for KPI and compact cards. Form and detail cards use `p-4`/`p-6` (shadcn Card default). |
 | `--table-row-height` | 36px | `h-9` rows. Use 44px (`h-11`) on touch layouts. |
 | Grid | 12 columns | `grid grid-cols-12 gap-4`. KPI cards `col-span-12 sm:col-span-6 xl:col-span-3`. |
@@ -238,12 +233,12 @@ Verify layouts at **375 / 768 / 1024 / 1440px**. Below `md`, the sidebar becomes
 | Feedback | Inline `<Notice>` (shadcn Alert) inside the form that triggered it. Add `sonner` `<Toaster />` to the layout only once there is non-form feedback to show. | Engine rule: Toaster in layout, never per page |
 | Async content | `Skeleton` with fixed height | Avoid layout shift (severity High) |
 | Command palette | `Command` (cmdk), opened with ⌘K | — |
-| Status | `Badge` variants: success, warning, danger, info, note, neutral → `--tbook-*` tone tokens (see 1.2a) | — |
+| Status | `Badge` variants: success, warning, danger, info, note, neutral → tone tokens (see 1.3) | — |
 
 **Component specs (adjusted from the engine):**
 
-- **Buttons:** shadcn sizes (`h-9` default, `h-8` sm in toolbars and tables). Radius `--radius` (8px). Weight 500–600. Transition colours over 150–200ms. Primary uses `bg-primary`. Secondary is `variant="outline"`, with a 1px border, not the engine's 2px.
-- **Cards:** `bg-card border rounded-lg` with a soft shadow (`--tbook-shadow`). Radius is 12px (`rounded-xl`) for dashboard cards. Hover lift only if the whole card is a link.
+- **Buttons:** shadcn sizes (`h-9` default, `h-8` sm in toolbars and tables). Radius `--radius` (10px, `rounded-md` = 8px). Weight 500–600. Transition colours over 150–200ms. Primary uses `bg-primary`. Secondary is `variant="outline"`, with a 1px border, not the engine's 2px.
+- **Cards:** `bg-card border rounded-lg` with a soft shadow (`shadow-sm`). Radius is 12px (`rounded-xl`) for dashboard cards. Hover lift only if the whole card is a link.
 - **Inputs:** 1px `border-input`. On focus, `ring-[3px] ring-ring/20` with the border set to `ring`. Mobile font size at least 16px.
 - **Modals:** overlay `bg-black/50 backdrop-blur-[4px]`. This is the only blur in the console. Radius 16px, max width about 500px for forms.
 - **Shadows:** sm `0 1px 2px rgb(0 0 0/.05)`, md `0 4px 6px rgb(0 0 0/.1)` for popovers and dropdowns, lg `0 10px 15px rgb(0 0 0/.1)` for dialogs. Static cards use sm or a border only.
@@ -269,7 +264,7 @@ Build pages from these plus `components/ui/*`. Don't use raw HTML controls or on
 | `EmptyState` | `title`, `hint`, `icon`, `action`, `variant` inline / panel / hero |
 | `Notice` | Inline message: `tone` info / success / warning / danger / note, `title`, `action` |
 | `AuthShell` | Frame for the sign-in screens |
-| `ThemeToggle`, `ThemeInitScript` | Light / Dark / System switch for the header; no-flash init script for the root layout |
+| `ThemeToggle` | Light / Dark / System switch for the header (`next-themes`; the `ThemeProvider` is in the root layout) |
 | `LinkPagination` | URL-driven paging |
 | `DescriptionList` | Label/value detail rows |
 | `FormField`, `NativeSelect`, `CheckboxField` | Form rows that submit through FormData |
@@ -284,7 +279,7 @@ Build pages from these plus `components/ui/*`. Don't use raw HTML controls or on
 - Emojis as icons. Use **Lucide** only (already configured)
 - Clickable elements without `cursor-pointer`
 - Hover effects that shift layout (scale or translate inside dense lists)
-- Text below 4.5:1 contrast. Watch `--tbook-text-faint`
+- Text below 4.5:1 contrast. Watch `text-muted-foreground` on tinted surfaces
 - Instant state changes with no transition
 - Focus states that are hidden. Keep the shadcn `focus-visible:ring`
 - Fonts loaded through a `<link>` or `@import` to Google
