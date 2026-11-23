@@ -71,7 +71,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         />
         <SidebarInset>
           <AdminHeader permissions={permissions} modules={orgModules} isSystemAdmin={user.isSystemAdmin} />
-          <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 pb-16 md:p-6">{children}</main>
+          <main className="mx-auto flex w-full min-w-0 max-w-[1440px] flex-col gap-6 p-4 pb-16 md:p-6">{children}</main>
         </SidebarInset>
       </SidebarProvider>
       </WorkspaceSeed>

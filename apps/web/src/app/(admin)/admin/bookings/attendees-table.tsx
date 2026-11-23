@@ -6,8 +6,9 @@ import { Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type ColumnDef, type DataTableQuery, type TablePrefs } from "@/components/data-table";
+import { choiceTone } from "@/lib/answer-tone";
 import { formatDateTime } from "@/lib/format";
-import type { AttendeeTableRow } from "./list-columns";
+import { ANSWER_PREFIX, type AttendeeTableRow } from "./list-columns";
 
 /** The attendees list: one row per guest, the registration answers as columns. */
 export function AttendeesTable({
@@ -82,6 +83,24 @@ export function AttendeesTable({
               ),
             };
           default:
+            // A choice question: the answer as a badge, coloured by which choice it is (same colour for the same answer everywhere).
+            if (column.key.startsWith(ANSWER_PREFIX) && column.type === "enum" && column.enumValues) {
+              const choices = column.enumValues;
+              return {
+                ...column,
+                render: (value) => {
+                  const text = String(value ?? "");
+                  if (!text) return <span className="text-muted-foreground">–</span>;
+                  const index = choices.findIndex((choice) => choice.label === text);
+                  const checkbox = choices.length === 2 && choices[0]?.value === "yes";
+                  return (
+                    <Badge variant={checkbox ? (text === choices[0]!.label ? "success" : "neutral") : choiceTone(index, text)} className="h-auto max-w-56 whitespace-normal text-left">
+                      {text}
+                    </Badge>
+                  );
+                },
+              };
+            }
             return column;
         }
       }),

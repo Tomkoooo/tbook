@@ -14,6 +14,7 @@ import { eventPath } from "@/lib/event-routes";
 import { BookingActions } from "./booking-actions";
 import { ReceiptPanel } from "./receipt-panel";
 import { AttachInvoicePanel, EditBookingPanel, MarkPaidPanel } from "./manage-panels";
+import { GuestAnswers } from "@/components/guest-answers";
 import { GuestControls } from "./guest-controls";
 
 export const dynamic = "force-dynamic";
@@ -257,7 +258,7 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
             </TableHeader>
             <TableBody>
               {booking.attendees.map((attendee, index) => {
-                const own = describeFields(attendee?.fields, booking.attendeeFieldSchema ?? []);
+                const own = Object.keys(attendee?.fields ?? {}).length > 0;
                 // A team entry keeps its players under `members`, and the
                 // entry's own fields are usually empty — rendering only
                 // those showed a bare "—" for every pair in the real data.
@@ -269,21 +270,21 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
                       {attendee?.registrationNumber ? <div className="font-mono text-xs text-muted-foreground">{attendee.registrationNumber}</div> : null}
                     </TableCell>
                     <TableCell className="whitespace-normal">
-                      {own ? <div>{own}</div> : null}
+                      {own ? <GuestAnswers fields={attendee?.fields} schema={booking.attendeeFieldSchema ?? []} /> : null}
                       {!canManage && (attendee?.tags?.length ?? 0) > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
+                        <div className="mt-2 flex flex-wrap gap-1">
                           {attendee!.tags!.map((tag) => (
-                            <Badge key={tag} variant="secondary">
+                            <Badge key={tag} variant="note">
                               {tag}
                             </Badge>
                           ))}
                         </div>
                       ) : null}
                       {members.length > 0 ? (
-                        <ol className={`list-decimal pl-5 ${own ? "mt-1.5" : ""}`}>
+                        <ol className={`grid list-decimal gap-3 pl-5 ${own ? "mt-3" : ""}`}>
                           {members.map((member, memberIndex) => (
                             <li key={memberIndex}>
-                              {describeFields(member?.fields, booking.teamMemberFieldSchema ?? []) || "—"}
+                              <GuestAnswers fields={member?.fields} schema={booking.teamMemberFieldSchema ?? []} />
                             </li>
                           ))}
                         </ol>
@@ -316,7 +317,7 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
               {booking.cancelledAttendees.map((entry, index) => (
                 <TableRow key={index}>
                   <TableCell className="whitespace-normal">
-                    {describeFields(entry.attendee?.fields, booking.attendeeFieldSchema ?? []) || "—"}
+                    <GuestAnswers fields={entry.attendee?.fields} schema={booking.attendeeFieldSchema ?? []} />
                     {entry.attendee?.registrationNumber ? <div className="font-mono text-xs text-muted-foreground">{entry.attendee.registrationNumber}</div> : null}
                   </TableCell>
                   <TableCell>{formatDateTime(entry.cancelledAt)}</TableCell>
@@ -434,40 +435,4 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
       ) : null}
     </>
   );
-}
-
-function formatFieldValue(value: unknown): string {
-  if (value == null) return "—";
-  if (Array.isArray(value)) return value.join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-/**
- * Renders one attendee's or player's fields as a readable line, resolving
- * both sides against the schema: the field's label instead of its key
- * ("Teljes név" not "teljes_nev"), and a select's choice label instead of
- * its stored value ("Female" not "option_2"). The raw forms are what the
- * database holds and are meaningless to an org manager reading the screen.
- *
- * Anything no longer in the schema falls back to the raw key/value, so
- * historical data still shows rather than disappearing.
- */
-function describeFields(
-  fields: Record<string, unknown> | undefined,
-  schema: Array<{ key: string; label: string; choices?: Array<{ value: string; label: string }> }>,
-): string {
-  const entries = Object.entries(fields ?? {}).filter(([key]) => key !== "_id");
-  if (entries.length === 0) return "";
-
-  const byKey = new Map(schema.map((field) => [field.key, field]));
-
-  return entries
-    .map(([key, value]) => {
-      const field = byKey.get(key);
-      const label = field?.label ?? key;
-      const choice = field?.choices?.find((option) => option.value === String(value));
-      return `${label}: ${choice?.label ?? formatFieldValue(value)}`;
-    })
-    .join(" · ");
 }
