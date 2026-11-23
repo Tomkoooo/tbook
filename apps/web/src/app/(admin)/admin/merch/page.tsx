@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Ticket } from "lucide-react";
 import { getOrganizationSettings, listMerchSales, listProducts } from "@tbook/services";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { Notice } from "@/components/notice";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
@@ -46,7 +46,7 @@ export default async function MerchPage() {
 
       {recent.length > 0 ? (
         <SectionCard title="Recent merch sales" flush>
-          <DataTable
+          <SimpleTable
             rows={recent}
             rowKey={(sale) => sale.id}
             mobileCards

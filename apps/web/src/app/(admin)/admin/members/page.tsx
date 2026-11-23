@@ -1,7 +1,7 @@
 import { listInvites, listMembers, listRoles } from "@tbook/services";
 import { MailPlus, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { EmptyState } from "@/components/empty-state";
 import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { PageTitle } from "@/components/page-title";
@@ -44,7 +44,7 @@ export default async function MembersPage() {
       ) : null}
 
       <Panel title={`Members (${activeMembers.length})`} flush>
-        <DataTable
+        <SimpleTable
           rows={members}
           rowKey={(member) => member.membershipId}
           mobileCards
@@ -109,7 +109,7 @@ export default async function MembersPage() {
 
       {invites.length > 0 ? (
         <Panel title={`Pending invites (${invites.length})`} flush>
-          <DataTable
+          <SimpleTable
             rows={invites}
             rowKey={(invite) => invite.id}
             mobileCards
@@ -149,7 +149,7 @@ export default async function MembersPage() {
           actions={canManageRoles ? <RoleDialog role={null} /> : null}
           flush
         >
-          <DataTable
+          <SimpleTable
             rows={roles}
             rowKey={(role) => role.id}
             mobileCards

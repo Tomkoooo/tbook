@@ -6,7 +6,7 @@ import { listCheckInRosterForOrg, listEventTags } from "@tbook/services";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/filter-bar";
 import { FormField, NativeSelect } from "@/components/form-bits";
@@ -128,7 +128,7 @@ export default async function CheckInEventPage({
       </FilterBar>
 
       <SectionCard title="Roster" description="Auto-refreshes every 15 seconds." flush>
-        <DataTable
+        <SimpleTable
           rows={roster.vouchers}
           rowKey={(voucher) => String(voucher._id)}
           mobileCards

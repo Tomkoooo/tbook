@@ -5,7 +5,7 @@ import { listProducts } from "@tbook/services";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/filter-bar";
 import { FormField, NativeSelect } from "@/components/form-bits";
@@ -101,7 +101,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       </FilterBar>
 
       <SectionCard flush>
-        <DataTable
+        <SimpleTable
           rows={rows}
           rowKey={(product) => product.id}
           mobileCards

@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/admin-auth";
 import { getActiveOrganizationIdFromCookie } from "@/lib/org-cookie";
 import { organizationRepository } from "@tbook/db";
 import { resolveMembershipPermissions } from "@tbook/services";
 import { TBOOK_OWNER_PERMISSIONS } from "@tbook/schemas";
+import { WorkspaceSeed } from "@/components/shell/workspace-store";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { workspaceSeedForPath } from "@/lib/workspace-nav";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AdminHeader } from "./admin-header";
 import { AdminNav } from "./admin-nav";
@@ -51,8 +54,13 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     .filter(([, state]) => state?.enabled)
     .map(([key]) => key);
 
+  // The event/group the URL is in, resolved here so the sidebar and breadcrumbs render complete on the first paint.
+  const pathname = (await headers()).get("x-tbook-pathname") ?? "";
+  const seed = activeOrgId && permissions.length > 0 ? await workspaceSeedForPath(activeOrgId, permissions, pathname) : null;
+
   return (
     <TooltipProvider>
+      <WorkspaceSeed info={seed}>
       <SidebarProvider>
         <AdminNav
           organizationName={activeOrg?.name ?? null}
@@ -66,6 +74,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 pb-16 md:p-6">{children}</main>
         </SidebarInset>
       </SidebarProvider>
+      </WorkspaceSeed>
     </TooltipProvider>
   );
 }

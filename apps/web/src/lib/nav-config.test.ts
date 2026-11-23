@@ -9,7 +9,7 @@ const hrefs = (groups: ReturnType<typeof filterNavGroups>) => groups.flatMap((gr
 describe("filterNavGroups", () => {
   it("keeps the sidebar to org pages and stations: no per-event or per-group tools, whatever the member holds", () => {
     const all = hrefs(filterNavGroups(NAV_GROUPS, { permissions: OWNER, modules: ALL_MODULES }));
-    for (const removed of ["hotels", "bus", "vip", "waitlist", "feedback", "kiosk", "emails", "reports", "preview"]) {
+    for (const removed of ["hotels", "bus", "vip", "waitlist", "feedback", "kiosk", "emails", "preview"]) {
       expect(all).not.toContain(`/admin/${removed}`);
     }
   });
@@ -17,7 +17,7 @@ describe("filterNavGroups", () => {
   it("shows every group and item when the modules are on and the permissions are held", () => {
     const groups = filterNavGroups(NAV_GROUPS, { permissions: OWNER, modules: ALL_MODULES });
     expect(groups.map((group) => group.label)).toEqual(["Home", "Events", "Organization", "Stations"]);
-    expect(groups.find((group) => group.label === "Organization")?.items.map((item) => item.label)).toEqual(["Bookings", "Products", "Merch register", "Data lists", "Team", "Settings"]);
+    expect(groups.find((group) => group.label === "Organization")?.items.map((item) => item.label)).toEqual(["Bookings", "Reports", "Products", "Merch register", "Data lists", "Team", "Settings"]);
     expect(groups.find((group) => group.label === "Stations")?.items.map((item) => item.label)).toEqual(["Check-in", "Point of sale", "Stand"]);
   });
 

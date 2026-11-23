@@ -42,6 +42,7 @@ export const NAV_ICONS: Record<NavIconKey, LucideIcon> = {
   settings: Settings,
   organizations: Building2,
   merch: ShoppingBag,
+  reports: ChartColumn,
   data: Database,
 };
 

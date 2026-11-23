@@ -2,7 +2,7 @@ import { Banknote, CreditCard, Download, Landmark, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { EmptyState } from "@/components/empty-state";
 import { FormField } from "@/components/form-bits";
 import { Notice } from "@/components/notice";
@@ -87,7 +87,7 @@ export default async function StandStatsPage({ params, searchParams }: { params:
           </KpiGrid>
 
           <Panel title="Termékek" flush>
-            <DataTable
+            <SimpleTable
               rows={s.byProduct}
               rowKey={(p) => p.productId}
               maxHeight="lg"
@@ -110,7 +110,7 @@ export default async function StandStatsPage({ params, searchParams }: { params:
           </Panel>
 
           <Panel title="Napok" flush>
-            <DataTable
+            <SimpleTable
               rows={s.byDay.map((row, i) => ({ row, day: days[i]! }))}
               rowKey={({ row }) => row.date}
               mobileCards

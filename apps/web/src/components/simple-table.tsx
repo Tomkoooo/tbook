@@ -6,11 +6,11 @@ import { ariaSort, nextSortDir, type SortDir, type SortState } from "@/lib/table
 import { cn } from "@/lib/utils";
 
 /**
- * DataTable (lite) — a small, server-renderable table over the shadcn Table.
+ * SimpleTable — a small, server-renderable table over the shadcn Table.
  * It is deliberately not an engine: no client state, no column picker. Pages
  * keep their own filters/paging in the URL and hand it rows and columns.
  *
- *   <DataTable
+ *   <SimpleTable
  *     rows={bookings}
  *     rowKey={(b) => String(b._id)}
  *     columns={[
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
  *   />
  *
  * Props:
- *   columns     DataColumn<T>[]  (see below)
+ *   columns     SimpleColumn<T>[]  (see below)
  *   rows        T[]
  *   rowKey      (row) => string
  *   sort        { state, hrefFor } — turns columns that have `sortKey` into links;
@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
  *   caption     visually hidden table caption, for screen readers
  *   className   extra classes on the <table>
  *
- * DataColumn: key, header, cell(row), align ("left" | "right" | "center"),
+ * SimpleColumn: key, header, cell(row), align ("left" | "right" | "center"),
  *   sortKey, hideBelow ("sm" | "md" | "lg" | "xl": hide the column on narrower screens),
  *   wrap (allow the cell text to wrap), className, mobile ("title" | "footer" | "hide";
  *   default: shown as a label/value row), mobileLabel (label when `header` is not a string).
@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
  * Server component. Keep it that way: it takes function props (`cell`, `rowKey`),
  * which may not cross from a server page into a client component.
  */
-export interface DataColumn<T> {
+export interface SimpleColumn<T> {
   key: string;
   header: ReactNode;
   cell: (row: T) => ReactNode;
@@ -59,7 +59,7 @@ export interface DataColumn<T> {
   mobileLabel?: string;
 }
 
-export interface DataTableSort {
+export interface SimpleTableSort {
   state: SortState;
   hrefFor: (key: string, dir: SortDir) => string;
 }
@@ -81,7 +81,7 @@ const ROW_HEIGHT = {
 
 const MAX_HEIGHT = { sm: "max-h-80", md: "max-h-[28rem]", lg: "max-h-[40rem]" } as const;
 
-export function DataTable<T>({
+export function SimpleTable<T>({
   columns,
   rows,
   rowKey,
@@ -94,10 +94,10 @@ export function DataTable<T>({
   caption,
   className,
 }: {
-  columns: DataColumn<T>[];
+  columns: SimpleColumn<T>[];
   rows: readonly T[];
   rowKey: (row: T) => string;
-  sort?: DataTableSort;
+  sort?: SimpleTableSort;
   density?: keyof typeof ROW_HEIGHT;
   maxHeight?: keyof typeof MAX_HEIGHT;
   mobileCards?: boolean;
@@ -200,7 +200,7 @@ export function DataTable<T>({
   );
 }
 
-function SortLink<T>({ column, sort }: { column: DataColumn<T>; sort: DataTableSort }) {
+function SortLink<T>({ column, sort }: { column: SimpleColumn<T>; sort: SimpleTableSort }) {
   const key = column.sortKey as string;
   const active = sort.state.key === key;
   const Icon = !active ? ArrowUpDown : sort.state.dir === "asc" ? ArrowUp : ArrowDown;

@@ -1,14 +1,12 @@
 import type { ReactNode } from "react";
 import { ActionError } from "@tbook/actions";
 import { notFound } from "next/navigation";
-import { organizationRepository } from "@tbook/db";
-import { getGroupForOrg, resolveModulesFromDocs } from "@tbook/services";
-import { overviewLink, WorkspaceHeader } from "@/components/shell/workspace-header";
+import { getGroupForOrg } from "@tbook/services";
+import { WorkspaceHeader } from "@/components/shell/workspace-header";
 import { Badge } from "@/components/ui/badge";
 import { requireAdminPage } from "@/lib/admin-page";
-import { groupPath } from "@/lib/event-routes";
-import { GROUP_TOOLS, filterGroupTools, groupToolLinks, type ToolLink } from "@/lib/event-tools";
 import { toneFor } from "@/lib/status-tones";
+import { groupWorkspaceInfo } from "@/lib/workspace-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -30,16 +28,12 @@ export default async function GroupWorkspaceLayout({ children, params }: { child
   });
   if (!group) notFound();
 
-  const org = await organizationRepository.findById(organizationId);
-  const modules = resolveModulesFromDocs(org, group, null);
-  const tools = filterGroupTools(GROUP_TOOLS, { permissions, isOn: modules.isOn });
-  const eventsLink: ToolLink = { key: "events", label: "Events", href: `${groupPath(groupId)}/events`, icon: "events" };
-  const links = [overviewLink(groupPath(groupId)), ...groupToolLinks(tools, groupId), eventsLink];
+  const info = await groupWorkspaceInfo(organizationId, permissions, group);
 
   return (
     <>
       <WorkspaceHeader
-        info={{ kind: "group", id: groupId, name: group.name, links }}
+        info={info}
         tabsLabel="Event group tools"
         status={<Badge variant={toneFor(GROUP_STATUS_TONES, group.status)}>{group.status}</Badge>}
         meta={group.description ? <span className="truncate">{group.description}</span> : null}

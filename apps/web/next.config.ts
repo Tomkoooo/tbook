@@ -7,7 +7,7 @@ const GROUP_ID_QUERY = [{ type: "query" as const, key: "groupId", value: "(?<gro
 /** Tools that moved under /admin/events/[eventId]/ (they used to take ?eventId=). */
 const MOVED_EVENT_TOOLS = "bookings|check-in|sales|stand|bus|waitlist|feedback|kiosk|emails|vip|reports|preview";
 /** Moved tools that are only an event's list page when there is no event: send those to the events list. */
-const EVENT_ONLY_LISTS = "bus|waitlist|feedback|kiosk|emails|vip|reports|preview";
+const EVENT_ONLY_LISTS = "bus|waitlist|feedback|kiosk|emails|vip|preview";
 
 /**
  * Every pre-restructure console URL keeps working (see docs/console-structure.md,

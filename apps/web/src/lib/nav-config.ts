@@ -28,6 +28,7 @@ export type NavIconKey =
   | "settings"
   | "organizations"
   | "merch"
+  | "reports"
   | "data";
 
 export interface NavItem {
@@ -66,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Organization",
     items: [
       { href: "/admin/bookings", label: "Bookings", icon: "bookings", permission: "booking:read", module: "ticket-sales" },
+      { href: "/admin/reports", label: "Reports", icon: "reports", permission: "booking:read" },
       { href: "/admin/products", label: "Products", icon: "products", permission: ["product:read", "product:write", "event:read"] },
       { href: "/admin/merch", label: "Merch register", icon: "merch", permission: ["sale:create", "booking:manage"], module: "point-of-sale" },
       { href: "/admin/data", label: "Data lists", icon: "data", permission: ["list:manage", "event:write"] },

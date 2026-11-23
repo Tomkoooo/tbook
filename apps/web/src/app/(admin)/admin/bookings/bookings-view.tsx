@@ -1,64 +1,35 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
-import { WALK_IN_CUSTOMER_EMAIL, bookingStatuses, invoiceStatuses } from "@tbook/schemas";
 import type { Permission } from "@tbook/schemas";
-import { listBookingFilterOptions, listBookingsForOrg, summarizeBookingGuests } from "@tbook/services";
-import { CalendarX, CreditCard, Download, Plus, Ticket, Wallet } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { listAttendeesForOrg, listBookingFilterOptions, listBookingsForOrg, summarizeBookingGuests } from "@tbook/services";
+import { CreditCard, Plus, ScanLine, Ticket, UserCheck, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataColumn } from "@/components/data-table";
-import { EmptyState } from "@/components/empty-state";
 import { KpiGrid, KpiTile } from "@/components/kpi-tile";
-import { LinkPagination } from "@/components/link-pagination";
 import { PageTitle } from "@/components/page-title";
-import { SectionCard } from "@/components/section-card";
-import { BOOKING_STATUS_TONES, INVOICE_STATUS_TONES, toneFor } from "@/lib/status-tones";
-import { firstParam, hrefWithParams, parseSort } from "@/lib/table-sort";
-import { formatDateTime, formatMoney, formatRevenue } from "@/lib/admin-page";
+import { formatRevenue } from "@/lib/format";
 import { eventPath } from "@/lib/event-routes";
 import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
-import { BookingFilters } from "./booking-filters";
-import { ColumnPicker } from "./column-picker";
-import { BOOKING_COLUMNS_COOKIE, FIELD_PREFIX, TOGGLEABLE_COLUMNS, parseColumns } from "./columns";
+import { readTablePrefs } from "@/lib/table-prefs";
+import { cn } from "@/lib/utils";
+import { activeFilterCount } from "@/components/data-table";
+import { AttendeeBreakdowns } from "./attendee-breakdown";
+import { AttendeesTable } from "./attendees-table";
+import { BookingsTable } from "./bookings-table";
+import { ANSWER_PREFIX, attendeeColumns, bookingColumns, type AttendeeTableRow, type BookingRow, type ListOptions } from "./list-columns";
+import { attendeeQueryFromParams, bookingQueryFromParams } from "./list-query";
 
 /**
  * The booking list, shared by `/admin/bookings` (every event in the
  * organization) and `/admin/events/[eventId]/bookings` (one event: pass
- * `event`, and the event and group filters disappear). All table state
- * (filters, sort, page) lives in the query string, which makes any view
- * shareable, bookmarkable and reload-safe, and means the server component
- * can render the exact requested view with no client state at all.
+ * `event`, and the event and group filters disappear). Two views over the same
+ * data: **Bookings** (one row per purchase) and **Attendees** (one row per
+ * guest, the registration answers as columns, plus how the answers split).
+ * All table state lives in the URL (`view`, `search`, `sort`, `page`,
+ * `f.<column>`), so any view is shareable and reload-safe.
  *
  * The pages do the auth and module guards; this renders.
  */
 
 type SearchParams = Record<string, string | string[] | undefined>;
-
-const one = firstParam;
-
-/** Narrows a query param to a known enum value, dropping anything unrecognized. */
-function enumList<T extends string>(raw: string | undefined, allowed: readonly T[]): T[] | undefined {
-  if (!raw) return undefined;
-  const values = raw
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value): value is T => (allowed as readonly string[]).includes(value));
-  return values.length > 0 ? values : undefined;
-}
-
-/** Parses a date input, ignoring an unparseable one rather than erroring the page. */
-function date(raw: string | undefined): Date | undefined {
-  if (!raw) return undefined;
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
-}
-
-const SORTABLE = [
-  { key: "createdAt", label: "Booked" },
-  { key: "customerName", label: "Customer" },
-  { key: "eventName", label: "Event" },
-  { key: "totalHuf", label: "Total" },
-] as const;
 
 export async function BookingsView({
   organizationId,
@@ -73,52 +44,143 @@ export async function BookingsView({
   event?: { id: string; name: string };
 }) {
   const basePath = event ? eventPath(event.id, "bookings") : "/admin/bookings";
+  const view = params.view === "attendees" ? "attendees" : "bookings";
+  const options = await listBookingFilterOptions(organizationId);
 
-  const sorted = parseSort(params, SORTABLE.map((entry) => entry.key), { key: "createdAt", dir: "desc" });
-  const sortBy = sorted.key as (typeof SORTABLE)[number]["key"];
-  const sortDir = sorted.dir;
+  const tabClass = (active: boolean) => cn("inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-sm font-medium", active ? "bg-background shadow-xs" : "text-muted-foreground hover:text-foreground");
+  const viewTabs = (
+    <div className="bg-muted inline-flex rounded-lg p-0.5" role="tablist" aria-label="View">
+      <Link href={basePath} role="tab" aria-selected={view === "bookings"} className={tabClass(view === "bookings")}>
+        <CreditCard className="size-3.5" />
+        Bookings
+      </Link>
+      <Link href={`${basePath}?view=attendees`} role="tab" aria-selected={view === "attendees"} className={tabClass(view === "attendees")}>
+        <Users className="size-3.5" />
+        Attendees
+      </Link>
+    </div>
+  );
 
-  const filter = {
-    status: enumList(one(params, "status"), bookingStatuses),
-    invoiceStatus: enumList(one(params, "invoiceStatus"), invoiceStatuses),
-    eventId: event ? event.id : one(params, "eventId"),
-    groupId: event ? undefined : one(params, "groupId"),
-    search: one(params, "search"),
-    tag: one(params, "tag") || undefined,
-    checkIn: (one(params, "checkIn") === "in" || one(params, "checkIn") === "not_in" ? one(params, "checkIn") : undefined) as "in" | "not_in" | undefined,
-    createdFrom: date(one(params, "createdFrom")),
-    // An end date from a date input means "the whole of that day", so it is
-    // pushed to the day's last moment — otherwise a same-day filter returns
-    // nothing, which reads as a bug.
-    createdTo: (() => {
-      const parsed = date(one(params, "createdTo"));
-      if (!parsed) return undefined;
-      parsed.setHours(23, 59, 59, 999);
-      return parsed;
-    })(),
+  const newRegistrationHref = event ? eventPath(event.id, "bookings", "new") : null;
+  const title = (
+    <PageTitle
+      title={view === "attendees" ? "Attendees" : "Bookings"}
+      description={
+        view === "attendees"
+          ? event
+            ? `Everyone with a ticket to ${event.name}, with what they answered at registration.`
+            : "Everyone with a ticket, one row per guest, with what they answered at registration."
+          : event
+            ? `Bookings of ${event.name}.`
+            : "Every booking in this organization, including those made through the legacy storefronts."
+      }
+      actions={
+        newRegistrationHref && hasPermissionOrFallback(permissions, "booking:manage") ? (
+          <Button asChild>
+            <Link href={newRegistrationHref}>
+              <Plus /> New registration
+            </Link>
+          </Button>
+        ) : null
+      }
+    />
+  );
+
+  const eventOptions = options.events.map(({ id, name }) => ({ id, name }));
+
+  if (view === "attendees") {
+    const prefs = await readTablePrefs("attendees");
+    // The columns depend on which questions the events ask, so read the (cheap) field list first.
+    const probe = await listAttendeesForOrg(organizationId, { eventId: event?.id, pageSize: 1, withBreakdown: false });
+    const listOptions: ListOptions = { eventPreset: Boolean(event), groups: options.groups, events: eventOptions, tags: options.tags, fields: probe.fields };
+    const columns = attendeeColumns(listOptions);
+    const { query, filter } = attendeeQueryFromParams(params, columns as never, prefs?.pageSize, event?.id);
+    const result = await listAttendeesForOrg(organizationId, filter);
+
+    const rows: AttendeeTableRow[] = result.rows.map((row) => {
+      const out: AttendeeTableRow = {
+        id: row.id,
+        bookingId: row.bookingId,
+        eventId: row.eventId,
+        eventName: row.eventName,
+        name: row.name,
+        registrationNumber: row.registrationNumber,
+        status: row.status,
+        checkedInAt: row.checkedInAt,
+        tags: row.tags,
+        buyer: row.buyer,
+      };
+      for (const [key, value] of Object.entries(row.answers)) out[ANSWER_PREFIX + key] = value;
+      return out;
+    });
+
+    const exportParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      const items = Array.isArray(value) ? value : value ? [value] : [];
+      if (key !== "view" && key !== "page") for (const item of items) exportParams.append(key, item);
+    }
+    if (event) exportParams.set("eventId", event.id);
+    const exportHref = hasPermissionOrFallback(permissions, "booking:export") ? `/admin/attendees/export?${exportParams.toString()}` : undefined;
+    const filters = activeFilterCount(query);
+
+    return (
+      <>
+        {title}
+        <KpiGrid cols={3}>
+          <KpiTile label="Guests" value={result.total} hint={filters > 0 || query.search ? "matching the filters" : "with a ticket"} icon={<Users />} />
+          <KpiTile label="Checked in" value={result.checkedIn} hint={result.total > 0 ? `${Math.round((result.checkedIn / result.total) * 100)}% of them` : "—"} tone="success" icon={<UserCheck />} />
+          <KpiTile label="Still expected" value={Math.max(result.total - result.checkedIn, 0)} hint="not scanned yet" tone="info" icon={<ScanLine />} className="col-span-2 md:col-span-1" />
+        </KpiGrid>
+        <AttendeeBreakdowns breakdowns={result.breakdowns} basePath={basePath} params={params} />
+        <AttendeesTable rows={rows} columns={columns} query={query} total={result.total} basePath={basePath} prefs={prefs} exportHref={exportHref} toolbarLeading={viewTabs} />
+      </>
+    );
+  }
+
+  const prefs = await readTablePrefs("bookings");
+  const listOptions: ListOptions = {
+    eventPreset: Boolean(event),
+    groups: options.groups,
+    events: eventOptions,
+    tags: options.tags,
+    fields: options.guestFields.map((field) => ({ ...field, type: "text", choices: [] })),
   };
-
-  const page = Math.max(Number(one(params, "page") ?? 1) || 1, 1);
-
-  const [result, options] = await Promise.all([
-    listBookingsForOrg(organizationId, { ...filter, page, pageSize: 25, sortBy, sortDir }),
-    listBookingFilterOptions(organizationId),
-  ]);
-  // Columns: the saved choice, or by default everything plus the guests' identifying answer (e.g. employee ID).
-  const identifierKeys = options.guestFields.filter((field) => field.identifier).map((field) => field.key);
-  const saved = parseColumns((await cookies()).get(BOOKING_COLUMNS_COOKIE)?.value, options.guestFields.map((field) => field.key));
-  const visibleKeys = saved ?? [...TOGGLEABLE_COLUMNS.map((column) => column.key as string), ...identifierKeys.map((key) => FIELD_PREFIX + key)];
-  const show = (key: string) => visibleKeys.includes(key);
-  const shownFields = options.guestFields.filter((field) => show(FIELD_PREFIX + field.key));
+  const columns = bookingColumns(listOptions);
+  const { query, filter, sortBy, sortDir } = bookingQueryFromParams(params, columns as never, prefs?.pageSize, event?.id);
+  const result = await listBookingsForOrg(organizationId, { ...filter, page: query.page, pageSize: query.pageSize, sortBy, sortDir });
   const guestSummaries = await summarizeBookingGuests(result.bookings.map((booking) => String(booking._id)));
 
-  /** Rebuilds the current URL with some params replaced — keeps filters when paging or sorting. */
-  const hrefWith = (overrides: Record<string, string | undefined>) => hrefWithParams(basePath, params, overrides);
-
-  const FILTER_KEYS = (event
-    ? ["search", "status", "invoiceStatus", "tag", "checkIn", "createdFrom", "createdTo"]
-    : ["search", "status", "invoiceStatus", "eventId", "groupId", "tag", "checkIn", "createdFrom", "createdTo"]) as readonly string[];
-  const activeFilters = FILTER_KEYS.filter((key) => firstParam(params, key)).length;
+  const rows: BookingRow[] = result.bookings.map((booking) => {
+    const summary = guestSummaries.get(String(booking._id));
+    const out: BookingRow = {
+      id: String(booking._id),
+      createdAt: new Date(booking.createdAt).toISOString(),
+      customerName: booking.customer?.name ?? "",
+      customerEmail: booking.customer?.email ?? "",
+      eventName: booking.eventName ?? "",
+      groupName: booking.groupName ?? "",
+      hotelName: booking.hotelName ?? "",
+      total: booking.totalHuf,
+      currency: booking.currency ?? "HUF",
+      guests: booking.guests,
+      checkedIn: summary ? summary.checkedIn : null,
+      status: booking.status,
+      source: booking.source ?? "",
+      isTest: Boolean(booking.isTest),
+      tags: summary?.tags ?? [],
+      paidVia: booking.paymentMethod ?? "stripe",
+      invoiceStatus: booking.invoiceStatus ?? "",
+      invoiceSource: booking.invoiceSource ?? "",
+    };
+    for (const field of options.guestFields) {
+      out[ANSWER_PREFIX + field.key] = (booking.attendees ?? [])
+        .map((attendee) => attendee.fields?.[field.key])
+        .filter((value) => value !== undefined && value !== null && String(value) !== "")
+        .map(String)
+        .join(", ");
+    }
+    return out;
+  });
 
   const exportQuery = new URLSearchParams();
   if (filter.status) exportQuery.set("status", filter.status.join(","));
@@ -128,228 +190,18 @@ export async function BookingsView({
   if (filter.search) exportQuery.set("search", filter.search);
   if (filter.createdFrom) exportQuery.set("createdFrom", filter.createdFrom.toISOString());
   if (filter.createdTo) exportQuery.set("createdTo", filter.createdTo.toISOString());
-
-
-  const newRegistrationHref = filter.eventId ? eventPath(filter.eventId, "bookings", "new") : null;
-  const sortLabel = new Map<string, string>(SORTABLE.map((entry) => [entry.key, entry.label]));
-  type Row = (typeof result.bookings)[number];
-
-  const columns: DataColumn<Row>[] = [
-    {
-      key: "createdAt",
-      header: sortLabel.get("createdAt"),
-      sortKey: "createdAt",
-      className: "text-muted-foreground",
-      cell: (booking) => formatDateTime(booking.createdAt),
-    },
-    {
-      key: "customerName",
-      header: sortLabel.get("customerName"),
-      sortKey: "customerName",
-      mobile: "title",
-      cell: (booking) => (
-        <>
-          <Link className="font-medium hover:underline" href={`/admin/bookings/${String(booking._id)}`}>
-            {booking.customer?.name}
-          </Link>
-          <div className="text-muted-foreground text-xs">
-            {booking.customer?.email === WALK_IN_CUSTOMER_EMAIL ? "walk-in · printed receipt" : booking.customer?.email}
-          </div>
-        </>
-      ),
-    },
-  ];
-  if (show("event")) {
-    columns.push({
-      key: "eventName",
-      header: sortLabel.get("eventName"),
-      sortKey: "eventName",
-      wrap: true,
-      className: "min-w-48",
-      cell: (booking) => (
-        <>
-          {booking.eventName}
-          {booking.hotelName ? <div className="text-muted-foreground text-xs">{booking.hotelName}</div> : null}
-        </>
-      ),
-    });
-  }
-  if (show("total")) {
-    columns.push({
-      key: "totalHuf",
-      header: sortLabel.get("totalHuf"),
-      sortKey: "totalHuf",
-      align: "right",
-      cell: (booking) => formatMoney(booking.totalHuf, booking.currency ?? "HUF"),
-    });
-  }
-  for (const field of shownFields) {
-    columns.push({
-      key: field.key,
-      header: field.label,
-      wrap: true,
-      cell: (booking) =>
-        (booking.attendees ?? [])
-          .map((attendee) => attendee.fields?.[field.key])
-          .filter((value) => value !== undefined && value !== null && String(value) !== "")
-          .map(String)
-          .join(", ") || <span className="text-muted-foreground">–</span>,
-    });
-  }
-  if (show("guests")) {
-    columns.push({
-      key: "guests",
-      header: "Guests",
-      align: "right",
-      cell: (booking) => {
-        const summary = guestSummaries.get(String(booking._id));
-        return (
-          <>
-            {booking.guests}
-            {summary ? (
-              <div className="text-muted-foreground text-xs whitespace-nowrap">
-                {summary.checkedIn}/{summary.guests} checked in
-              </div>
-            ) : null}
-          </>
-        );
-      },
-    });
-  }
-  if (show("status")) {
-    columns.push({
-      key: "status",
-      header: "Status",
-      cell: (booking) => {
-        const summary = guestSummaries.get(String(booking._id));
-        return (
-          <>
-            <div className="flex gap-1">
-              <Badge variant={toneFor(BOOKING_STATUS_TONES, booking.status)}>{booking.status}</Badge>
-              {booking.source === "admin" ? <Badge variant="info">admin</Badge> : null}
-              {booking.isTest ? <Badge variant="warning">TESZT</Badge> : null}
-            </div>
-            {summary && summary.tags.length > 0 ? (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {summary.tags.map((tag) => (
-                  <Badge key={tag} variant="note">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-          </>
-        );
-      },
-    });
-  }
-  if (show("paidVia")) {
-    columns.push({
-      key: "paidVia",
-      header: "Paid via",
-      className: "text-muted-foreground",
-      hideBelow: "lg",
-      cell: (booking) => booking.paymentMethod ?? "stripe",
-    });
-  }
-  if (show("invoice")) {
-    columns.push({
-      key: "invoice",
-      header: "Invoice",
-      cell: (booking) => (
-        <div className="flex gap-1">
-          <Badge variant={toneFor(INVOICE_STATUS_TONES, booking.invoiceStatus)}>{booking.invoiceStatus}</Badge>
-          {booking.invoiceSource === "manual" ? <Badge variant="neutral">manual</Badge> : null}
-        </div>
-      ),
-    });
-  }
-  columns.push({
-    key: "open",
-    header: <span className="sr-only">Actions</span>,
-    align: "right",
-    mobile: "footer",
-    cell: (booking) => (
-      <Button variant="ghost" size="sm" asChild>
-        <Link href={`/admin/bookings/${String(booking._id)}`}>Open</Link>
-      </Button>
-    ),
-  });
+  const exportHref = hasPermissionOrFallback(permissions, "booking:export") ? `/api/v2/admin/bookings/export?${exportQuery.toString()}` : undefined;
+  const filters = activeFilterCount(query);
 
   return (
     <>
-      <PageTitle
-        title="Bookings"
-        description={event ? `Guests of ${event.name}.` : "Every booking in this organization, including those made through the legacy storefronts."}
-        actions={
-          <>
-            <ColumnPicker
-              builtIn={TOGGLEABLE_COLUMNS.map((column) => ({ key: column.key, label: column.label }))}
-              fields={options.guestFields.map((field) => ({ key: FIELD_PREFIX + field.key, label: field.label }))}
-              selected={visibleKeys}
-            />
-            {hasPermissionOrFallback(permissions, "booking:export") ? (
-              <Button variant="outline" asChild>
-                <a href={`/api/v2/admin/bookings/export?${exportQuery.toString()}`}>
-                  <Download /> Export CSV
-                </a>
-              </Button>
-            ) : null}
-            {newRegistrationHref && hasPermissionOrFallback(permissions, "booking:manage") ? (
-              <Button asChild>
-                <Link href={newRegistrationHref}>
-                  <Plus /> New registration
-                </Link>
-              </Button>
-            ) : null}
-          </>
-        }
-      />
-
+      {title}
       <KpiGrid cols={3}>
-        <KpiTile label="Matching" value={result.total} hint={activeFilters > 0 ? `${activeFilters} filter${activeFilters === 1 ? "" : "s"} applied` : event ? "all bookings of this event" : "all bookings"} icon={<CreditCard />} />
+        <KpiTile label="Matching" value={result.total} hint={filters > 0 || query.search ? "matching the filters" : event ? "all bookings of this event" : "all bookings"} icon={<CreditCard />} />
         <KpiTile label="Guests" value={result.paidGuests} hint="paid + confirmed" tone="info" icon={<Ticket />} />
         <KpiTile label="Revenue" value={formatRevenue(result.revenueByCurrency)} hint="paid + confirmed" tone="success" icon={<Wallet />} className="col-span-2 md:col-span-1" />
       </KpiGrid>
-
-      <BookingFilters options={options} params={params} activeCount={activeFilters} basePath={basePath} eventPreset={Boolean(event)} />
-
-      <SectionCard flush>
-        <DataTable
-          rows={result.bookings}
-          rowKey={(booking) => String(booking._id)}
-          columns={columns}
-          mobileCards
-          maxHeight="lg"
-          caption="Bookings"
-          sort={{
-            state: { key: sortBy, dir: sortDir },
-            hrefFor: (key, dir) => hrefWith({ sortBy: key, sortDir: dir, page: undefined }),
-          }}
-          empty={
-            <EmptyState
-              icon={<CalendarX />}
-              title="No bookings match these filters"
-              hint="Try clearing the search or widening the date range."
-              action={
-                activeFilters > 0 ? (
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={basePath}>Clear filters</Link>
-                  </Button>
-                ) : undefined
-              }
-            />
-          }
-        />
-        {result.bookings.length > 0 ? (
-          <LinkPagination
-            page={result.page}
-            pageCount={result.pageCount}
-            total={result.total}
-            hrefForPage={(target) => hrefWith({ page: String(target) })}
-          />
-        ) : null}
-      </SectionCard>
+      <BookingsTable rows={rows} columns={columns} query={query} total={result.total} basePath={basePath} prefs={prefs} exportHref={exportHref} toolbarLeading={viewTabs} />
     </>
   );
 }

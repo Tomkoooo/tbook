@@ -376,3 +376,8 @@
     position: static !important;
   }
 }
+
+/* Reserve the scrollbar's width: a page that grows past the viewport must not nudge the layout sideways. */
+html {
+  scrollbar-gutter: stable;
+}

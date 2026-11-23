@@ -17,7 +17,8 @@ Organization                                   /admin/…
 |---|---|---|
 | Org | `/admin` | Dashboard |
 | Org | `/admin/events`, `/admin/groups` | The catalog: lists, create |
-| Org | `/admin/bookings`, `/admin/bookings/[bookingId]` | All bookings across events; a booking's detail (a booking knows its event) |
+| Org | `/admin/bookings`, `/admin/bookings/[bookingId]` | All bookings across events (Bookings / Attendees views); a booking's detail (a booking knows its event) |
+| Org | `/admin/reports` | Reports hub: every event with its registrations report, attendee list and stand daily reports |
 | Org | `/admin/products`, `/admin/merch` | Merch catalog + stock (shared with the webshop) and the merch register |
 | Org | `/admin/data/…` | Name lists (eligibility, VIP, email audiences) |
 | Org | `/admin/members`, `/admin/settings/…`, `/admin/integrations` | Team, settings, payments, webhooks |
@@ -27,7 +28,7 @@ Organization                                   /admin/…
 | Group | `/admin/groups/[groupId]/events` | The group's events and the tools on for each |
 | Group | `/admin/groups/[groupId]/hotels`, `…/hotels/[hotelId]` | Hotels (a hotel belongs to a group, shared by its events) |
 | Event | `/admin/events/[eventId]` | Overview, settings, module switches |
-| Event | `…/bookings`, `…/bookings/new` | Guests of this event; register someone paid outside the storefront |
+| Event | `…/bookings`, `…/bookings/new` | Bookings and attendees of this event (`?view=attendees`); register someone paid outside the storefront |
 | Event | `…/check-in` | Door scanner and arrivals |
 | Event | `…/sales` | Counter point of sale for tickets |
 | Event | `…/stand`, `…/stand/products`, `…/stand/safe`, `…/stand/stats`, `…/stand/export` | Stand mode |
@@ -104,3 +105,29 @@ to the admin console. The installed app starts at `/`.
 Follow the tCrm template (`docs/06-design-tokenek.md` there): oklch zinc neutrals, brand =
 `--primary` / `--secondary` (+ dark `--sidebar-primary`), radius 0.625rem, a dedicated
 `--sidebar-*` set, status tones (meaning, not brand), dark mode = `.dark` class via `next-themes`.
+
+## Lists: the DataTable engine
+
+Every list view uses `components/data-table` (the tCrm template's engine, docs/07-datatable.md): one
+toolbar — search, **Filters**, **Sort**, **Columns** (show / hide / reorder), page size, export —
+and the state in the URL (`search`, `sort`, `page`, `pageSize`, `f.<column>`). Column and page-size
+choices are remembered per `tableId` in a **cookie** (not localStorage) so the server renders the
+right columns on the first paint — no jump after hydration.
+
+- Define columns in a serializable `…-columns.ts`; wrap `<DataTable>` in a `"use client"` file that adds
+  the cell renderers (render functions can't cross from a server page). Give it a stable `tableId`.
+- `mode="server"` (default): the page maps the URL to its query (`parseDataTableQuery`) and passes one
+  page of rows + `total`. `mode="client"`: pass every row; the engine searches/filters/sorts in memory.
+- `SimpleTable` (`components/simple-table.tsx`) is the static, server-rendered table for small
+  read-only tables on dashboards — not for lists.
+- Bookings has two views over the same data: **Bookings** (a row per purchase) and **Attendees**
+  (a row per guest with a ticket; each registration question is a column, plus a split of how the
+  guests answered each choice question — click a bar to filter). `lib`: `listAttendeesForOrg`.
+
+## No layout shift
+
+The shell must be complete on the first paint: `middleware.ts` forwards the path as
+`x-tbook-pathname`, the admin layout resolves the event/group the URL is in
+(`lib/workspace-nav.ts`) and seeds `WorkspaceSeed`, so the sidebar section and breadcrumbs don't wait
+for hydration. Dates are formatted in `Europe/Budapest` (`lib/format.ts`) so server and browser agree.
+`html { scrollbar-gutter: stable }` stops the page sliding when a scrollbar appears.

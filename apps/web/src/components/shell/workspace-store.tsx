@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useSyncExternalStore, type ReactNode } from "react";
 import type { ToolLink } from "@/lib/event-tools";
 
 /**
@@ -31,14 +31,28 @@ function subscribe(listener: () => void) {
   };
 }
 
-/** The registered workspace if it is the `kind`/`id` asked for, else null. */
+const SeedContext = createContext<WorkspaceInfo | null>(null);
+
+/**
+ * The server's own answer for the page being rendered (from the request path),
+ * so the sidebar section and breadcrumbs are complete in the very first HTML.
+ * Without it they would show a skeleton until the page hydrates and then jump.
+ * The live registration below takes over once it exists.
+ */
+export function WorkspaceSeed({ info, children }: { info: WorkspaceInfo | null; children: ReactNode }) {
+  return <SeedContext.Provider value={info}>{children}</SeedContext.Provider>;
+}
+
+/** The registered workspace if it is the `kind`/`id` asked for, else the server's seed for it, else null. */
 export function useWorkspace(kind: WorkspaceInfo["kind"], id: string | null): WorkspaceInfo | null {
+  const seed = useContext(SeedContext);
   const snapshot = useSyncExternalStore(
     subscribe,
     () => current,
     () => null,
   );
-  return snapshot && id && snapshot.kind === kind && snapshot.id === id ? snapshot : null;
+  const matches = (info: WorkspaceInfo | null) => (info && id && info.kind === kind && info.id === id ? info : null);
+  return matches(snapshot) ?? matches(seed);
 }
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;

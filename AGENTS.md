@@ -54,6 +54,8 @@ come from `lib/status-tones.ts`. Long forms end with `StickyFormFooter`.
 
 **Console routes carry the business context.** Event tools live under `/admin/events/[eventId]/…`, group tools (hotels) under `/admin/groups/[groupId]/…`. Build links with `lib/event-routes.ts` (`eventPath`, `groupPath`) — never `?eventId=` — and start every event page with `requireEvent` + `requireEventModule` (`lib/require-module.tsx`). Sidebar, tabs, ⌘K and the home page all read one registry (`lib/nav-config.ts`, `lib/event-tools.ts`).
 
+**Lists use the DataTable engine** (`components/data-table`, docs in `docs/console-structure.md`): serializable `columns`, a `"use client"` wrapper with the renderers, URL state, a stable `tableId`. Never hand-roll a filter form or a bare table for a list.
+
 **Server actions** re-check the permission themselves (`requireOrgPermission`)
 and return a plain `{ ok, message }` result for inline display. Never trust a
 hidden field for authorization.

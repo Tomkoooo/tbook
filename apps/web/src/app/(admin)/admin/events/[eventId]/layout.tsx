@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { CalendarDays, FolderKanban } from "lucide-react";
-import { listEventsForOrg, listGroupsForOrg, resolveModules } from "@tbook/services";
+import { listEventsForOrg, listGroupsForOrg } from "@tbook/services";
 import { EventSwitcher } from "@/components/shell/event-switcher";
-import { overviewLink, WorkspaceHeader } from "@/components/shell/workspace-header";
+import { WorkspaceHeader } from "@/components/shell/workspace-header";
 import { Badge } from "@/components/ui/badge";
 import { requireAdminPage, formatDate } from "@/lib/admin-page";
-import { eventPath, groupPath } from "@/lib/event-routes";
-import { EVENT_TOOLS, eventToolLinks, filterEventTools } from "@/lib/event-tools";
+import { groupPath } from "@/lib/event-routes";
 import { requireEvent } from "@/lib/require-module";
 import { toneFor } from "@/lib/status-tones";
+import { eventWorkspaceInfo } from "@/lib/workspace-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +27,10 @@ export default async function EventWorkspaceLayout({ children, params }: { child
 
   const { organizationId, permissions } = await requireAdminPage("event:read");
   const event = await requireEvent(organizationId, eventId);
-  const [modules, events, groups] = await Promise.all([resolveModules({ organizationId, event }), listEventsForOrg(organizationId), listGroupsForOrg(organizationId)]);
+  const [info, events, groups] = await Promise.all([eventWorkspaceInfo(organizationId, permissions, event), listEventsForOrg(organizationId), listGroupsForOrg(organizationId)]);
 
   const groupId = event.groupId ? String(event.groupId) : null;
   const group = groupId ? groups.find((candidate) => String(candidate._id) === groupId) : undefined;
-  const tools = filterEventTools(EVENT_TOOLS, { permissions, isOn: modules.isOn, hasVipList: Boolean(event.vipListId) });
-  const links = [overviewLink(eventPath(eventId)), ...eventToolLinks(tools, { eventId, groupId })];
 
   const switcherEvents = [...events]
     .sort((a, b) => String(b.startDate ?? "").localeCompare(String(a.startDate ?? "")))
@@ -42,7 +40,7 @@ export default async function EventWorkspaceLayout({ children, params }: { child
   return (
     <>
       <WorkspaceHeader
-        info={{ kind: "event", id: eventId, name: event.name, links }}
+        info={info}
         tabsLabel="Event tools"
         status={<Badge variant={toneFor(EVENT_STATUS_TONES, event.status)}>{event.status}</Badge>}
         meta={

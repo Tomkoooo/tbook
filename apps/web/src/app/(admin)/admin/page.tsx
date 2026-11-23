@@ -3,7 +3,7 @@ import { getOrganizationStats, listBookingsForOrg } from "@tbook/services";
 import { CalendarDays, Clock, CreditCard, FolderTree, Plus, Ticket, Users, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { EmptyState } from "@/components/empty-state";
 import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { Notice } from "@/components/notice";
@@ -131,7 +131,7 @@ export default async function AdminHomePage({
 
       {recent ? (
         <Panel title="Latest bookings" description="The eight most recent, newest first." href="/admin/bookings" flush>
-          <DataTable
+          <SimpleTable
             rows={recent.bookings}
             rowKey={(booking) => String(booking._id)}
             mobileCards

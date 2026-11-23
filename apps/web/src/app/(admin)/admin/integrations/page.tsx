@@ -2,7 +2,7 @@ import { getInventoryApiKey, getOrganizationSettings, getSumUpSettings, listWebh
 import { webhookEventTypes } from "@tbook/schemas";
 import { CreditCard, FileText, KeyRound, Mail, Webhook } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { DataTable } from "@/components/data-table";
+import { SimpleTable } from "@/components/simple-table";
 import { EmptyState } from "@/components/empty-state";
 import { KpiGrid, KpiTile } from "@/components/kpi-tile";
 import { PageTitle } from "@/components/page-title";
@@ -95,7 +95,7 @@ export default async function IntegrationsPage() {
         description="Send booking and check-in events to another system as they happen."
         flush
       >
-        <DataTable
+        <SimpleTable
           rows={webhooks}
           rowKey={(hook) => hook.id}
           mobileCards
