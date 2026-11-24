@@ -25,6 +25,18 @@ export function registerGuestPortalModule(): void {
         hint: "Comma-separated question keys, e.g. nev,munkaltato. Identifying questions (ID) are always locked.",
       },
       {
+        key: "busChangesCloseAt",
+        label: "Last moment to change the bus (Budapest time)",
+        type: "text",
+        hint: "e.g. 2026-11-24 16:00. After it guests can't change the bus or the transfer answer on the site; everything else stays editable. Empty: no deadline.",
+      },
+      {
+        key: "busFieldKeys",
+        label: "Questions that count as “the bus”",
+        type: "text",
+        hint: "Comma-separated question keys locked together with the bus choice. Default: transzfer.",
+      },
+      {
         key: "showContactUnmasked",
         label: "Show the guest's own email and phone unmasked",
         type: "select",

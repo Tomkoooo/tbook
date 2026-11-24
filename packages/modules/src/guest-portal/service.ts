@@ -3,8 +3,8 @@ import { eventRepository, type IBooking, type IEvent } from "@tbook/db";
 import { isFieldVisible } from "@tbook/domain";
 import { bookingEventContext, cancelBookingAttendee, editBookingAttendee, editableFieldSchema, resolveModules } from "@tbook/services";
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
-import { BUS_TRANSPORT } from "../bus-transport";
-import { busForAttendee, formatDeparture } from "../bus-transport/service";
+import { BUS_TRANSPORT, parseDeparture } from "../bus-transport";
+import { busForAttendee, busRouteFields, formatDeparture } from "../bus-transport/service";
 import { busWaitlistPosition } from "../bus-transport/waitlist";
 import { attendeeKeyOf, findAttendeeByCode, toEventAttendees } from "../shared/attendees";
 import { sendSystemEmailToAttendee, systemEmailPlan } from "../event-emails/service";
@@ -26,6 +26,14 @@ export interface GuestPortalConfig {
   allowCancel?: "yes" | "no";
   /** Comma-separated question keys guests may not change (identifying/unique ones never can). */
   lockedFields?: string;
+  /**
+   * Last moment (Budapest time, e.g. "2026-11-24 16:00") a guest may change their bus: the bus
+   * question(s) and the transfer questions in `busFieldKeys`. After it those answers are locked;
+   * everything else stays editable until the event. Empty: no deadline.
+   */
+  busChangesCloseAt?: string;
+  /** Comma-separated question keys that count as "the bus" besides the bus-route question (e.g. transzfer). */
+  busFieldKeys?: string;
   /** "yes": the guest sees their own email and phone unmasked (`masked: false`). Default: masked. */
   showContactUnmasked?: "yes" | "no";
   cancelSubject?: string;
@@ -96,9 +104,20 @@ function changesOpen(event: IEvent): boolean {
   return new Date(event.startDate).getTime() > Date.now();
 }
 
-function lockedKeys(schema: AttendeeFieldDef[], config: GuestPortalConfig): string[] {
+/** True once the configured bus-change deadline has passed (an unreadable value means no deadline). */
+export function busChangesClosed(config: GuestPortalConfig, event: IEvent, now = Date.now()): boolean {
+  const raw = (config.busChangesCloseAt ?? "").trim();
+  if (!raw) return false;
+  const at = parseDeparture(raw, new Date(event.startDate));
+  return at != null && now >= at.getTime();
+}
+
+function lockedKeys(schema: AttendeeFieldDef[], config: GuestPortalConfig, busClosed = false): string[] {
   const configured = (config.lockedFields ?? "").split(",").map((key) => key.trim()).filter(Boolean);
-  return [...new Set([...identifyingKeys(schema), ...configured])];
+  const bus = busClosed
+    ? [...busRouteFields(schema).map((field) => field.key), ...(config.busFieldKeys ?? "transzfer").split(",").map((key) => key.trim()).filter(Boolean)]
+    : [];
+  return [...new Set([...identifyingKeys(schema), ...configured, ...bus])];
 }
 
 export interface GuestView {
@@ -141,7 +160,7 @@ export async function guestView(found: Found): Promise<GuestView> {
   const schema = await editableFieldSchema(booking, ctx);
   const attendee = plain(booking.attendees![attendeeIndex]!) as BookingAttendee;
   const row = toEventAttendees(booking)[attendeeIndex]!;
-  const locked = new Set(lockedKeys(schema, config));
+  const locked = new Set(lockedKeys(schema, config, busChangesClosed(config, event)));
   const open = changesOpen(event);
   const unmasked = ["yes", "true"].includes(String(config.showContactUnmasked ?? ""));
   const masked = (field: AttendeeFieldDef) => !unmasked && isContactField(field);
