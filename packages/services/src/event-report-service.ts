@@ -145,7 +145,19 @@ export async function eventReport(organizationId: string, eventId: string, filte
 }
 
 /** Every guest with every answer, registration number, check-in and tags. Cancelled guests on a second sheet. */
-export async function exportEventRegistrationsXlsx(organizationId: string, eventId: string, filter: ReportFilter = {}): Promise<{ fileName: string; buffer: Buffer }> {
+/** Extra columns (and sheets) a module adds to the registrations export, e.g. the bus stop and the bus waitlist. */
+export interface RegistrationExportExtras {
+  columns: Array<{ header: string; key: string; width: number }>;
+  values(row: { booking: IBooking; attendee: BookingAttendee }): Record<string, unknown>;
+  addSheets?(workbook: ExcelJS.Workbook): void;
+}
+
+export async function exportEventRegistrationsXlsx(
+  organizationId: string,
+  eventId: string,
+  filter: ReportFilter = {},
+  extras?: RegistrationExportExtras,
+): Promise<{ fileName: string; buffer: Buffer }> {
   const event = await getEventForOrg(organizationId, eventId);
   const schema = await liveFieldSchemaForEvent(eventId, (event.attendeeFieldSchema ?? []).map((f) => plain(f) as AttendeeFieldDef));
   const guests = await loadGuests(eventId, schema, filter);
@@ -156,6 +168,7 @@ export async function exportEventRegistrationsXlsx(organizationId: string, event
     { header: "Regisztrációs szám", key: "rn", width: 14 },
     { header: "Név", key: "name", width: 26 },
     ...schema.map((field) => ({ header: field.label, key: `f:${field.key}`, width: field.type === "textarea" ? 40 : 18 })),
+    ...(extras?.columns ?? []),
     { header: "Címkék", key: "tags", width: 16 },
     { header: "Belépett", key: "checkedIn", width: 18 },
     { header: "Regisztrált", key: "createdAt", width: 18 },
@@ -175,9 +188,12 @@ export async function exportEventRegistrationsXlsx(organizationId: string, event
       contactEmail: row.booking.customer?.email ?? "",
     };
     for (const field of schema) values[`f:${field.key}`] = answerLabel(field, row.attendee.fields?.[field.key]);
+    if (extras) Object.assign(values, extras.values({ booking: row.booking, attendee: row.attendee }));
     sheet.addRow(values);
   }
   sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columns.length } };
+
+  extras?.addSheets?.(workbook);
 
   const cancelledSheet = workbook.addWorksheet("Lemondott");
   cancelledSheet.columns = [

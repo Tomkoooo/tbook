@@ -1,4 +1,5 @@
 import { ActionError } from "@tbook/actions";
+import { busTransport } from "@tbook/modules";
 import { exportEventRegistrationsXlsx } from "@tbook/services";
 import { requireOrgPermission } from "@/lib/admin-auth";
 
@@ -10,7 +11,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ even
     const { organizationId } = await requireOrgPermission("booking:read");
     const field = url.searchParams.get("field");
     const value = url.searchParams.get("value");
-    const { fileName, buffer } = await exportEventRegistrationsXlsx(organizationId, eventId, field && value ? { fieldKey: field, value } : {});
+    const { fileName, buffer } = await exportEventRegistrationsXlsx(organizationId, eventId, field && value ? { fieldKey: field, value } : {}, await busTransport.registrationExportExtras(eventId));
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

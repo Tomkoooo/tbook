@@ -306,7 +306,7 @@ export async function liveFieldSchemaForEvent(eventId: string, schema: AttendeeF
   const { schema: resolved, details } = await resolveFieldChoices(schema.map((f) => plain(f)), { event, organizationId, groupId, modules });
   return resolved.map((field) =>
     details[field.key]
-      ? { ...field, choices: details[field.key]!.map((choice) => ({ value: choice.value, label: choice.disabled ? `${choice.label} (full)` : choice.label })) }
+      ? { ...field, choices: details[field.key]!.map((choice) => ({ value: choice.value, label: choice.disabled && !choice.meta?.closed ? `${choice.label} (full)` : choice.label })) }
       : field,
   );
 }

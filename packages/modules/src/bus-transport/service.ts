@@ -5,10 +5,10 @@ import { ActionError } from "@tbook/actions";
 import { BookingModel, type IBooking } from "@tbook/db";
 import { isFieldVisible } from "@tbook/domain";
 import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbook/schemas";
-import type { DynamicChoice } from "@tbook/services";
+import type { DynamicChoice, RegistrationExportExtras } from "@tbook/services";
 import { ACTIVE_BOOKING_STATUSES, toEventAttendees, type EventAttendee } from "../shared/attendees";
 import { BusBoardingModel, BusRouteModel, type BoardingStatus, type BusLeg, type BusStop, type IBusRoute } from "./model";
-import { notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
+import { listBusWaitlist, notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
 
 /** The `choicesSource` that turns a select field into "pick your bus". */
 export const BUS_ROUTES_SOURCE = "bus-transport:routes";
@@ -689,4 +689,51 @@ export async function exportPassengersXlsx(routes: IBusRoute[], waitlist?: BusWa
     sheet.getRow(1).font = { bold: true };
   }
   return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+
+/**
+ * Bus columns for the event's registrations export: the bus and the stop a guest boards at, or their place
+ * on the bus waitlist, plus a "Busz-várólista" sheet with the whole line.
+ */
+export async function registrationExportExtras(eventId: string): Promise<RegistrationExportExtras> {
+  const routes = new Map((await listRoutes(eventId)).map((route) => [String(route._id), route]));
+  if (routes.size === 0) return { columns: [], values: () => ({}) };
+  const waitlist = await listBusWaitlist(eventId);
+  const positionByReg = new Map(waitlist.filter((row) => row.registrationNumber).map((row) => [String(row.registrationNumber), row.position]));
+  return {
+    columns: [
+      { header: "Busz", key: "bus:code", width: 10 },
+      { header: "Busz – felszállási hely", key: "bus:stop", width: 36 },
+      { header: "Busz – indulás", key: "bus:departure", width: 22 },
+      { header: "Busz-várólista", key: "bus:waitlist", width: 16 },
+    ],
+    values({ booking, attendee }) {
+      const fields = busRouteFields((booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[]);
+      const raw = fields.map((field) => attendee.fields?.[field.key]).find((value) => String(value ?? "") !== "");
+      if (isBusWaitlistValue(raw)) {
+        const position = positionByReg.get(String(attendee.registrationNumber ?? ""));
+        return { "bus:waitlist": position ? `Igen – ${position}. a sorban` : "Igen" };
+      }
+      const parsed = parseBusValue(raw);
+      const route = parsed ? routes.get(parsed.routeId) : undefined;
+      if (!parsed || !route) return {};
+      const stop = effectiveStop(route, parsed.stopIndex);
+      return { "bus:code": route.code, "bus:stop": [stop.city, stop.pickupPoint].filter(Boolean).join(" – "), "bus:departure": formatDeparture(stop.departureAt) };
+    },
+    addSheets(workbook) {
+      if (waitlist.length === 0) return;
+      const sheet = workbook.addWorksheet("Busz-várólista");
+      sheet.columns = [
+        { header: "Sorszám", key: "position", width: 10 },
+        { header: "Név", key: "name", width: 28 },
+        { header: "Regisztrációs azonosító", key: "reg", width: 22 },
+        { header: "Telefon", key: "phone", width: 16 },
+        { header: "E-mail", key: "email", width: 28 },
+        { header: "Várólistára került", key: "joined", width: 22 },
+      ];
+      for (const row of waitlist) sheet.addRow({ position: row.position, name: row.name, reg: row.registrationNumber ?? "", phone: row.phone, email: row.email, joined: formatDeparture(row.joinedAt) });
+      sheet.getRow(1).font = { bold: true };
+    },
+  };
 }
