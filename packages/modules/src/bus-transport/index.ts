@@ -1,3 +1,4 @@
+import { ActionError } from "@tbook/actions";
 import { eventRepository } from "@tbook/db";
 import { extensions, registerImportTarget, registerModule } from "@tbook/services";
 import {
@@ -35,6 +36,15 @@ const editReleases = new Map<string, Map<string, number>>();
  * for boarding (outbound and return, kept apart from venue check-in).
  */
 export const BUS_TRANSPORT = "bus-transport";
+
+/** Bus booking is closed: every wanted seat must have been held by this booking already. */
+function assertNoNewSeats(wanted: Map<string, number>, held: Map<string, number> | undefined): void {
+  for (const [routeId, count] of wanted) {
+    if (count > (held?.get(routeId) ?? 0)) {
+      throw new ActionError(400, "bus_closed", "A buszfoglalás lezárult, új helyet már nem lehet foglalni. Értesítést kérhetsz, ha felszabadul hely.", { routeId });
+    }
+  }
+}
 
 export function registerBusTransportModule(): void {
   registerModule({
@@ -77,7 +87,10 @@ export function registerBusTransportModule(): void {
       // Without buses there is nothing to wait for either: no "notify me" option, so "waitlist" is refused like any unknown answer.
       if (routes.length === 0) return [];
       // One choice per stop of a multi-stop bus ("<routeId>~<stop index>"), all sharing the bus's seats.
-      const choices = routes.flatMap((route) => routeChoices(route));
+      const closed = busBookingClosed(ctx.modules, new Date(ctx.event.startDate));
+      const choices = routes
+        .flatMap((route) => routeChoices(route))
+        .map((choice) => (closed ? { ...choice, remaining: 0, disabled: true, meta: { ...choice.meta, closed: true } } : choice));
       // Always offered: no seat, the guest waits for one and is emailed when one frees up.
       return [...choices, { value: BUS_WAITLIST_VALUE, label: BUS_WAITLIST_LABEL, remaining: null, disabled: false, meta: { waitlist: true } }];
     },
@@ -91,12 +104,17 @@ export function registerBusTransportModule(): void {
     if (busRouteFields(ctx.fieldSchema).length === 0) return null;
     const eventId = String(ctx.event._id);
     const wanted = seatsByRoute(ctx.attendees, ctx.fieldSchema);
-    if (ctx.dryRun) return reserveSeats(eventId, wanted, { dryRun: true });
+    if (ctx.dryRun) {
+      if (busBookingClosed(ctx.modules, new Date(ctx.event.startDate))) assertNoNewSeats(wanted, editReleases.get(ctx.bookingId));
+      return reserveSeats(eventId, wanted, { dryRun: true });
+    }
     if (ctx.isTest) {
       // Test registrations take no seats (live availability is untouched); the bus waitlist still works, in its own line.
       await syncBusWaitlist({ organizationId: ctx.organizationId, eventId }, ctx.bookingId, ctx.attendees, ctx.fieldSchema);
       return null;
     }
+    // After the bus deadline only seats the booking already held may be kept; no new or moved seats.
+    if (busBookingClosed(ctx.modules, new Date(ctx.event.startDate))) assertNoNewSeats(wanted, editReleases.get(ctx.bookingId));
     const reservation = await reserveSeats(eventId, wanted);
     await syncBusWaitlist({ organizationId: ctx.organizationId, eventId }, ctx.bookingId, ctx.attendees, ctx.fieldSchema);
     const released = editReleases.get(ctx.bookingId);
@@ -256,6 +274,18 @@ export function parseDeparture(raw: string | undefined, eventStart: Date): Date 
     return null;
   }
   return budapestToUtc(y, m, d, hh, mm);
+}
+
+/** True once the guest-portal setting `busChangesCloseAt` (e.g. "2026-11-24 16:00", Budapest time) has passed; empty or unreadable = never. */
+export function busBookingClosedAt(raw: string | undefined, eventStart: Date, now = Date.now()): boolean {
+  const at = parseDeparture(raw, eventStart);
+  return at != null && now >= at.getTime();
+}
+
+/** True when this event's bus seat booking is closed (new seats are refused; the bus waitlist stays open). */
+export function busBookingClosed(modules: { isOn(key: string): boolean; config(key: string): object }, eventStart: Date): boolean {
+  if (!modules.isOn("guest-portal")) return false;
+  return busBookingClosedAt((modules.config("guest-portal") as { busChangesCloseAt?: string }).busChangesCloseAt, eventStart);
 }
 
 /** Wall-clock time in Budapest → the UTC instant (handles CET/CEST). */

@@ -27,9 +27,9 @@ export interface GuestPortalConfig {
   /** Comma-separated question keys guests may not change (identifying/unique ones never can). */
   lockedFields?: string;
   /**
-   * Last moment (Budapest time, e.g. "2026-11-24 16:00") a guest may change their bus: the bus
-   * question(s) and the transfer questions in `busFieldKeys`. After it those answers are locked;
-   * everything else stays editable until the event. Empty: no deadline.
+   * Last moment (Budapest time, e.g. "2026-11-24 16:00") to book or change a bus seat. After it: no new
+   * seats (the bus routes show as closed, only the bus waitlist is offered), and a guest who holds a seat can't
+   * change or cancel it (the bus question and `busFieldKeys` are locked). Everything else stays editable. Empty: no deadline.
    */
   busChangesCloseAt?: string;
   /** Comma-separated question keys that count as "the bus" besides the bus-route question (e.g. transzfer). */
@@ -160,7 +160,10 @@ export async function guestView(found: Found): Promise<GuestView> {
   const schema = await editableFieldSchema(booking, ctx);
   const attendee = plain(booking.attendees![attendeeIndex]!) as BookingAttendee;
   const row = toEventAttendees(booking)[attendeeIndex]!;
-  const locked = new Set(lockedKeys(schema, config, busChangesClosed(config, event)));
+  const bus = await busForAttendee(booking, attendeeIndex);
+  // After the deadline only a guest who holds a seat is locked (no change, no bus cancel). Guests without a seat
+  // may still ask for the bus waitlist: the bus question then offers nothing but that option.
+  const locked = new Set(lockedKeys(schema, config, busChangesClosed(config, event) && Boolean(bus?.route)));
   const open = changesOpen(event);
   const unmasked = ["yes", "true"].includes(String(config.showContactUnmasked ?? ""));
   const masked = (field: AttendeeFieldDef) => !unmasked && isContactField(field);
@@ -170,7 +173,6 @@ export async function guestView(found: Found): Promise<GuestView> {
     if (value == null) continue;
     fields[field.key] = masked(field) ? (field.type === "email" || /mail/i.test(field.key) ? maskEmail(String(value)) : maskPhone(String(value))) : value;
   }
-  const bus = await busForAttendee(booking, attendeeIndex);
   const route = bus?.route ?? null;
   const busOn = ctx.modules.isOn(BUS_TRANSPORT);
   const waitPosition = busOn ? await busWaitlistPosition(String(event._id), attendeeKeyOf(booking, attendee, attendeeIndex), Boolean(booking.isTest)) : null;
