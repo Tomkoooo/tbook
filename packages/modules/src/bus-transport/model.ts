@@ -175,6 +175,8 @@ export interface IBusWaitlistEntry extends Document {
   joinedAt: Date;
   /** Last "a seat is free" email. */
   notifiedAt: Date | null;
+  /** Last "which route would you like?" email (sent to guests who waited without choosing a route). */
+  routeAskedAt?: Date | null;
 }
 
 const BusWaitlistEntrySchema = new Schema<IBusWaitlistEntry>(
@@ -185,6 +187,7 @@ const BusWaitlistEntrySchema = new Schema<IBusWaitlistEntry>(
     attendeeKey: { type: String, required: true },
     joinedAt: { type: Date, required: true },
     notifiedAt: { type: Date, default: null },
+    routeAskedAt: { type: Date, default: null },
   },
   { timestamps: false },
 );

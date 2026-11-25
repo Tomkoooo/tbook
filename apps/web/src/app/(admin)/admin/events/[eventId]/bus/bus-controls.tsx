@@ -15,6 +15,7 @@ import {
   revokeCaptainLinkAction,
   rotateCaptainLinkAction,
   saveBusRouteAction,
+  sendBusRouteRequestsAction,
   sendCaptainNoticeAction,
   type BusActionResult,
 } from "@/app/(admin)/admin/bus-actions";
@@ -70,6 +71,27 @@ function BusStopsEditor({ initial }: { initial: BusStopFormValues[] }) {
         </Button>
       </div>
     </fieldset>
+  );
+}
+
+export function RouteRequestButton({ eventId, count }: { eventId: string; count: number }) {
+  const [result, setResult] = useState<BusActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
+  return (
+    <div className="grid justify-items-end gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={pending || count === 0}
+        onClick={() => {
+          if (!window.confirm(`Email ${count} waitlisted guest${count === 1 ? "" : "s"} who haven't chosen a route, asking them to pick one?`)) return;
+          startTransition(async () => setResult(await sendBusRouteRequestsAction(eventId)));
+        }}
+      >
+        <Mail /> Ask for a route ({count})
+      </Button>
+      {result ? <ResultNotice result={result} /> : null}
+    </div>
   );
 }
 

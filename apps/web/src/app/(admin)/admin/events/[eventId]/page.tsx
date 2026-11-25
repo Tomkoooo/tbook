@@ -15,7 +15,6 @@ import Link from "next/link";
 import { Bus, Puzzle } from "lucide-react";
 import { BUS_TRANSPORT, busTransport } from "@tbook/modules";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { eventPath } from "@/lib/event-routes";
 import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
@@ -23,6 +22,8 @@ import { SectionCard } from "@/components/section-card";
 import { EVENT_TOOLS, filterEventTools, toolLabelsForModule } from "@/lib/event-tools";
 import { requireAdminPage, toDateInput, toDateTimeInput } from "@/lib/admin-page";
 import { EMPTY_DAY_PASS, EMPTY_ELIGIBILITY, EventForm, type EventFormValues } from "./event-form";
+import { BusWaitlistTable } from "./bus/bus-waitlist-table";
+import { RouteRequestButton } from "./bus/bus-controls";
 import { DayAvailabilityTable } from "./day-availability-table";
 import { EventModulesCard } from "./event-modules-card";
 
@@ -122,6 +123,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   const busRoutes = showBus ? await busTransport.listRoutes(eventId) : [];
   const busWaitlist = showBus ? await busTransport.listBusWaitlist(eventId) : [];
   const busSeats = busRoutes.reduce((sum, route) => ({ seats: sum.seats + route.capacity, taken: sum.taken + route.seatsTaken }), { seats: 0, taken: 0 });
+  const routeRequestCount = showBus ? await busTransport.countBusRouteRequests(eventId) : 0;
   const BUS_PREVIEW = 20;
 
   const eligibility = expandLegacyEligibilityForEdit(event);
@@ -150,6 +152,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
           description={`${busSeats.taken} of ${busSeats.seats} seats taken on ${busRoutes.length} buses.`}
           actions={
             <>
+              <RouteRequestButton eventId={eventId} count={routeRequestCount} />
               <Button asChild variant="outline" size="sm">
                 <Link href={eventPath(eventId, "bus")}>
                   <Bus /> Open buses
@@ -164,43 +167,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
           }
           flush
         >
-          {busWaitlist.length === 0 ? (
-            <EmptyState title="Nobody is waiting for a bus" />
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-right">#</TableHead>
-                    <TableHead>Guest</TableHead>
-                    <TableHead>Contact</TableHead>
-                    <TableHead>Waiting since</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {busWaitlist.slice(0, BUS_PREVIEW).map((row) => (
-                    <TableRow key={`${row.position}-${row.registrationNumber ?? row.name}`}>
-                      <TableCell className="text-right tabular-nums">{row.position}</TableCell>
-                      <TableCell>
-                        {row.name}
-                        <div className="text-muted-foreground text-xs">{row.registrationNumber ?? ""}</div>
-                      </TableCell>
-                      <TableCell>
-                        {row.email || "—"}
-                        <div className="text-muted-foreground text-xs">{row.phone}</div>
-                      </TableCell>
-                      <TableCell>{busTransport.formatDeparture(row.joinedAt)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {busWaitlist.length > BUS_PREVIEW ? (
-                <div className="text-muted-foreground px-4 py-3 text-sm">
-                  Showing {BUS_PREVIEW} of {busWaitlist.length}. <Link className="underline" href={eventPath(eventId, "bus")}>See the full list</Link> or export it.
-                </div>
-              ) : null}
-            </>
-          )}
+          <BusWaitlistTable eventId={eventId} waitlist={busWaitlist} limit={BUS_PREVIEW} />
         </SectionCard>
       ) : null}
       <EventForm

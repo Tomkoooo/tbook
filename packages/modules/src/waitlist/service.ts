@@ -16,7 +16,7 @@ import {
 } from "@tbook/services";
 import type { AttendeeFieldDef, BookingAttendee } from "@tbook/schemas";
 import { BusRouteModel } from "../bus-transport/model";
-import { BUS_WAITLIST_VALUE, busRouteFields, parseBusValue, seatsByRoute } from "../bus-transport/service";
+import { BUS_WAITLIST_VALUE, busRouteFields, busWaitlistValue, isBusWaitlistValue, parseBusValue, seatsByRoute } from "../bus-transport/service";
 import { sendSystemEmailToContact, systemEmailPlan } from "../event-emails/service";
 import type { SystemEmailTrigger } from "../event-emails/model";
 import { FREE_REGISTRATION } from "../free-registration";
@@ -429,10 +429,12 @@ async function withFullBusesWaitlisted(event: IEvent, attendees: BookingAttendee
     const answers = { ...(attendee.fields ?? {}) };
     for (const field of fields) {
       const value = String(answers[field.key] ?? "");
-      if (full.has(parseBusValue(value)?.routeId ?? "")) {
-        answers[field.key] = BUS_WAITLIST_VALUE;
+      const wantedRoute = parseBusValue(value)?.routeId ?? "";
+      if (full.has(wantedRoute)) {
+        // Keep the wanted bus on the waitlist answer so the organizers see the demand per route.
+        answers[field.key] = Types.ObjectId.isValid(wantedRoute) ? busWaitlistValue(wantedRoute) : BUS_WAITLIST_VALUE;
         fallback = true;
-      } else if (!busesOffered && value === BUS_WAITLIST_VALUE) {
+      } else if (!busesOffered && isBusWaitlistValue(value)) {
         delete answers[field.key];
       } else if (busesOffered && !value && isFieldVisible(field, answers)) {
         answers[field.key] = BUS_WAITLIST_VALUE;

@@ -135,6 +135,18 @@ export async function recountBusSeatsAction(eventId: string): Promise<BusActionR
   }
 }
 
+/** Emails the waitlisted guests who haven't chosen a route, asking them to pick one on the site. */
+export async function sendBusRouteRequestsAction(eventId: string): Promise<BusActionResult> {
+  try {
+    await requireBusEvent(eventId);
+    const sent = await busTransport.sendBusRouteRequests(eventId);
+    revalidatePath(`/admin/events/${eventId}`, "layout");
+    return { ok: true, message: sent === 0 ? "Nobody to email: everyone on the waitlist has chosen a route, or was already asked in the last 24 hours." : `Emailed ${sent} guest${sent === 1 ? "" : "s"}.` };
+  } catch (error) {
+    return fail(error, "sendBusRouteRequestsAction");
+  }
+}
+
 /** Emails the bus's passengers who haven't had its current captain's details yet ("bus_captain_notice"). */
 export async function sendCaptainNoticeAction(routeId: string): Promise<BusActionResult> {
   try {

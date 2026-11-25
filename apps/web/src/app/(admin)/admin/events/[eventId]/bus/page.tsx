@@ -11,7 +11,8 @@ import { requireAdminPage } from "@/lib/admin-page";
 import { hasPermissionOrFallback } from "@/lib/permission-fallbacks";
 import { eventPath } from "@/lib/event-routes";
 import { requireEvent, requireEventModule } from "@/lib/require-module";
-import { BusRouteDialog, BusRouteRowActions, RecountSeatsButton } from "./bus-controls";
+import { BusRouteDialog, BusRouteRowActions, RecountSeatsButton, RouteRequestButton } from "./bus-controls";
+import { BusWaitlistTable } from "./bus-waitlist-table";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ export default async function BusPage({ params }: { params: Promise<{ eventId: s
     ? await Promise.all(routes.map(async (route) => (busTransport.hasCaptain(route) ? (await busTransport.captainNoticeRecipients(route)).length : null)))
     : routes.map(() => null);
   const waitlist = await busTransport.listBusWaitlist(eventId);
+  const routeRequestCount = canManage ? await busTransport.countBusRouteRequests(eventId) : 0;
   const totals = routes.reduce((sum, route) => ({ seats: sum.seats + route.capacity, taken: sum.taken + route.seatsTaken }), { seats: 0, taken: 0 });
 
   return (
@@ -169,41 +171,11 @@ export default async function BusPage({ params }: { params: Promise<{ eventId: s
       </SectionCard>
       <SectionCard
         title={`Bus waitlist — ${waitlist.length}`}
-        description="Guests who chose “notify me” because their bus was full. They hold no seat and aren't on any passenger list. When seats free up they get an email (at most once per new free seats, or every 6 hours) and pick a bus on the site."
+        actions={canManage ? <RouteRequestButton eventId={eventId} count={routeRequestCount} /> : undefined}
+        description="Guests who chose “notify me” (for a route) because their bus was full. They hold no seat and aren't on any passenger list. When seats free up they get an email (at most once per new free seats, or every 6 hours) and pick a bus on the site."
         flush
       >
-        {waitlist.length === 0 ? (
-          <EmptyState title="Nobody is waiting for a bus" />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-right">#</TableHead>
-                <TableHead>Guest</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Waiting since</TableHead>
-                <TableHead>Last notified</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {waitlist.map((row) => (
-                <TableRow key={`${row.position}-${row.registrationNumber ?? row.name}`}>
-                  <TableCell className="text-right tabular-nums">{row.position}</TableCell>
-                  <TableCell>
-                    {row.name}
-                    <div className="text-muted-foreground text-xs">{row.registrationNumber ?? ""}</div>
-                  </TableCell>
-                  <TableCell>
-                    {row.email || "—"}
-                    <div className="text-muted-foreground text-xs">{row.phone}</div>
-                  </TableCell>
-                  <TableCell>{busTransport.formatDeparture(row.joinedAt)}</TableCell>
-                  <TableCell>{row.notifiedAt ? busTransport.formatDeparture(row.notifiedAt) : "—"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        <BusWaitlistTable eventId={eventId} waitlist={waitlist} showNotified />
       </SectionCard>
     </>
   );

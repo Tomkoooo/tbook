@@ -6,7 +6,7 @@ import { ACTIVE_BOOKING_STATUSES, attendeeKeyOf, toEventAttendees, type EventAtt
 import { sendSystemEmailToAttendee, systemEmailPlan } from "../event-emails/service";
 import { eventSiteUrl, fillTemplate, moduleMailTransporter, sendModuleMail } from "../shared/mail";
 import { BusRouteModel, BusSeatStateModel, BusWaitlistEntryModel } from "./model";
-import { busRouteFields, isBusWaitlistValue } from "./service";
+import { busRouteFields, busWaitlistRouteId, isBusWaitlistValue } from "./service";
 
 /**
  * The bus waitlist ("értesítést kérek"): guests whose bus answer is
@@ -34,9 +34,20 @@ export const BUS_WAITLIST_DEFAULTS = {
     "Szia {{name}}!\n\nJó hír: felszabadult hely a(z) {{event}} buszos transzferén. Ha még szeretnél busszal jönni, lépj be a weboldalon az azonosítóddal (törzsszámoddal), és válaszd ki a járatot: {{siteUrl}}\n\nA helyek érkezési sorrendben telnek be, ezért érdemes minél előbb választanod. Ha közben már nem kell a busz, nincs teendőd.\n\nÜdv,\nA szervezők",
 };
 
+export const BUS_ROUTE_REQUEST_DEFAULTS = {
+  subject: "Melyik útvonalon szeretnél utazni? – {{event}}",
+  message:
+    "Szia {{name}}!\n\nA(z) {{event}} buszos transzferének várólistáján vagy. Hogy tudjuk, hány és milyen útvonalú buszra van szükség, kérjük, jelöld meg, melyik útvonalon szeretnél utazni: lépj be a weboldalon az azonosítóddal (törzsszámoddal), és a buszos lépésnél válaszd ki az útvonalat az „Értesítést kérek” lehetőségek közül: {{siteUrl}}\n\nA választás nem foglal le helyet, csak a szervezést segíti. Ha közben már nem kell a busz, nincs teendőd.\n\nÜdv,\nA szervezők",
+};
+
+/** A guest who has been asked (and not answered) is asked again after this long. */
+export const BUS_ROUTE_REQUEST_REASK_MS = 24 * 3600_000;
+
 export interface BusWaitlistConfig {
   busWaitlistSubject?: string;
   busWaitlistMessage?: string;
+  busRouteRequestSubject?: string;
+  busRouteRequestMessage?: string;
 }
 
 let transporterOverride: MailTransporter | undefined;
@@ -158,19 +169,102 @@ export interface BusWaitlistRow {
   phone: string;
   joinedAt: Date;
   notifiedAt: Date | null;
+  /** The bus the guest would like, null = no route chosen yet. */
+  routeId: string | null;
+  routeCode: string;
+  routeName: string;
+  /** Last "which route?" email. */
+  routeAskedAt: Date | null;
+}
+
+function wantedRouteOf(row: EventAttendee): string | null {
+  for (const field of busRouteFields(row.booking.attendeeFieldSchema as AttendeeFieldDef[])) {
+    const routeId = busWaitlistRouteId(row.fields[field.key]);
+    if (routeId) return routeId;
+  }
+  return null;
 }
 
 /** The (live) line for the console and the export. */
 export async function listBusWaitlist(eventId: string): Promise<BusWaitlistRow[]> {
-  return (await waitingGuests(eventId)).map((guest, index) => ({
-    position: index + 1,
-    name: guest.row.displayName,
-    registrationNumber: guest.row.registrationNumber,
-    email: emailOf(guest.row),
-    phone: phoneOf(guest.row),
-    joinedAt: guest.joinedAt,
-    notifiedAt: guest.notifiedAt,
-  }));
+  const guests = await waitingGuests(eventId);
+  const routes = new Map((await BusRouteModel.find({ eventId }).lean().exec()).map((route) => [String(route._id), route]));
+  const asked = new Map((await BusWaitlistEntryModel.find({ eventId }, { routeAskedAt: 1 }).lean().exec()).map((entry) => [String(entry._id), entry.routeAskedAt ?? null]));
+  return guests.map((guest, index) => {
+    const routeId = wantedRouteOf(guest.row);
+    const route = routeId ? routes.get(routeId) : undefined;
+    return {
+      position: index + 1,
+      name: guest.row.displayName,
+      registrationNumber: guest.row.registrationNumber,
+      email: emailOf(guest.row),
+      phone: phoneOf(guest.row),
+      joinedAt: guest.joinedAt,
+      notifiedAt: guest.notifiedAt,
+      routeId: route ? routeId : null,
+      routeCode: route?.code ?? "",
+      routeName: route?.city ?? "",
+      routeAskedAt: asked.get(String(guest.entryId)) ?? null,
+    };
+  });
+}
+
+/** Waiting guests per wanted bus (buses nobody waits for are left out) plus those who haven't chosen one. */
+export function busWaitlistDemand(rows: BusWaitlistRow[]): { routes: { routeId: string; code: string; name: string; count: number }[]; noRoute: number } {
+  const byRoute = new Map<string, { routeId: string; code: string; name: string; count: number }>();
+  let noRoute = 0;
+  for (const row of rows) {
+    if (!row.routeId) {
+      noRoute += 1;
+      continue;
+    }
+    const entry = byRoute.get(row.routeId) ?? { routeId: row.routeId, code: row.routeCode, name: row.routeName, count: 0 };
+    entry.count += 1;
+    byRoute.set(row.routeId, entry);
+  }
+  return { routes: [...byRoute.values()].sort((a, b) => b.count - a.count), noRoute };
+}
+
+/** How many waitlisted guests would get the "which route?" email now (no route chosen, not asked in the last day). */
+export async function countBusRouteRequests(eventId: string, now = new Date()): Promise<number> {
+  return (await listBusWaitlist(eventId)).filter((row) => !row.routeId && row.email && (!row.routeAskedAt || now.getTime() - row.routeAskedAt.getTime() >= BUS_ROUTE_REQUEST_REASK_MS)).length;
+}
+
+/**
+ * Emails the waitlisted guests who haven't chosen a route, asking them to pick one on the site. Each guest is claimed
+ * atomically first (no double sends) and is asked again only after a day. Returns how many were emailed.
+ */
+export async function sendBusRouteRequests(eventId: string, now = new Date()): Promise<number> {
+  const event = await eventRepository.findById(eventId);
+  if (!event) return 0;
+  const modules = await resolveModules({ organizationId: event.organizationId ? String(event.organizationId) : null, event });
+  if (!modules.isOn("bus-transport")) return 0;
+  const config = modules.config<BusWaitlistConfig>("bus-transport");
+  const siteUrl = await eventSiteUrl(event);
+  let sent = 0;
+  for (const guest of await waitingGuests(eventId)) {
+    if (wantedRouteOf(guest.row)) continue;
+    const to = emailOf(guest.row);
+    if (!to) continue;
+    const entry = await BusWaitlistEntryModel.findById(guest.entryId, { routeAskedAt: 1 }).lean().exec();
+    const last = entry?.routeAskedAt ?? null;
+    if (last && now.getTime() - new Date(last).getTime() < BUS_ROUTE_REQUEST_REASK_MS) continue;
+    const claimed = await BusWaitlistEntryModel.findOneAndUpdate({ _id: guest.entryId, routeAskedAt: last }, { $set: { routeAskedAt: now } }).exec();
+    if (!claimed) continue;
+    const values = { name: guest.row.displayName, event: event.name, siteUrl };
+    try {
+      await sendModuleMail(event, {
+        to,
+        subject: fillTemplate(config.busRouteRequestSubject?.trim() || BUS_ROUTE_REQUEST_DEFAULTS.subject, values),
+        text: fillTemplate(config.busRouteRequestMessage?.trim() || BUS_ROUTE_REQUEST_DEFAULTS.message, values),
+      }, transporterOverride);
+      sent += 1;
+    } catch (error) {
+      console.error("[tbook] bus route request email failed", eventId, guest.row.attendeeKey, error);
+      await BusWaitlistEntryModel.updateOne({ _id: guest.entryId }, { $set: { routeAskedAt: last } }).exec();
+    }
+  }
+  return sent;
 }
 
 /**

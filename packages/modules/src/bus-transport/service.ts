@@ -8,7 +8,7 @@ import type { AttendeeFieldDef, AttendeeFieldValue, BookingAttendee } from "@tbo
 import type { DynamicChoice, RegistrationExportExtras } from "@tbook/services";
 import { ACTIVE_BOOKING_STATUSES, toEventAttendees, type EventAttendee } from "../shared/attendees";
 import { BusBoardingModel, BusRouteModel, type BoardingStatus, type BusLeg, type BusStop, type IBusRoute } from "./model";
-import { listBusWaitlist, notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
+import { busWaitlistDemand, listBusWaitlist, notifyBusWaitlist, seatsFreed, type BusWaitlistRow } from "./waitlist";
 
 /** The `choicesSource` that turns a select field into "pick your bus". */
 export const BUS_ROUTES_SOURCE = "bus-transport:routes";
@@ -17,8 +17,20 @@ export const BUS_ROUTES_SOURCE = "bus-transport:routes";
 export const BUS_WAITLIST_VALUE = "waitlist";
 export const BUS_WAITLIST_LABEL = "Nincs szabad hely – értesítést kérek, ha felszabadul";
 
+/** The waitlist answer, optionally with the bus (route) the guest would like: "waitlist" or "waitlist:<routeId>". */
 export function isBusWaitlistValue(value: unknown): boolean {
-  return String(value ?? "") === BUS_WAITLIST_VALUE;
+  const text = String(value ?? "");
+  return text === BUS_WAITLIST_VALUE || text.startsWith(`${BUS_WAITLIST_VALUE}:`);
+}
+
+export function busWaitlistValue(routeId: string): string {
+  return `${BUS_WAITLIST_VALUE}:${routeId}`;
+}
+
+/** The wanted bus of a waitlist answer; null for the plain "waitlist" (no route chosen) and for non-waitlist answers. */
+export function busWaitlistRouteId(value: unknown): string | null {
+  const text = String(value ?? "");
+  return text.startsWith(`${BUS_WAITLIST_VALUE}:`) ? text.slice(BUS_WAITLIST_VALUE.length + 1) || null : null;
 }
 
 const TIME_ZONE = "Europe/Budapest";
@@ -680,17 +692,33 @@ export async function exportPassengersXlsx(routes: IBusRoute[], waitlist?: BusWa
       { header: "Regisztrációs azonosító", key: "reg", width: 22 },
       { header: "Telefon", key: "phone", width: 16 },
       { header: "E-mail", key: "email", width: 28 },
+      { header: "Kért útvonal", key: "route", width: 30 },
       { header: "Várólistára került", key: "joined", width: 22 },
       { header: "Utolsó értesítés", key: "notified", width: 22 },
     ];
     for (const row of waitlist) {
-      sheet.addRow({ position: row.position, name: row.name, reg: row.registrationNumber ?? "", phone: row.phone, email: row.email, joined: formatDeparture(row.joinedAt), notified: formatDeparture(row.notifiedAt) });
+      sheet.addRow({ position: row.position, name: row.name, reg: row.registrationNumber ?? "", phone: row.phone, email: row.email, route: row.routeId ? `${row.routeName} (${row.routeCode})` : "nincs megadva", joined: formatDeparture(row.joinedAt), notified: formatDeparture(row.notifiedAt) });
     }
     sheet.getRow(1).font = { bold: true };
+    addWaitlistDemandSheet(workbook, waitlist);
   }
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
+
+/** "Várólista – útvonalak": how many guests wait for each bus (and how many haven't said), so the organizers can size the transfers. */
+function addWaitlistDemandSheet(workbook: { addWorksheet(name: string): import("exceljs").Worksheet }, waitlist: BusWaitlistRow[]): void {
+  const demand = busWaitlistDemand(waitlist);
+  const sheet = workbook.addWorksheet("Várólista – útvonalak");
+  sheet.columns = [
+    { header: "Útvonal", key: "route", width: 36 },
+    { header: "Várakozók száma", key: "count", width: 18 },
+  ];
+  for (const route of demand.routes) sheet.addRow({ route: `${route.name} (${route.code})`, count: route.count });
+  if (demand.noRoute > 0) sheet.addRow({ route: "Nincs útvonal megadva", count: demand.noRoute });
+  sheet.addRow({ route: "Összesen", count: waitlist.length });
+  sheet.getRow(1).font = { bold: true };
+}
 
 /**
  * Bus columns for the event's registrations export: the bus and the stop a guest boards at, or their place
@@ -707,13 +735,19 @@ export async function registrationExportExtras(eventId: string): Promise<Registr
       { header: "Busz – felszállási hely", key: "bus:stop", width: 36 },
       { header: "Busz – indulás", key: "bus:departure", width: 22 },
       { header: "Busz-várólista", key: "bus:waitlist", width: 16 },
+      { header: "Busz-várólista – kért útvonal", key: "bus:waitlistRoute", width: 30 },
     ],
     values({ booking, attendee }) {
       const fields = busRouteFields((booking.attendeeFieldSchema ?? []) as AttendeeFieldDef[]);
       const raw = fields.map((field) => attendee.fields?.[field.key]).find((value) => String(value ?? "") !== "");
       if (isBusWaitlistValue(raw)) {
         const position = positionByReg.get(String(attendee.registrationNumber ?? ""));
-        return { "bus:waitlist": position ? `Igen – ${position}. a sorban` : "Igen" };
+        const wanted = busWaitlistRouteId(raw);
+        const wantedRoute = wanted ? routes.get(wanted) : undefined;
+        return {
+          "bus:waitlist": position ? `Igen – ${position}. a sorban` : "Igen",
+          "bus:waitlistRoute": wantedRoute ? `${wantedRoute.city} (${wantedRoute.code})` : "nincs megadva",
+        };
       }
       const parsed = parseBusValue(raw);
       const route = parsed ? routes.get(parsed.routeId) : undefined;
@@ -730,10 +764,12 @@ export async function registrationExportExtras(eventId: string): Promise<Registr
         { header: "Regisztrációs azonosító", key: "reg", width: 22 },
         { header: "Telefon", key: "phone", width: 16 },
         { header: "E-mail", key: "email", width: 28 },
+        { header: "Kért útvonal", key: "route", width: 30 },
         { header: "Várólistára került", key: "joined", width: 22 },
       ];
-      for (const row of waitlist) sheet.addRow({ position: row.position, name: row.name, reg: row.registrationNumber ?? "", phone: row.phone, email: row.email, joined: formatDeparture(row.joinedAt) });
+      for (const row of waitlist) sheet.addRow({ position: row.position, name: row.name, reg: row.registrationNumber ?? "", phone: row.phone, email: row.email, route: row.routeId ? `${row.routeName} (${row.routeCode})` : "nincs megadva", joined: formatDeparture(row.joinedAt) });
       sheet.getRow(1).font = { bold: true };
+      addWaitlistDemandSheet(workbook, waitlist);
     },
   };
 }

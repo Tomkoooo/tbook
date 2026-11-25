@@ -8,6 +8,7 @@ import {
   attendeeAwaitsBus,
   attendeeOnBusWaitlist,
   busForAttendee,
+  busWaitlistValue,
   busRouteFields,
   formatDeparture,
   listRoutes,
@@ -19,7 +20,7 @@ import {
 } from "./service";
 import { onAttendeeEmailDelivered } from "../event-emails/service";
 import { captainDetailsDelivered, captainInfo } from "./captain";
-import { BUS_WAITLIST_DEFAULTS, notifyBusWaitlist, removeFromBusWaitlist, seatsFreed, syncBusWaitlist } from "./waitlist";
+import { BUS_ROUTE_REQUEST_DEFAULTS, BUS_WAITLIST_DEFAULTS, notifyBusWaitlist, removeFromBusWaitlist, seatsFreed, syncBusWaitlist } from "./waitlist";
 
 /**
  * Seats an edit gave back, per booking, until the edit's new reservation
@@ -60,6 +61,18 @@ export function registerBusTransportModule(): void {
         hint: "e.g. A busz az indulási időponthoz képest legfeljebb 15 percet vár. Available in emails as {{bus.rules}} and in the guest API.",
       },
       {
+        key: "busRouteRequestSubject",
+        label: "“Which route?” email subject (bus waitlist)",
+        type: "text",
+        hint: `Sent to waitlisted guests who haven't chosen a route. Placeholders {{name}}, {{event}}, {{siteUrl}}. Default: ${BUS_ROUTE_REQUEST_DEFAULTS.subject}`,
+      },
+      {
+        key: "busRouteRequestMessage",
+        label: "“Which route?” email text (bus waitlist)",
+        type: "text",
+        hint: "Placeholders {{name}}, {{event}}, {{siteUrl}}. Empty = the built-in Hungarian text.",
+      },
+      {
         key: "busWaitlistSubject",
         deprecated: "Deprecated: edit this email on the Emails page (system email “Bus waitlist: seat freed”). An email there overrides this field.",
         label: "Bus waitlist email subject (a seat freed up)",
@@ -91,8 +104,16 @@ export function registerBusTransportModule(): void {
       const choices = routes
         .flatMap((route) => routeChoices(route))
         .map((choice) => (closed ? { ...choice, remaining: 0, disabled: true, meta: { ...choice.meta, closed: true } } : choice));
-      // Always offered: no seat, the guest waits for one and is emailed when one frees up.
-      return [...choices, { value: BUS_WAITLIST_VALUE, label: BUS_WAITLIST_LABEL, remaining: null, disabled: false, meta: { waitlist: true } }];
+      // Always offered: no seat, the guest waits for one and is emailed when one frees up. One option per bus
+      // ("waitlist:<routeId>") tells the organizers which route is wanted; the plain "waitlist" stays valid (no route chosen).
+      const waitFor = routes.map((route) => ({
+        value: busWaitlistValue(String(route._id)),
+        label: `Értesítést kérek – ${route.city} (${route.code})`,
+        remaining: null,
+        disabled: false,
+        meta: { waitlist: true, routeId: String(route._id), routeName: route.city, code: route.code },
+      }));
+      return [...choices, ...waitFor, { value: BUS_WAITLIST_VALUE, label: BUS_WAITLIST_LABEL, remaining: null, disabled: false, meta: { waitlist: true } }];
     },
   });
 
