@@ -3,9 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { ActionError } from "@tbook/actions";
 import {
+  appendDataListRows,
   applyImportTarget,
   createImportSession,
   deleteDataListForOrg,
+  deleteDataListRow,
+  getDataListForOrg,
+  parsePastedRows,
   getImportSessionForOrg,
   importSessionAsDataList,
 } from "@tbook/services";
@@ -138,5 +142,41 @@ export async function deleteDataListAction(listId: string): Promise<DataActionRe
     return { ok: true, message: "List deleted." };
   } catch (error) {
     return fail(error, "deleteDataListAction");
+  }
+}
+
+/** Adds rows to a list: one row from the form fields (`cell:<column key>`), or many pasted from a spreadsheet (`paste`). */
+export async function appendDataListRowsAction(listId: string, formData: FormData): Promise<ApplyResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("list:manage");
+    const list = await getDataListForOrg(organizationId, listId);
+    const paste = String(formData.get("paste") ?? "");
+    const rows = paste.trim()
+      ? parsePastedRows(paste, list.columns)
+      : [Object.fromEntries(list.columns.map((column) => [column.key, String(formData.get(`cell:${column.key}`) ?? "")]))];
+    const result = await appendDataListRows(organizationId, listId, rows, { update: formData.get("update") === "on" });
+    revalidatePath("/admin/data");
+    revalidatePath(`/admin/data/${listId}`);
+    const parts = [`${result.added.length} row${result.added.length === 1 ? "" : "s"} added`];
+    if (result.updated.length) parts.push(`${result.updated.length} updated`);
+    const details: string[] = [];
+    if (result.existing.length) details.push(`Already in the list, left unchanged: ${result.existing.slice(0, 20).join(", ")}${result.existing.length > 20 ? "…" : ""}. Tick “Update rows that already exist” to overwrite them.`);
+    if (result.skippedEmpty) details.push(`${result.skippedEmpty} row${result.skippedEmpty === 1 ? "" : "s"} had no key and ${result.skippedEmpty === 1 ? "was" : "were"} skipped.`);
+    if (result.duplicateKeys.length) details.push(`Repeated keys (first one kept): ${result.duplicateKeys.join(", ")}`);
+    return { ok: result.added.length + result.updated.length > 0, message: `${parts.join(", ")}. The list now has ${result.rowCount} rows.`, details, listId };
+  } catch (error) {
+    return fail(error, "appendDataListRowsAction");
+  }
+}
+
+export async function deleteDataListRowAction(listId: string, key: string): Promise<DataActionResult> {
+  try {
+    const { organizationId } = await requireOrgPermission("list:manage");
+    const rowCount = await deleteDataListRow(organizationId, listId, key);
+    revalidatePath("/admin/data");
+    revalidatePath(`/admin/data/${listId}`);
+    return { ok: true, message: `Row removed. The list now has ${rowCount} rows.` };
+  } catch (error) {
+    return fail(error, "deleteDataListRowAction");
   }
 }

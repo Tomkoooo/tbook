@@ -35,6 +35,37 @@ export const dataListRepository = {
     return rows.length;
   },
 
+  /** Adds rows (keys not yet in the list) and, with `update`, overwrites the data of existing keys. Keys must be unique. */
+  async appendRows(
+    organizationId: string,
+    listId: string,
+    rows: Array<{ key: string; data: Record<string, string> }>,
+    update: boolean,
+  ): Promise<{ added: string[]; updated: string[]; existing: string[] }> {
+    const orgId = new Types.ObjectId(organizationId);
+    const listOid = new Types.ObjectId(listId);
+    const present = await this.findExistingKeys(listId, rows.map((row) => row.key));
+    const fresh = rows.filter((row) => !present.has(row.key));
+    const existing = rows.filter((row) => present.has(row.key));
+    if (fresh.length > 0) {
+      await DataListRowModel.insertMany(fresh.map((row) => ({ organizationId: orgId, listId: listOid, key: row.key, data: row.data })), { ordered: true });
+    }
+    if (update) {
+      for (const row of existing) await DataListRowModel.updateOne({ listId: listOid, key: row.key }, { $set: { data: row.data } }).exec();
+    }
+    const keys = existing.map((row) => row.key);
+    return { added: fresh.map((row) => row.key), updated: update ? keys : [], existing: update ? [] : keys };
+  },
+
+  async deleteRow(listId: string, key: string): Promise<boolean> {
+    const result = await DataListRowModel.deleteOne({ listId, key }).exec();
+    return result.deletedCount > 0;
+  },
+
+  countRows(listId: string): Promise<number> {
+    return DataListRowModel.countDocuments({ listId }).exec();
+  },
+
   /** Which of these (already normalised) keys exist in the list. */
   async findExistingKeys(listId: string, keys: string[]): Promise<Set<string>> {
     if (keys.length === 0 || !Types.ObjectId.isValid(listId)) return new Set();

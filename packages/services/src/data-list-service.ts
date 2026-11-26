@@ -119,6 +119,62 @@ export async function replaceDataListRows(
   return { list: list!, imported, skippedEmpty: prepared.skippedEmpty, duplicateKeys: prepared.duplicateKeys };
 }
 
+export interface DataListAppendResult {
+  added: string[];
+  updated: string[];
+  /** Keys already in the list (left unchanged because `update` was off). */
+  existing: string[];
+  skippedEmpty: number;
+  duplicateKeys: string[];
+  rowCount: number;
+}
+
+/**
+ * Adds rows to an existing list without re-uploading it (e.g. a late employee). Cells are matched to the list's
+ * columns by column key; unknown keys are dropped. Rows whose key is already in the list are left alone, or
+ * overwritten with `update`.
+ */
+export async function appendDataListRows(
+  organizationId: string,
+  listId: string,
+  rows: Array<Record<string, string>>,
+  opts: { update?: boolean } = {},
+): Promise<DataListAppendResult> {
+  const list = await getDataListForOrg(organizationId, listId);
+  const columns = list.columns.map((column) => column.key);
+  const cleaned = rows.map((row) => Object.fromEntries(columns.map((key) => [key, String(row[key] ?? "").trim()])));
+  const prepared = prepareRows(cleaned, list.keyColumn, list.keyNormalization);
+  if (prepared.rows.length === 0) throw ActionError.validation("Every row needs a value in the key column.");
+  const current = await dataListRepository.countRows(listId);
+  if (current + prepared.rows.length > MAX_ROWS) throw ActionError.validation(`A data list can hold at most ${MAX_ROWS.toLocaleString("en")} rows.`);
+  const result = await dataListRepository.appendRows(organizationId, listId, prepared.rows, Boolean(opts.update));
+  const rowCount = await dataListRepository.countRows(listId);
+  await dataListRepository.updateById(listId, { rowCount });
+  return { ...result, skippedEmpty: prepared.skippedEmpty, duplicateKeys: prepared.duplicateKeys, rowCount };
+}
+
+/** Removes one row by its stored (normalised) key. */
+export async function deleteDataListRow(organizationId: string, listId: string, key: string): Promise<number> {
+  await getDataListForOrg(organizationId, listId);
+  if (!(await dataListRepository.deleteRow(listId, key))) throw ActionError.notFound("Row not found");
+  const rowCount = await dataListRepository.countRows(listId);
+  await dataListRepository.updateById(listId, { rowCount });
+  return rowCount;
+}
+
+/**
+ * Reads rows pasted from a spreadsheet: one per line, cells split by tabs (Excel/Sheets copy), or by ";" / "," when
+ * there's no tab. Cells map to `columns` in order; a first line equal to the column labels is skipped.
+ */
+export function parsePastedRows(text: string, columns: Array<{ key: string; label: string }>): Array<Record<string, string>> {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+  const split = (line: string) => (line.includes("\t") ? line.split("\t") : line.includes(";") ? line.split(";") : line.split(","));
+  const rows = lines.map((line) => split(line).map((cell) => cell.trim().replace(/^"(.*)"$/, "$1")));
+  const header = columns.map((column) => column.label.trim().toLowerCase());
+  if (rows[0] && rows[0].length > 1 && rows[0].every((cell, i) => cell.toLowerCase() === header[i])) rows.shift();
+  return rows.map((cells) => Object.fromEntries(columns.map((column, i) => [column.key, cells[i] ?? ""])));
+}
+
 export async function getDataListForOrg(organizationId: string, listId: string): Promise<IDataList> {
   const list = await dataListRepository.findById(listId);
   if (!list || String(list.organizationId) !== organizationId) throw ActionError.notFound("Data list not found");

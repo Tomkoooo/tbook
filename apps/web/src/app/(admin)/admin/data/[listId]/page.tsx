@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageTitle } from "@/components/page-title";
 import { SectionCard } from "@/components/section-card";
 import { requireAdminPage } from "@/lib/admin-page";
+import { AddDataListRowsDialog, DeleteDataListRowButton } from "../data-list-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -40,9 +41,12 @@ export default async function DataListPage({ params, searchParams }: { params: P
         description={`${list.rowCount} rows · key: ${keyLabel}${list.sourceFileName ? ` · from ${list.sourceFileName}` : ""}`}
         back={{ href: "/admin/data", label: "Data" }}
         actions={
-          <Button asChild variant="outline">
-            <Link href={`/admin/data/import?replace=${listId}`}>Replace with a new file</Link>
-          </Button>
+          <>
+            <Button asChild variant="outline">
+              <Link href={`/admin/data/import?replace=${listId}`}>Replace with a new file</Link>
+            </Button>
+            <AddDataListRowsDialog listId={listId} columns={list.columns.map((column) => ({ key: column.key, label: column.label }))} keyColumn={list.keyColumn} />
+          </>
         }
       />
       <SectionCard
@@ -66,6 +70,9 @@ export default async function DataListPage({ params, searchParams }: { params: P
                 {list.columns.map((column) => (
                   <TableHead key={column.key}>{column.label}</TableHead>
                 ))}
+                <TableHead className="w-10">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -78,6 +85,9 @@ export default async function DataListPage({ params, searchParams }: { params: P
                         {data[column.key] ?? ""}
                       </TableCell>
                     ))}
+                    <TableCell>
+                      <DeleteDataListRowButton listId={listId} rowKey={row.key} label={data[list.keyColumn] || row.key} />
+                    </TableCell>
                   </TableRow>
                 );
               })}
