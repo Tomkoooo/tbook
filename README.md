@@ -76,6 +76,13 @@ plan file without touching the event's own fields (`--confirm UPDATE`).
 test survey answers, email log rows); dry run lists it, `--apply --prod-ack
 --confirm PURGE` deletes, sends no email and leaves live counters alone.
 
+`data list | rows | append | delete-row` manage data lists (employee rosters,
+VIP name lists): `data append --list <id|name> --file <x.xlsx|csv> [--sheet
+<name>] [--map <column>=<A|1>]... [--from-row n] [--update]` adds rows from a
+spreadsheet without replacing the list (the dry run shows each row as ADD /
+already in list / repeated), `data delete-row --key <key> --confirm DELETE`
+removes one.
+
 Safety model, enforced the same way for every command and every entity
 added later:
 

@@ -1,5 +1,6 @@
 import { ActionError } from "@tbook/actions";
 import { runBookingCommand } from "./commands/booking";
+import { runDataCommand } from "./commands/data";
 import { runEventCommand } from "./commands/event";
 import { runGroupCommand } from "./commands/group";
 import { runSetupCommand } from "./commands/setup";
@@ -33,6 +34,9 @@ Entities and actions:
   group     list | edit | keys   (keys: API key hint, --reveal-preview, --rotate-preview, --rotate-api-key)
   booking   list | show | resend-voucher | purge-test   (purge-test --event <id>: delete the event's
             X-TBook-Test bookings, waitlist entries, claims, tickets, answers; no emails)
+  data      list | rows | append | delete-row   (data lists: append --list <id|name> --file <x.xlsx|csv>
+            [--sheet <name>] [--map <column>=<A|1>]... [--from-row n] [--update] adds rows without replacing the
+            list; delete-row --key <key> --confirm DELETE)
   setup     apply --plan <file.json> [--update]   (modules, data lists from spreadsheets, group, event, emails;
             --update brings an existing event's modules, module settings and emails in line with the plan)
 
@@ -87,6 +91,10 @@ async function main(): Promise<void> {
   }
   if (entity === "setup") {
     await runSetupCommand(action, rest);
+    return;
+  }
+  if (entity === "data") {
+    await runDataCommand(action, rest);
     return;
   }
   if (entity === "booking") {
